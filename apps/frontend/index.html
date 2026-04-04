@@ -1,13 +1,39 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nirex Code</title>
+  <meta name="description"
+    content="The AI pair programmer that lives in your terminal. Generate code, debug faster, understand codebases — all from the command line.">
+  <meta name="author" content="Nirex Code" />
+  <link rel="shortcut icon" href="nirexcode.svg" type="image/x-icon">
+
+
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <script>
+    (function () {
+      var system = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', system);
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+        document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+      });
+    })();
+  </script>
+  <meta property="og:title" content="Nirex Code — AI Pair Programmer for Your Terminal">
+  <meta name="twitter:title" content="Nirex Code — AI Pair Programmer for Your Terminal">
+  <meta property="og:description"
+    content="The AI pair programmer that lives in your terminal. Generate code, debug faster, understand codebases — all from the command line.">
+  <meta name="twitter:description"
+    content="The AI pair programmer that lives in your terminal. Generate code, debug faster, understand codebases — all from the command line.">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>
