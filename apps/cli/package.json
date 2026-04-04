@@ -1,0 +1,32 @@
+{
+  "name": "@nirex/cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "nirex": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nirex/shared": "workspace:*",
+    "chalk": "^5.4.1",
+    "commander": "^13.0.0",
+    "ora": "^8.1.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nirex/typescript-config": "workspace:*",
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "5.9.2",
+    "vitest": "^2.1.8"
+  }
+}

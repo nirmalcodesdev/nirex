@@ -1,0 +1,17 @@
+{
+  "name": "@nirex/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@nirex/typescript-config": "workspace:*",
+    "typescript": "5.9.2"
+  }
+}
