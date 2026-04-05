@@ -10,10 +10,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@nirex/assets": "workspace:*",
     "@nirex/shared": "workspace:*",
+    "@nirex/tailwind-config": "workspace:*",
     "@nirex/ui": "workspace:*",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.96.2",
+    "clsx": "^2.1.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-icons": "^5.6.0",
+    "react-router-dom": "^7.14.0",
+    "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
@@ -28,6 +36,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "postcss": "8.5.8",
+    "postcss-import": "^16.1.1",
     "tailwindcss": "3",
     "typescript": "5.9.2",
     "typescript-eslint": "^8.57.0",

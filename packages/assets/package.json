@@ -1,0 +1,11 @@
+{
+  "name": "@nirex/assets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./fonts/*": "./fonts/*",
+    "./images/*": "./images/*",
+    "./fonts.css": "./fonts.css"
+  }
+}
