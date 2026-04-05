@@ -25,8 +25,12 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "paths": {
-      "@nirex/ui": ["../../packages/ui/src"],
-      "@/*": ["./src/*"]
+      "@nirex/ui": [
+        "../../packages/ui/src"
+      ],
+      "@/*": [
+        "./src/*"
+      ]
     },
     /* Linting */
     "strict": true,
@@ -37,6 +41,7 @@
     "noUncheckedSideEffectImports": true
   },
   "include": [
-    "src"
-  ]
+    "src",
+    "../../packages/ui/src/layout"
+, "../../packages/ui/src/toaster.tsx"  ]
 }

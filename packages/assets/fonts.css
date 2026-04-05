@@ -1,0 +1,29 @@
+/* Inter */
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/inter-variable.ttf') format('truetype-variations'),
+       url('./fonts/inter-variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Space Grotesk */
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('./fonts/space-grotesk-variable.ttf') format('truetype-variations'),
+       url('./fonts/space-grotesk-variable.ttf') format('truetype');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* JetBrains Mono */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/jetbrains-mono-variable.ttf') format('truetype-variations'),
+       url('./fonts/jetbrains-mono-variable.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
