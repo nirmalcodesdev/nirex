@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, ArrowRight, CheckCircle2, RefreshCw, Hexagon } from "lucide-react";
+import { Mail, ArrowRight, CheckCircle2, RefreshCw } from "lucide-react";
+import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 
 export function VerifyEmail() {
     const [isLoading, setIsLoading] = useState(false);
@@ -52,10 +54,9 @@ export function VerifyEmail() {
 
                 <div className="relative z-10 flex flex-col justify-between p-16 w-full">
                     <Link to="/" className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={20} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-9 h-9" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </Link>
 
                     <AnimatePresence mode="wait">
@@ -101,7 +102,7 @@ export function VerifyEmail() {
                                         <CheckCircle2 className="w-12 h-12 text-nirex-accent" strokeWidth={1.5} />
                                     </div>
                                     <div className="absolute -bottom-2 -right-2 w-16 h-16 rounded-xl bg-gradient-to-br from-nirex-accent/30 to-nirex-accent/10 backdrop-blur-sm border border-nirex-accent/10 flex items-center justify-center">
-                                        <Hexagon className="w-8 h-8 text-nirex-accent/60" strokeWidth={1.5} />
+                                        <img src={nirexLogo} alt="nirex" className="w-8 h-8 opacity-60" />
                                     </div>
                                 </div>
 
@@ -121,7 +122,7 @@ export function VerifyEmail() {
                         )}
                     </AnimatePresence>
 
-                    <p className="text-nirex-text-muted/60 text-sm">© 2025 nirex</p>
+                    <p className="text-nirex-text-muted/60 text-sm">{APP_NAME} {APP_NAME_SUFFIX}</p>
                 </div>
             </div>
 
@@ -135,10 +136,9 @@ export function VerifyEmail() {
                 >
                     {/* Mobile Logo */}
                     <div className="lg:hidden flex items-center justify-center gap-2 mb-10">
-                        <div className="w-8 h-8 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={18} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-8 h-8" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </div>
 
                     <AnimatePresence mode="wait">

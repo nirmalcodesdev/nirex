@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, ArrowLeft, ArrowRight, CheckCircle2, Hexagon, AlertCircle } from "lucide-react";
+import { Mail, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 
 export function ForgotPassword() {
     const [email, setEmail] = useState("");
@@ -49,10 +51,9 @@ export function ForgotPassword() {
                 {/* Content */}
                 <div className="relative z-10 flex flex-col justify-between p-16 w-full">
                     <Link to="/" className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={20} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-9 h-9" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </Link>
 
                     <div className="space-y-8">
@@ -78,7 +79,7 @@ export function ForgotPassword() {
                         </div>
                     </div>
 
-                    <p className="text-nirex-text-muted/60 text-sm">© 2025 nirex</p>
+                    <p className="text-nirex-text-muted/60 text-sm">{APP_NAME} {APP_NAME_SUFFIX}</p>
                 </div>
             </div>
 
@@ -92,10 +93,9 @@ export function ForgotPassword() {
                 >
                     {/* Mobile Logo */}
                     <div className="lg:hidden flex items-center justify-center gap-2 mb-10">
-                        <div className="w-8 h-8 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={18} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-8 h-8" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </div>
 
                     <AnimatePresence mode="wait">
@@ -168,7 +168,7 @@ export function ForgotPassword() {
                                         Back to sign in
                                     </Link>
                                 </div>
-                            </motion.div>
+                            </motion.div >
                         ) : (
                             <motion.div
                                 key="success"
@@ -204,10 +204,11 @@ export function ForgotPassword() {
                                     </button>
                                 </div>
                             </motion.div>
-                        )}
-                    </AnimatePresence>
-                </motion.div>
-            </div>
-        </div>
+                        )
+                        }
+                    </AnimatePresence >
+                </motion.div >
+            </div >
+        </div >
     );
 }

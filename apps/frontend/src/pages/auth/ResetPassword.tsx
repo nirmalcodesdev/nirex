@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Check, Hexagon, AlertCircle } from "lucide-react";
+import { Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Check, AlertCircle } from "lucide-react";
+import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 
 export function ResetPassword() {
     const [formData, setFormData] = useState({
@@ -91,10 +93,9 @@ export function ResetPassword() {
 
                     <div className="relative z-10 flex flex-col justify-between p-16 w-full">
                         <Link to="/" className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                                <Hexagon size={20} strokeWidth={2.5} />
-                            </div>
-                            <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                            <img src={nirexLogo} alt="nirex" className="w-9 h-9" />
+                            <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                         </Link>
                         <div />
                         <p className="text-nirex-text-muted/60 text-sm">© 2025 nirex</p>
@@ -110,10 +111,9 @@ export function ResetPassword() {
                     >
                         {/* Mobile Logo */}
                         <div className="lg:hidden flex items-center justify-center gap-2 mb-10">
-                            <div className="w-8 h-8 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                                <Hexagon size={18} strokeWidth={2.5} />
-                            </div>
-                            <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                            <img src={nirexLogo} alt="nirex" className="w-8 h-8" />
+                            <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                         </div>
 
                         <div className="w-14 h-14 bg-nirex-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -150,10 +150,9 @@ export function ResetPassword() {
                 >
                     {/* Mobile Logo */}
                     <div className="lg:hidden flex items-center justify-center gap-2 mb-10">
-                        <div className="w-8 h-8 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={18} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-8 h-8" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </div>
 
                     <div className="text-center mb-8">
@@ -297,10 +296,9 @@ export function ResetPassword() {
                 {/* Content */}
                 <div className="relative z-10 flex flex-col justify-between p-16 w-full">
                     <Link to="/" className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-nirex-accent text-nirex-text-inverse flex items-center justify-center">
-                            <Hexagon size={20} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-9 h-9" />
+                        <span className="text-xl font-semibold tracking-tight text-nirex-text-primary">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em] text-nirex-text-primary">{APP_NAME_SUFFIX}</span>}
                     </Link>
 
                     <div className="space-y-8">

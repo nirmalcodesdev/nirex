@@ -1,6 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Hexagon, ArrowLeft, FileText, Shield, UserCheck, Scale, Globe } from "lucide-react";
+import { ArrowLeft, FileText, Shield, UserCheck, Scale, Globe } from "lucide-react";
+import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 
 export function Terms() {
     const location = useLocation();
@@ -30,10 +32,9 @@ export function Terms() {
             <header className="border-b border-border sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
                 <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
                     <Link to="/" className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center">
-                            <Hexagon size={18} strokeWidth={2.5} />
-                        </div>
-                        <span className="font-semibold tracking-tight">nirex</span>
+                        <img src={nirexLogo} alt="nirex" className="w-8 h-8" />
+                        <span className="font-semibold tracking-tight">{APP_NAME}</span>
+                        {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em]">{APP_NAME_SUFFIX}</span>}
                     </Link>
                     <Link
                         to={returnPath}
