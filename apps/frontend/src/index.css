@@ -64,6 +64,10 @@ html {
     --accent-foreground: var(--text-primary);
     --destructive: var(--color-error);
     --destructive-foreground: var(--text-primary);
+    --success: var(--color-success);
+    --success-foreground: var(--text-primary);
+    --warning: var(--color-warning);
+    --warning-foreground: var(--text-primary);
     --border: var(--bg-border);
     --input: var(--bg-border);
     --ring: var(--nirex-accent);
