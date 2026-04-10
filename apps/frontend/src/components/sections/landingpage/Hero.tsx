@@ -2,6 +2,7 @@ import { useEffect, useRef, type JSX } from 'react';
 import MagneticButton from '@nirex/ui/MagneticButton';
 import { useTerminalTyping } from '@/hooks/useTerminalTyping';
 import { terminalLines } from '@/constant/landingpage';
+import { Link } from 'react-router-dom';
 
 
 
@@ -81,13 +82,15 @@ export default function Hero() {
 
                 {/* CTA Row */}
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-4 opacity-0 animate-[fadeIn_0.45s_ease_0.75s_forwards]">
-                    <MagneticButton
-                        strength={0.35}
-                        className="h-11 px-6 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
-                    >
-                        Get Started
-                        <span className="inline-block transition-transform hover:translate-x-0.5 hover:-translate-y-0.5">↗</span>
-                    </MagneticButton>
+                    <Link to="/auth/signup">
+                        <MagneticButton
+                            strength={0.35}
+                            className="h-11 px-6 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
+                        >
+                            Get Started
+                            <span className="inline-block transition-transform hover:translate-x-0.5 hover:-translate-y-0.5">↗</span>
+                        </MagneticButton>
+                    </Link>
 
                     <button className="h-11 px-6 rounded-lg border border-border font-mono text-[13px] text-nirex-text-secondary hover:border-nirex-accent/30 hover:text-nirex-text-primary transition-all duration-200">
                         <span className="text-nirex-accent">$ </span>nirex --demo
@@ -134,6 +137,6 @@ export default function Hero() {
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-        </section>
+        </section >
     );
 }

@@ -1,6 +1,9 @@
 export interface NavLink {
     label: string;
-    href: string;
+    /** React Router path (preferred) */
+    to?: string;
+    /** External URL or fallback */
+    href?: string;
 }
 
 export interface NavProps {
@@ -12,9 +15,13 @@ export interface NavProps {
     links: NavLink[];
     /** CTA button text */
     ctaText?: string;
-    /** CTA button href */
+    /** CTA button route (React Router) */
+    ctaTo?: string;
+    /** CTA button href (external link fallback) */
     ctaHref?: string;
-    /** Base URL for brand link */
+    /** Brand link route (React Router) */
+    brandTo?: string;
+    /** Brand href (external link fallback) */
     brandHref?: string;
     /** Custom CSS classes */
     className?: string;
