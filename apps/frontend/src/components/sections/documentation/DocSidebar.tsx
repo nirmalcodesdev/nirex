@@ -21,7 +21,7 @@ export function DocSidebar({
     return (
         <>
             <aside
-                className={`fixed lg:sticky top-16 left-0 z-30 w-72 h-[calc(100vh-4rem)] border-r border-border bg-background overflow-y-auto lg:translate-x-0 transition-transform ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+                className={`fixed lg:sticky top-16 left-0 z-30 w-72 h-[calc(100vh-4rem)] border-r border-border bg-background overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border hover:scrollbar-thumb-muted-foreground/30 lg:translate-x-0 transition-transform ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
                     }`}
             >
                 <div className="p-4">
