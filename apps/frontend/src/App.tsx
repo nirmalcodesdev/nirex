@@ -9,6 +9,7 @@ import { Signin, Signup, ForgotPassword, ResetPassword, VerifyEmail } from "./pa
 import CustomCursor from "@nirex/ui/CustomCursor";
 import { Terms } from "./pages/legal/Terms.tsx";
 import { Privacy } from "./pages/legal/Privacy.tsx";
+import Documentation from "./pages/Documentation.tsx";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ const App = () => (
           <Route path="/landing" element={<Navigate to="/" replace />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/docs" element={<Documentation />} />
 
           {/* Auth Routes - Nested under /auth parent */}
           <Route path="/auth" element={<AuthLayout />}>
