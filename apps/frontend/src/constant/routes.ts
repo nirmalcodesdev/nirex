@@ -5,6 +5,7 @@
 export const ROUTES = {
   // Public Routes
   LANDING: "/landing",
+  ONBOARDING: "/onboarding", // Added onboarding route
   TERMS: "/terms",
   PRIVACY: "/privacy",
   DOCS: "/docs",

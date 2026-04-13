@@ -42,7 +42,15 @@ export function Signin() {
         setIsLoading(true);
         setTimeout(() => {
             setIsLoading(false);
-            navigate("/");
+            
+            // Check if onboarding is complete
+            const onboardingComplete = localStorage.getItem("nirex-onboarding-complete");
+
+            if (onboardingComplete === "true") {
+                navigate("/"); // Redirect to dashboard if onboarding is complete
+            } else {
+                navigate("/onboarding"); // Redirect to onboarding if not complete
+            }
         }, 1200);
     };
 
