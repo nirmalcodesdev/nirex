@@ -8,6 +8,8 @@ import type { PricingPlans } from "@/types/plans.types";
 import type { FAQs } from "@/types/faq.types";
 import type { Features } from "@/types/features.types";
 import type { Commands } from "@/types/commands.types";
+import { ROUTES } from "../routes";
+
 export const navLinks: NavLink[] = [
     {
         label: "Features",
@@ -23,7 +25,7 @@ export const navLinks: NavLink[] = [
     },
     {
         label: "Docs",
-        href: "/docs"
+        href: ROUTES.DOCUMENTATION
     }
 
 ]
@@ -35,15 +37,15 @@ export const footerLinks: FooterColumn[] = [
             { label: 'Features', href: '#features' },
             { label: 'Pricing', href: '#pricing' },
             { label: 'Changelog', href: '#' },
-            { label: 'Documentation', href: '#' },
-            { label: 'CLI Reference', href: '#' },
+            { label: 'Documentation', href: ROUTES.DOCUMENTATION },
+            { label: 'CLI Reference', href: ROUTES.DOCUMENTATION },
         ],
     },
     {
         title: 'Resources',
         links: [
-            { label: 'Getting Started', href: '#' },
-            { label: 'API Reference', href: '#' },
+            { label: 'Getting Started', href: ROUTES.DOCUMENTATION },
+            { label: 'API Reference', href: ROUTES.DOCUMENTATION },
             { label: 'Integrations', href: '#' },
             { label: 'Blog', href: '#' },
             { label: 'Status', href: '#' },
@@ -61,8 +63,8 @@ export const footerLinks: FooterColumn[] = [
     {
         title: 'Legal',
         links: [
-            { label: 'Privacy Policy', href: '#' },
-            { label: 'Terms of Service', href: '#' },
+            { label: 'Privacy Policy', href: ROUTES.PRIVACY },
+            { label: 'Terms of Service', href: ROUTES.TERMS },
             { label: 'Security', href: '#' },
             { label: 'DPA', href: '#' },
         ],

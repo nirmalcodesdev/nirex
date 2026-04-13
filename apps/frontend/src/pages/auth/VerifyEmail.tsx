@@ -15,10 +15,15 @@ export function VerifyEmail() {
 
     useEffect(() => {
         if (countdown > 0 && !canResend) {
-            const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+            const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
             return () => clearTimeout(timer);
-        } else if (countdown === 0) {
-            setCanResend(true);
+        }
+    }, [countdown, canResend]);
+
+    useEffect(() => {
+        if (countdown === 0 && !canResend) {
+            const timer = setTimeout(() => setCanResend(true), 0);
+            return () => clearTimeout(timer);
         }
     }, [countdown, canResend]);
 

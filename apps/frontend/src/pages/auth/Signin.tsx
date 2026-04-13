@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Hexagon } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight } from "lucide-react";
 import { AlertCircle } from "lucide-react";
 import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
@@ -182,8 +182,7 @@ export function Signin() {
                                     onChange={(e) => {
                                         setEmail(e.target.value);
                                         if (errors.email) {
-                                            const { email: _, ...rest } = errors;
-                                            setErrors(rest);
+                                            setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== 'email')));
                                         }
                                     }}
                                     placeholder="name@company.com"
@@ -220,8 +219,7 @@ export function Signin() {
                                     onChange={(e) => {
                                         setPassword(e.target.value);
                                         if (errors.password) {
-                                            const { password: _, ...rest } = errors;
-                                            setErrors(rest);
+                                            setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== 'password')));
                                         }
                                     }}
                                     placeholder="••••••••"

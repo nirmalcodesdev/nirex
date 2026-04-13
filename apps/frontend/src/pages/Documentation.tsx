@@ -25,7 +25,7 @@ import type { DocContent } from "@/types/documentation.types";
 // Document Content
 // ============================================================================
 
-const getDocContent = (activeDoc: string, currentNavTitle?: string, currentItemTitle?: string): DocContent => {
+const getDocContent = (activeDoc: string, _currentNavTitle?: string, currentItemTitle?: string): DocContent => {
     const contents: Record<string, DocContent> = {
         introduction: {
             id: "introduction",

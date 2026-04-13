@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
-import { Hexagon, Menu, X, Search, Sun, Moon, Command } from "lucide-react";
+import { Menu, X, Search, Sun, Moon, Command } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import type { DocHeaderProps } from "@/types/documentation.types";
 import { BsGithub } from "react-icons/bs";
 import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
+
+import { ROUTES } from "@/constant/routes";
 
 export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHeaderProps) {
     const { theme, toggleTheme } = useTheme();
@@ -20,7 +22,7 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                     >
                         {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
                     </button>
-                    <Link to="/" className="flex items-center gap-2.5">
+                    <Link to={ROUTES.DASHBOARD.ROOT} className="flex items-center gap-2.5">
                         <img src={nirexLogo} alt={APP_NAME} className="w-8 h-8" />
                         <div className="flex items-center gap-0 hidden sm:flex">
                             <span className="font-display font-bold text-lg">{APP_NAME}</span>
@@ -70,7 +72,7 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                         <BsGithub size={20} />
                     </a>
                     <Link
-                        to="/dashboard"
+                        to={ROUTES.DASHBOARD.ROOT}
                         className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
                     >
                         Dashboard

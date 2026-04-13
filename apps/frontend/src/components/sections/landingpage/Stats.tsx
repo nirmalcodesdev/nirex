@@ -7,12 +7,12 @@ function StatItem({ value, target, suffix, label, sublabel }: {
     label: string;
     sublabel: string;
 }) {
-    const countUp = target !== undefined ? useCountUp(target, 1000, suffix || '') : null;
+    const countUp = useCountUp(target ?? 0, 1000, suffix || '');
 
     return (
         <div className="text-center px-4" data-reveal="fade-up">
-            <div className="font-display font-bold text-5xl text-nirex-text-primary mb-2" ref={countUp?.ref as React.Ref<HTMLDivElement>}>
-                {countUp ? countUp.display : value}
+            <div className="font-display font-bold text-5xl text-nirex-text-primary mb-2" ref={target !== undefined ? (countUp.ref as React.Ref<HTMLDivElement>) : undefined}>
+                {target !== undefined ? countUp.display : value}
             </div>
             <div className="font-body text-[11px] text-nirex-text-muted uppercase tracking-wider">
                 {label}
