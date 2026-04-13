@@ -31,6 +31,8 @@ function colorize(line: string): JSX.Element {
     return <span className="t-output">{line}</span>;
 }
 
+import { ROUTES } from '@/constant/routes';
+
 export default function Hero() {
     const { displayedLines, isComplete } = useTerminalTyping(terminalLines, true, 3000);
     const headlineRef = useRef<HTMLHeadingElement>(null);
@@ -82,7 +84,7 @@ export default function Hero() {
 
                 {/* CTA Row */}
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-4 opacity-0 animate-[fadeIn_0.45s_ease_0.75s_forwards]">
-                    <Link to="/auth/signup">
+                    <Link to={ROUTES.AUTH.SIGNUP}>
                         <MagneticButton
                             strength={0.35}
                             className="h-11 px-6 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"

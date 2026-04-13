@@ -2,6 +2,8 @@ import MagneticButton from '@nirex/ui/MagneticButton';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { ROUTES } from '@/constant/routes';
+
 export default function FinalCTA() {
     const [copied, setCopied] = useState(false);
 
@@ -27,7 +29,7 @@ export default function FinalCTA() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10" data-reveal="fade-up" data-reveal-delay="0.15">
-                    <Link to="/auth/signup">
+                    <Link to={ROUTES.AUTH.SIGNUP}>
                         <MagneticButton
                             strength={0.35}
                             className="h-12 px-8 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"

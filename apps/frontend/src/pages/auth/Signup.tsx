@@ -320,8 +320,7 @@ export function Signup() {
                                 onChange={(e) => {
                                     setAgreedToTerms(e.target.checked);
                                     if (errors.terms) {
-                                        const { terms: _, ...rest } = errors;
-                                        setErrors(rest);
+                                        setErrors(Object.fromEntries(Object.entries(errors).filter(([k]) => k !== 'terms')));
                                     }
                                 }}
                                 className={`h-4 w-4 mt-0.5 rounded text-nirex-accent focus:ring-nirex-accent ${errors.terms ? "border-destructive" : "border-border"}

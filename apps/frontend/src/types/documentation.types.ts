@@ -1,4 +1,3 @@
-import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 
 export type CodeLanguage = "bash" | "javascript" | "typescript" | "json" | "yaml";

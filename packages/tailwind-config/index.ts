@@ -79,6 +79,9 @@ const config: Config = {
           surface: "hsl(var(--bg-surface) / <alpha-value>)",
           elevated: "hsl(var(--bg-elevated) / <alpha-value>)",
           overlay: "hsl(var(--bg-overlay) / <alpha-value>)",
+          success: "hsl(var(--color-success) / <alpha-value>)",
+          warning: "hsl(var(--color-warning) / <alpha-value>)",
+          error: "hsl(var(--color-error) / <alpha-value>)",
         },
         "nirex-text": {
           primary: "hsl(var(--text-primary))",

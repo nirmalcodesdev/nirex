@@ -6,7 +6,7 @@ import {
     Database,
     Shield,
 } from "lucide-react";
-import type { DocSection, CodeBlock, DocContent } from "@/types/documentation.types";
+import type { DocSection, CodeBlock } from "@/types/documentation.types";
 
 export const navigation: DocSection[] = [
     {

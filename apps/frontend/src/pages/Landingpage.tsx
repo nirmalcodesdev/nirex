@@ -17,6 +17,8 @@ import FAQ from '@/components/sections/landingpage/FAQ';
 import FinalCTA from '@/components/sections/landingpage/FinalCTA';
 import Features from '@/components/sections/landingpage/Features';
 
+import { ROUTES } from '@/constant/routes';
+
 export default function LandingPage() {
     const revealRef = useScrollReveal();
 
@@ -24,7 +26,7 @@ export default function LandingPage() {
         <div ref={revealRef}>
             <a href="#main" className="skip-link">Skip to main content</a>
             <GrainOverlay />
-            <Nav links={navLinks} brandName={APP_NAME} brandSuffix={APP_NAME_SUFFIX} logoSrc={nirexLogo} ctaTo='/auth/signup' />
+            <Nav links={navLinks} brandName={APP_NAME} brandSuffix={APP_NAME_SUFFIX} logoSrc={nirexLogo} ctaTo={ROUTES.AUTH.SIGNUP} />
 
             <main id="main">
                 <Hero />
@@ -42,7 +44,7 @@ export default function LandingPage() {
 
             </main>
 
-            <Footer columns={footerLinks} brandName={`${APP_NAME}`} socialLinks={socialLinks} brandHref='/' description={footerDescription} brandSuffix={APP_NAME_SUFFIX} copyrightName={`${APP_NAME} ${APP_NAME_SUFFIX}`} />
+            <Footer columns={footerLinks} brandName={`${APP_NAME}`} socialLinks={socialLinks} brandHref={ROUTES.DASHBOARD.ROOT} description={footerDescription} brandSuffix={APP_NAME_SUFFIX} copyrightName={`${APP_NAME} ${APP_NAME_SUFFIX}`} />
         </div>
     );
 }

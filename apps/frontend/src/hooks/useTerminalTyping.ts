@@ -30,9 +30,11 @@ export function useTerminalTyping(lines: TerminalLine[], autoRestart = true, res
 
         const line = lines[currentLineIndex];
 
-        // Guard clause: if line is undefined, stop typing
+        // Guard clause: if line is undefined, schedule stop typing
         if (!line) {
-            setIsTyping(false);
+            timeoutRef.current = window.setTimeout(() => {
+                setIsTyping(false);
+            }, 0);
             return;
         }
 
