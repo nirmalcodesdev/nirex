@@ -1,36 +1,68 @@
-import express, { Express } from 'express';
-import cors from 'cors';
+import express, { type Express } from 'express';
 import helmet from 'helmet';
-import morgan from 'morgan';
+import cors from 'cors';
+import passport from 'passport';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { env } from './config/env.js';
-import { errorHandler } from './middlewares/errorHandler.js';
-import { ApiError } from './utils/ApiError.js';
-import { ApiResponse } from './utils/ApiResponse.js';
+import { apiLimiter } from './middleware/rateLimiter.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import { requestLogger } from './middleware/requestLogger.js';
+import authRoutes from './modules/auth/auth.routes.js';
+import { configurePassport } from './config/passport.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app: Express = express();
 
-// Middlewares
+// ── Security headers ──────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
-app.use(express.json({ limit: '16kb' }));
-app.use(express.urlencoded({ extended: true, limit: '16kb' }));
-app.use(morgan(env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.status(200).json(new ApiResponse(200, null, 'Server is up and running'));
+// ── Request logging ───────────────────────────────────────────────────────
+// Must be early to capture all requests, but after helmet for security headers
+app.use(requestLogger);
+
+// ── CORS ──────────────────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: env.CORS_ORIGINS,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
+
+// ── Body parsing ──────────────────────────────────────────────────────────
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// ── Passport ──────────────────────────────────────────────────────────────
+configurePassport();
+app.use(passport.initialize());
+
+// ── Global rate limiter ───────────────────────────────────────────────────
+app.use('/api', apiLimiter);
+
+// ── Health check ──────────────────────────────────────────────────────────
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// V1 Routes (To be implemented)
-// import v1Router from './routes/v1/index.js';
-// app.use('/api/v1', v1Router);
+// ── Routes ─n───────────────────────────────────────────────────────────────
+app.use('/api/v1/auth', authRoutes);
 
-// 404 handler
-app.use((req, res, next) => {
-  next(new ApiError(404, 'Route not found'));
+// ── Static files (auth test interface) ────────────────────────────────────
+// Serve from project root public folder (works in both src and dist)
+const publicPath = path.join(__dirname, '..', 'public');
+app.use(express.static(publicPath));
+
+// ── 404 handler ───────────────────────────────────────────────────────────
+app.use((_req, res) => {
+  res.status(404).json({ status: 'fail', message: 'Route not found' });
 });
 
-// Global Error Handler
+// ── Error handler (must be last) ──────────────────────────────────────────
 app.use(errorHandler);
 
-export { app };
+export default app;
