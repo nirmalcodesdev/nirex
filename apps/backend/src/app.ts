@@ -9,6 +9,7 @@ import { apiLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import authRoutes from './modules/auth/auth.routes.js';
+import chatSessionRoutes from './modules/chat-session/chat-session.routes.js';
 import { configurePassport } from './config/passport.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,13 +30,19 @@ app.use(
     origin: env.CORS_ORIGINS,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-File-Name',
+      'X-Upload-Filename',
+      'Last-Event-ID',
+    ],
   }),
 );
 
 // ── Body parsing ──────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ── Passport ──────────────────────────────────────────────────────────────
 configurePassport();
@@ -49,8 +56,9 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ── Routes ─n───────────────────────────────────────────────────────────────
+// ── Routes ────────────────────────────────────────────────────────────────
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/sessions', chatSessionRoutes);
 
 // ── Static files (auth test interface) ────────────────────────────────────
 // Serve from project root public folder (works in both src and dist)

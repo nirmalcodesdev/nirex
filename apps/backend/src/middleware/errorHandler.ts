@@ -49,6 +49,12 @@ export function errorHandler(
       Object.entries(err.errors).map(([k, v]) => [k, v.message]),
     );
   }
+  // Mongoose cast / invalid ObjectId
+  else if (err instanceof MongooseError.CastError) {
+    statusCode = 400;
+    message = `Invalid ${err.path}`;
+    code = 'INVALID_ID';
+  }
   // Mongoose duplicate key
   else if (
     typeof err === 'object' &&

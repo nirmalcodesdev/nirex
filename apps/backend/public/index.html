@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <title>Auth & Device Management - Nirex Backend</title>
+  <title>Nirex Backend API Tester</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -335,8 +335,8 @@
 
   <div class="container">
     <header>
-      <h1>Auth & Device Management</h1>
-      <p class="subtitle">Test authentication endpoints and manage your connected devices</p>
+      <h1>Nirex Backend API Tester</h1>
+      <p class="subtitle">Test authentication, device management, and chat session endpoints</p>
     </header>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -360,6 +360,7 @@
     <div class="nav-tabs">
       <div class="nav-tab active" data-tab="public">Public Endpoints</div>
       <div class="nav-tab" data-tab="protected">Protected Endpoints</div>
+      <div class="nav-tab" data-tab="sessions">Chat Sessions</div>
     </div>
 
     <div id="publicTab" class="tab-content">
@@ -509,6 +510,218 @@
       </div>
     </div>
 
+    <div id="sessionsTab" class="tab-content hidden">
+      <div class="grid">
+        <div class="card">
+          <h2>Session Stats <span class="badge badge-protected">GET /sessions/stats</span></h2>
+          <button type="button" id="sessionStatsBtn">Get Stats</button>
+          <div id="sessionStatsResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Create Session <span class="badge badge-protected">POST /sessions</span></h2>
+          <form id="createSessionForm" action="#">
+            <div class="form-group"><label>Working Directory</label><input type="text" id="sessionWorkingDir" placeholder="/path/to/project" required></div>
+            <div class="form-group"><label>Model</label><input type="text" id="sessionModel" placeholder="gpt-4o" value="gpt-4o" required></div>
+            <button type="submit" id="createSessionBtn"><span>Create Session</span></button>
+          </form>
+          <div id="createSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>List Sessions <span class="badge badge-protected">GET /sessions</span></h2>
+          <form id="listSessionsForm" action="#">
+            <div class="form-group"><label>Page</label><input type="number" id="listSessionsPage" value="1" min="1"></div>
+            <div class="form-group"><label>Limit</label><input type="number" id="listSessionsLimit" value="20" min="1" max="100"></div>
+            <div class="form-group">
+              <label><input type="checkbox" id="listSessionsIncludeArchived"> Include Archived</label>
+            </div>
+            <button type="submit" id="listSessionsBtn"><span>List Sessions</span></button>
+          </form>
+          <div id="listSessionsResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Get Session <span class="badge badge-protected">GET /sessions/:id</span></h2>
+          <form id="getSessionForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="getSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Message Page</label><input type="number" id="getSessionPage" value="1" min="1"></div>
+            <div class="form-group"><label>Messages Per Page</label><input type="number" id="getSessionLimit" value="50" min="1" max="200"></div>
+            <button type="submit" id="getSessionBtn"><span>Get Session</span></button>
+          </form>
+          <div class="hint-box">Supports message pagination - use page/limit to navigate message history</div>
+          <div id="getSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Update Session <span class="badge badge-protected">PATCH /sessions/:id</span></h2>
+          <form id="updateSessionForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="updateSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Name (optional)</label><input type="text" id="updateSessionName" placeholder="New session name"></div>
+            <div class="form-group">
+              <label><input type="checkbox" id="updateSessionArchive"> Archive</label>
+            </div>
+            <button type="submit" id="updateSessionBtn"><span>Update Session</span></button>
+          </form>
+          <div id="updateSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Delete Session <span class="badge badge-protected">DELETE /sessions/:id</span></h2>
+          <form id="deleteSessionForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="deleteSessionId" placeholder="Session UUID" required></div>
+            <button type="submit" id="deleteSessionBtn" class="btn-danger"><span>Delete Session</span></button>
+          </form>
+          <div id="deleteSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Add Message <span class="badge badge-protected">POST /sessions/:id/messages</span></h2>
+          <form id="addMessageForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="addMessageSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Role</label>
+              <select id="addMessageRole" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="user">user</option>
+                <option value="assistant">assistant</option>
+                <option value="system">system</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Content</label><textarea id="addMessageContent" rows="3" placeholder="Message content" required></textarea></div>
+            <div class="form-group"><label>Client Message ID (optional)</label><input type="text" id="addMessageClientId" placeholder="Auto-generated if empty"></div>
+            <div class="form-group"><label>Input Tokens (optional)</label><input type="number" id="addMessageInputTokens" placeholder="0" min="0"></div>
+            <div class="form-group"><label>Output Tokens (optional)</label><input type="number" id="addMessageOutputTokens" placeholder="0" min="0"></div>
+            <button type="submit" id="addMessageBtn"><span>Add Message</span></button>
+          </form>
+          <div id="addMessageResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Create Checkpoint <span class="badge badge-protected">POST /sessions/:id/checkpoints</span></h2>
+          <form id="createCheckpointForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="checkpointSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Snapshot</label><textarea id="checkpointSnapshot" rows="3" placeholder="Checkpoint snapshot/summary" required></textarea></div>
+            <button type="submit" id="createCheckpointBtn"><span>Create Checkpoint</span></button>
+          </form>
+          <div id="createCheckpointResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>List Checkpoints <span class="badge badge-protected">GET /sessions/:id/checkpoints</span></h2>
+          <form id="listCheckpointsForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="listCheckpointsSessionId" placeholder="Session UUID" required></div>
+            <button type="submit" id="listCheckpointsBtn"><span>List Checkpoints</span></button>
+          </form>
+          <div id="listCheckpointsResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Export Session <span class="badge badge-protected">GET /sessions/:id/export</span></h2>
+          <form id="exportSessionForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="exportSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Format</label>
+              <select id="exportSessionFormat" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="json">JSON</option>
+                <option value="markdown">Markdown</option>
+              </select>
+            </div>
+            <button type="submit" id="exportSessionBtn"><span>Export Session</span></button>
+          </form>
+          <div id="exportSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Import Session <span class="badge badge-protected">POST /sessions/import</span></h2>
+          <form id="importSessionForm" action="#">
+            <div class="form-group"><label>Session JSON</label><textarea id="importSessionData" rows="5" placeholder="Paste exported session JSON here" required></textarea></div>
+            <button type="submit" id="importSessionBtn"><span>Import Session</span></button>
+          </form>
+          <div id="importSessionResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Delete All Sessions <span class="badge badge-protected">DELETE /sessions</span></h2>
+          <form id="deleteAllSessionsForm" action="#">
+            <div class="form-group">
+              <label><input type="checkbox" id="deleteAllSessionsConfirm" required> Confirm deletion</label>
+            </div>
+            <button type="submit" id="deleteAllSessionsBtn" class="btn-danger"><span>Delete All Sessions</span></button>
+          </form>
+          <div id="deleteAllSessionsResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Get Archived Messages <span class="badge badge-protected">GET /sessions/:id/archives</span></h2>
+          <form id="getArchivedMessagesForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="archivedMessagesSessionId" placeholder="Session UUID" required></div>
+            <button type="submit" id="getArchivedMessagesBtn"><span>Get Archived Messages</span></button>
+          </form>
+          <div class="hint-box">Retrieves archived message batches for sessions that exceeded 500 messages</div>
+          <div id="getArchivedMessagesResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Search Messages <span class="badge badge-protected">GET /sessions/search</span></h2>
+          <form id="searchMessagesForm" action="#">
+            <div class="form-group"><label>Search Query</label><input type="text" id="searchQuery" placeholder="Search terms..." required></div>
+            <div class="form-group"><label>Session ID (optional)</label><input type="text" id="searchSessionId" placeholder="Filter by session"></div>
+            <div class="form-group"><label>Page</label><input type="number" id="searchPage" value="1" min="1"></div>
+            <div class="form-group"><label>Limit</label><input type="number" id="searchLimit" value="20" min="1" max="100"></div>
+            <button type="submit" id="searchMessagesBtn"><span>Search</span></button>
+          </form>
+          <div class="hint-box">Full-text search across all your messages</div>
+          <div id="searchMessagesResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Edit Message <span class="badge badge-protected">PATCH /sessions/:id/messages/:msgId</span></h2>
+          <form id="editMessageForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="editMessageSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Message ID</label><input type="text" id="editMessageId" placeholder="Message UUID" required></div>
+            <div class="form-group"><label>New Content</label><textarea id="editMessageContent" rows="3" placeholder="Updated message content" required></textarea></div>
+            <button type="submit" id="editMessageBtn"><span>Edit Message</span></button>
+          </form>
+          <div id="editMessageResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Delete Message <span class="badge badge-protected">DELETE /sessions/:id/messages/:msgId</span></h2>
+          <form id="deleteMessageForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="deleteMessageSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Message ID</label><input type="text" id="deleteMessageId" placeholder="Message UUID" required></div>
+            <button type="submit" id="deleteMessageBtn" class="btn-danger"><span>Delete Message</span></button>
+          </form>
+          <div class="hint-box">Soft deletes message (preserves history)</div>
+          <div id="deleteMessageResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Acknowledge Messages <span class="badge badge-protected">POST /sessions/:id/messages/acknowledge</span></h2>
+          <form id="acknowledgeMessagesForm" action="#">
+            <div class="form-group"><label>Session ID</label><input type="text" id="ackSessionId" placeholder="Session UUID" required></div>
+            <div class="form-group"><label>Message IDs (comma-separated)</label><input type="text" id="ackMessageIds" placeholder="msg1, msg2, msg3" required></div>
+            <button type="submit" id="acknowledgeMessagesBtn"><span>Acknowledge</span></button>
+          </form>
+          <div class="hint-box">Mark messages as delivered/acknowledged</div>
+          <div id="acknowledgeMessagesResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+          <h2>SSE Real-time Stream <span class="badge badge-protected">GET /sessions/stream</span></h2>
+          <div class="form-group">
+            <label>Session ID (optional - leave empty for all sessions)</label>
+            <input type="text" id="sseSessionId" placeholder="Specific session ID or leave empty">
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button type="button" id="connectSseBtn"><span>Connect to Stream</span></button>
+            <button type="button" id="disconnectSseBtn" class="btn-danger" disabled><span>Disconnect</span></button>
+          </div>
+          <div class="hint-box">Real-time updates for new messages, session updates, and checkpoint creation. Uses Server-Sent Events (SSE).</div>
+          <div id="sseStatus" style="margin-top: 10px; color: #71717a; font-size: 0.9rem;">Status: Disconnected</div>
+          <div id="sseEvents" class="response hidden" style="margin-top: 10px; max-height: 200px; overflow-y: auto; background: #09090b; border: 1px solid #27272a; padding: 10px; font-family: monospace; font-size: 0.8rem;"></div>
+        </div>
+      </div>
+    </div>
+
     <div style="height: 80px;"></div>
     </div>
   </div>
@@ -519,8 +732,10 @@
       <span id="statusText">Not authenticated</span>
     </div>
     <div style="display: flex; align-items: center; gap: 10px;">
-      <span style="color: #71717a;">API:</span>
-      <code style="color: #22d3ee;">http://localhost:3001/api/v1/auth</code>
+      <span style="color: #71717a;">Auth:</span>
+      <code style="color: #22d3ee;">/api/v1/auth</code>
+      <span style="color: #71717a; margin-left: 10px;">Sessions:</span>
+      <code style="color: #22d3ee;">/api/sessions</code>
     </div>
   </div>
 

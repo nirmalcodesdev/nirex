@@ -1,0 +1,91 @@
+You are an expert backend engineer. I am building a CLI coding tool that has 
+both a CLI client and a web frontend. I already have a backend auth module 
+with user authentication . 
+
+Now I need you to build a complete SESSIONS MODULE system. Here are the full requirements:
+
+
+## DATABASE SCHEMA
+
+Create a `sessions` table with:
+- id (UUID, primary key)
+- user_id (foreign key → users table)
+- name (string, human-readable label, auto-generated from first message)
+- working_directory (string, project path the session was started from)
+- messages (JSONL or JSON array — stores full conversation turns)
+- token_usage (JSON — tracks input/output/cached token counts)
+- model (string — which AI model was used)
+- is_archived (boolean, default false)
+- created_at (timestamp)
+- updated_at (timestamp)
+
+Create a `session_checkpoints` table with:
+- id (UUID)
+- session_id (foreign key → sessions)
+- snapshot (JSON — compressed summary of conversation up to this point)
+- turn_index (int — which turn this checkpoint was taken at)
+- created_at (timestamp)
+
+---
+
+## BACKEND API ROUTES
+
+Build all routes under /api/sessions. All routes require JWT auth middleware.
+
+### Session CRUD
+POST   /api/sessions              → Create new session (body: working_directory, model)
+GET    /api/sessions              → List all sessions for current user (with pagination)
+GET    /api/sessions/:id          → Get single session with full message history
+PATCH  /api/sessions/:id          → Update session name or archive it
+DELETE /api/sessions/:id          → Delete session permanently
+DELETE /api/sessions              → Delete all sessions for user (with ?confirm=true)
+
+### Session Messages
+POST   /api/sessions/:id/messages → Append a new message turn to session
+                                    body: { role: "user"|"assistant", content, token_usage }
+
+### Checkpoints
+POST   /api/sessions/:id/checkpoint → Save a compaction checkpoint snapshot
+GET    /api/sessions/:id/checkpoints → List checkpoints for a session
+
+### Export / Import
+GET    /api/sessions/:id/export   → Export session as JSON (query: ?format=json|markdown)
+POST   /api/sessions/import       → Import a session from JSON file body
+
+### Stats
+GET    /api/sessions/stats        → Return total sessions, total tokens used, cost estimate
+
+---
+
+## BUSINESS LOGIC TO IMPLEMENT
+
+1. Auto-name: When the first user message is added to a session, 
+   auto-generate a short session name (first 6 words of first message, 
+   or call AI to summarize it into a title).
+
+2. Token tracking: Every time a message is appended, accumulate 
+   token_usage totals (input_tokens, output_tokens, cached_tokens) 
+   on the session row.
+
+3. Auto-compaction trigger: When total token count on a session 
+   exceeds 80% of the model context limit, automatically create a 
+   checkpoint snapshot before the next message is added.
+
+4. Project scoping: working_directory is hashed (SHA256) so sessions 
+   can be filtered by project root on the client side.
+
+5. Soft archive: PATCH /:id with { archived: true } hides session 
+   from default list (add ?include_archived=true query to show them).
+
+
+## ERROR HANDLING
+
+- 401 if JWT is missing or expired or revoked or user device session expired 
+- 403 if session belongs to a different user
+- 404 if session not found
+- 400 for missing required fields
+- All errors return { error: string, code: string } JSON
+
+
+Keep all code clean, modular, and consistent with a typical 
+MVC or layered architecture pattern.

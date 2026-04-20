@@ -117,6 +117,117 @@ export {
 export { AuthErrorCodes, CommonErrorCodes, ValidationErrorCodes } from './domain/auth/errors.js';
 
 // ============================================================================
+// Domain: Chat Sessions
+// ============================================================================
+
+// Core types
+export type {
+  // Core enums/types
+  MessageRole,
+  AIModel,
+  MessageDeliveryStatus,
+
+  // Core interfaces
+  TokenUsage,
+  ChatMessage,
+  IMessage,
+  MessageDTO,
+  MessageSearchResult,
+  SessionCheckpoint,
+  IChatSession,
+  ChatSessionDTO,
+  ChatSessionWithMessages,
+  CheckpointDTO,
+
+  // API Request/Response types
+  CreateSessionRequest,
+  CreateSessionResponse,
+  ListSessionsQuery,
+  ListChatSessionsResponse,
+  GetSessionQuery,
+  GetSessionResponse,
+  UpdateSessionRequest,
+  UpdateSessionResponse,
+  DeleteChatSessionResponse,
+  DeleteAllSessionsQuery,
+  DeleteAllSessionsResponse,
+  AddMessageRequest,
+  AddMessageResponse,
+  SearchMessagesQuery,
+  SearchMessagesResponse,
+  AcknowledgeMessageRequest,
+  AcknowledgeMessageResponse,
+  EditMessageRequest,
+  EditMessageResponse,
+  DeleteMessageResponse,
+  CreateCheckpointRequest,
+  CreateCheckpointResponse,
+  ListCheckpointsResponse,
+  ExportFormat,
+  ExportSessionQuery,
+  ImportSessionRequest,
+  ImportSessionResponse,
+  SessionStatsResponse,
+
+  // Error codes
+  ChatSessionErrorCode,
+
+  // Utility types
+  PaginationQuery,
+  SessionFilters,
+} from './domain/chat-session/index.js';
+
+// Chat session constants & utilities
+export {
+  MODEL_CONTEXT_LIMITS,
+  DEFAULT_CONTEXT_LIMIT,
+  COMPACTION_THRESHOLD,
+  getContextLimit,
+  shouldCompact,
+  MAX_MESSAGES_PER_DOCUMENT,
+  MAX_MESSAGE_CONTENT_SIZE,
+  MAX_MESSAGE_METADATA_SIZE,
+  DEFAULT_MESSAGE_PAGE_SIZE,
+  MAX_MESSAGE_PAGE_SIZE,
+} from './domain/chat-session/index.js';
+
+// Chat session validation schemas
+export {
+  // Common schemas
+  messageRoleSchema,
+  aiModelSchema,
+  tokenUsageSchema,
+  chatMessageSchema,
+  importChatMessageSchema,
+
+  // Session schemas
+  createSessionSchema,
+  updateSessionSchema,
+  sessionIdParamSchema,
+  messageIdParamSchema,
+  getSessionQuerySchema,
+
+  // Message schemas
+  addMessageSchema,
+  editMessageSchema,
+  acknowledgeMessagesSchema,
+
+  // Query schema types
+  type GetSessionQuerySchema,
+
+  // Checkpoint schemas
+  createCheckpointSchema,
+
+  // Query schemas
+  searchMessagesQuerySchema,
+  listSessionsQuerySchema,
+  deleteAllSessionsQuerySchema,
+  exportSessionQuerySchema,
+  importSessionSchema,
+  downloadAttachmentParamsSchema,
+} from './domain/chat-session/index.js';
+
+// ============================================================================
 // Domain: Common / Shared
 // ============================================================================
 

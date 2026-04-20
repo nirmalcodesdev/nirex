@@ -9,22 +9,65 @@ import {
 import { logger } from '../utils/logger.js';
 import { sessionService } from '../modules/session/session.service.js';
 
+/**
+ * Extract token from request (header or query param for SSE)
+ */
+function extractToken(req: Request): string | null {
+  // First try Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  // Fall back to query parameter (for SSE connections)
+  const tokenParam = req.query.token as string;
+  if (tokenParam) {
+    return tokenParam;
+  }
+
+  return null;
+}
+
+/**
+ * Debug log for token extraction
+ */
+function logTokenDebug(req: Request): void {
+  const hasAuthHeader = !!req.headers.authorization;
+  const hasTokenParam = !!req.query.token;
+  logger.debug('Token extraction debug', {
+    path: req.path,
+    hasAuthHeader,
+    hasTokenParam,
+    queryKeys: Object.keys(req.query),
+  });
+}
+
 // Validates the Bearer token and populates req.userId + req.sessionId.
 // Route handlers must not access user data directly — they use req.userId
 // to fetch the user from the service layer if needed.
+// Also supports token via query parameter for SSE connections.
 export async function authenticate(
   req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    logTokenDebug(req);
+    const token = extractToken(req);
+    if (!token) {
+      logger.debug('Authentication failed: No token found', { path: req.path, query: req.query });
       throw new AppError('No access token provided', 401, 'UNAUTHENTICATED');
     }
-
-    const token = authHeader.slice(7);
-    const payload = verifyAccessToken(token);
+    let payload;
+    try {
+      payload = verifyAccessToken(token);
+    } catch (verifyErr) {
+      logger.debug('Token verification failed', {
+        error: (verifyErr as Error).message,
+        tokenPrefix: token.substring(0, 20) + '...',
+      });
+      throw verifyErr;
+    }
 
     // Check if this specific token is blacklisted (single session sign-out)
     const isBlacklisted = await isTokenBlacklisted(payload.jti);
@@ -112,18 +155,17 @@ export async function authenticate(
 // but does NOT check if the session is revoked. This allows users to
 // sign out even if their session has been revoked.
 // Used specifically for the /sign-out endpoint.
+// Also supports token via query parameter for SSE connections.
 export async function authenticateTokenOnly(
   req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    const token = extractToken(req);
+    if (!token) {
       throw new AppError('No access token provided', 401, 'UNAUTHENTICATED');
     }
-
-    const token = authHeader.slice(7);
     const payload = verifyAccessToken(token);
 
     // Check if this specific token is blacklisted

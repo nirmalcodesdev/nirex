@@ -2,9 +2,18 @@
   'use strict';
 
   const API_BASE = '/api/v1/auth';
+  const SESSIONS_API_BASE = '/api/sessions';
   let accessToken = localStorage.getItem('accessToken');
   let refreshToken = localStorage.getItem('refreshToken');
   let currentUser = null;
+
+  function generateClientMessageId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+
+    return 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
@@ -26,6 +35,7 @@
         const target = this.dataset.tab;
         document.getElementById('publicTab').classList.toggle('hidden', target !== 'public');
         document.getElementById('protectedTab').classList.toggle('hidden', target !== 'protected');
+        document.getElementById('sessionsTab').classList.toggle('hidden', target !== 'sessions');
       });
     });
 
@@ -49,9 +59,37 @@
     document.getElementById('googleSignInBtn').addEventListener('click', () => handleOAuthSignIn('google'));
     document.getElementById('githubSignInBtn').addEventListener('click', () => handleOAuthSignIn('github'));
 
+    // Chat Session Event Listeners
+    document.getElementById('sessionStatsBtn').addEventListener('click', handleSessionStats);
+    document.getElementById('createSessionForm').addEventListener('submit', handleCreateSession);
+    document.getElementById('listSessionsForm').addEventListener('submit', handleListChatSessions);
+    document.getElementById('getSessionForm').addEventListener('submit', handleGetSession);
+    document.getElementById('updateSessionForm').addEventListener('submit', handleUpdateSession);
+    document.getElementById('deleteSessionForm').addEventListener('submit', handleDeleteSession);
+    document.getElementById('addMessageForm').addEventListener('submit', handleAddMessage);
+    document.getElementById('createCheckpointForm').addEventListener('submit', handleCreateCheckpoint);
+    document.getElementById('listCheckpointsForm').addEventListener('submit', handleListCheckpoints);
+    document.getElementById('exportSessionForm').addEventListener('submit', handleExportSession);
+    document.getElementById('importSessionForm').addEventListener('submit', handleImportSession);
+    document.getElementById('deleteAllSessionsForm').addEventListener('submit', handleDeleteAllSessions);
+
+    // New Chat Session Features
+    document.getElementById('getArchivedMessagesForm').addEventListener('submit', handleGetArchivedMessages);
+    document.getElementById('connectSseBtn').addEventListener('click', handleConnectSse);
+    document.getElementById('disconnectSseBtn').addEventListener('click', handleDisconnectSse);
+
+    // New Message Operations
+    document.getElementById('searchMessagesForm').addEventListener('submit', handleSearchMessages);
+    document.getElementById('editMessageForm').addEventListener('submit', handleEditMessage);
+    document.getElementById('deleteMessageForm').addEventListener('submit', handleDeleteMessage);
+    document.getElementById('acknowledgeMessagesForm').addEventListener('submit', handleAcknowledgeMessages);
+
     // Check for OAuth callback
     checkOAuthCallback();
   }
+
+  // SSE Connection
+  let sseSource = null;
 
   function showToast(message, type) {
     const container = document.getElementById('toastContainer');
@@ -720,5 +758,626 @@
       showResponse('oauthResponse', { message: 'OAuth error: ' + oauthError }, true);
       showToast('Sign in failed: ' + oauthError, 'error');
     }
+  }
+
+  // ── Chat Sessions API ────────────────────────────────────────────────────────
+
+  async function sessionsApiRequest(endpoint, options = {}) {
+    const url = SESSIONS_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    if (accessToken) {
+      config.headers['Authorization'] = 'Bearer ' + accessToken;
+    }
+
+    try {
+      const response = await fetch(url, config);
+
+      // Handle blob responses (for file downloads)
+      if (options.responseType === 'blob') {
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          return { success: false, error: { status: response.status, ...data } };
+        }
+        const blob = await response.blob();
+        return { success: true, blob, filename: endpoint };
+      }
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
+  async function handleSessionStats() {
+    hideResponse('sessionStatsResponse');
+    setLoading('sessionStatsBtn', true);
+
+    const result = await sessionsApiRequest('/stats');
+
+    setLoading('sessionStatsBtn', false);
+
+    if (result.success) {
+      showResponse('sessionStatsResponse', result.data, false);
+    } else {
+      showResponse('sessionStatsResponse', result.error, true);
+    }
+  }
+
+  async function handleCreateSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('createSessionResponse');
+    setLoading('createSessionBtn', true);
+
+    const result = await sessionsApiRequest('', {
+      method: 'POST',
+      body: JSON.stringify({
+        working_directory: document.getElementById('sessionWorkingDir').value,
+        model: document.getElementById('sessionModel').value
+      })
+    });
+
+    setLoading('createSessionBtn', false);
+
+    if (result.success) {
+      showResponse('createSessionResponse', result.data, false);
+      showToast('Session created!', 'success');
+      document.getElementById('createSessionForm').reset();
+    } else {
+      showResponse('createSessionResponse', result.error, true);
+      showToast(result.error.message || 'Failed to create session', 'error');
+    }
+    return false;
+  }
+
+  async function handleListChatSessions(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('listSessionsResponse');
+    setLoading('listSessionsBtn', true);
+
+    const page = document.getElementById('listSessionsPage').value;
+    const limit = document.getElementById('listSessionsLimit').value;
+    const includeArchived = document.getElementById('listSessionsIncludeArchived').checked;
+
+    let endpoint = `?page=${page}&limit=${limit}`;
+    if (includeArchived) endpoint += '&include_archived=true';
+
+    const result = await sessionsApiRequest(endpoint);
+
+    setLoading('listSessionsBtn', false);
+
+    if (result.success) {
+      showResponse('listSessionsResponse', result.data, false);
+    } else {
+      showResponse('listSessionsResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleGetSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('getSessionResponse');
+    setLoading('getSessionBtn', true);
+
+    const sessionId = document.getElementById('getSessionId').value.trim();
+    const page = document.getElementById('getSessionPage').value;
+    const limit = document.getElementById('getSessionLimit').value;
+
+    let endpoint = '/' + sessionId;
+    if (page || limit) {
+      endpoint += '?page=' + (page || 1) + '&limit=' + (limit || 50);
+    }
+
+    const result = await sessionsApiRequest(endpoint);
+
+    setLoading('getSessionBtn', false);
+
+    if (result.success) {
+      showResponse('getSessionResponse', result.data, false);
+    } else {
+      showResponse('getSessionResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleUpdateSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('updateSessionResponse');
+    setLoading('updateSessionBtn', true);
+
+    const sessionId = document.getElementById('updateSessionId').value.trim();
+    const name = document.getElementById('updateSessionName').value.trim();
+    const isArchived = document.getElementById('updateSessionArchive').checked;
+
+    const body = {};
+    if (name) body.name = name;
+    body.is_archived = isArchived;
+
+    const result = await sessionsApiRequest('/' + sessionId, {
+      method: 'PATCH',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('updateSessionBtn', false);
+
+    if (result.success) {
+      showResponse('updateSessionResponse', result.data, false);
+      showToast('Session updated!', 'success');
+    } else {
+      showResponse('updateSessionResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleDeleteSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('deleteSessionResponse');
+
+    const sessionId = document.getElementById('deleteSessionId').value.trim();
+    if (!confirm('Are you sure you want to delete this session?')) {
+      return false;
+    }
+
+    setLoading('deleteSessionBtn', true);
+
+    const result = await sessionsApiRequest('/' + sessionId, {
+      method: 'DELETE'
+    });
+
+    setLoading('deleteSessionBtn', false);
+
+    if (result.success) {
+      showResponse('deleteSessionResponse', result.data, false);
+      showToast('Session deleted!', 'success');
+      document.getElementById('deleteSessionForm').reset();
+    } else {
+      showResponse('deleteSessionResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleAddMessage(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('addMessageResponse');
+    setLoading('addMessageBtn', true);
+
+    const sessionId = document.getElementById('addMessageSessionId').value.trim();
+    const clientMessageIdInput = document.getElementById('addMessageClientId');
+    const clientMessageId = clientMessageIdInput.value.trim() || generateClientMessageId();
+    const body = {
+      role: document.getElementById('addMessageRole').value,
+      content: document.getElementById('addMessageContent').value,
+      client_message_id: clientMessageId
+    };
+
+    const inputTokens = document.getElementById('addMessageInputTokens').value;
+    const outputTokens = document.getElementById('addMessageOutputTokens').value;
+
+    if (inputTokens || outputTokens) {
+      body.token_usage = {};
+      if (inputTokens) body.token_usage.input_tokens = parseInt(inputTokens);
+      if (outputTokens) body.token_usage.output_tokens = parseInt(outputTokens);
+    }
+
+    const result = await sessionsApiRequest('/' + sessionId + '/messages', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('addMessageBtn', false);
+
+    if (result.success) {
+      showResponse('addMessageResponse', result.data, false);
+      showToast('Message added!', 'success');
+      document.getElementById('addMessageForm').reset();
+      clientMessageIdInput.value = '';
+    } else {
+      showResponse('addMessageResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleCreateCheckpoint(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('createCheckpointResponse');
+    setLoading('createCheckpointBtn', true);
+
+    const sessionId = document.getElementById('checkpointSessionId').value.trim();
+    const result = await sessionsApiRequest('/' + sessionId + '/checkpoints', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: document.getElementById('checkpointSnapshot').value
+      })
+    });
+
+    setLoading('createCheckpointBtn', false);
+
+    if (result.success) {
+      showResponse('createCheckpointResponse', result.data, false);
+      showToast('Checkpoint created!', 'success');
+      document.getElementById('createCheckpointForm').reset();
+    } else {
+      showResponse('createCheckpointResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleListCheckpoints(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('listCheckpointsResponse');
+    setLoading('listCheckpointsBtn', true);
+
+    const sessionId = document.getElementById('listCheckpointsSessionId').value.trim();
+    const result = await sessionsApiRequest('/' + sessionId + '/checkpoints');
+
+    setLoading('listCheckpointsBtn', false);
+
+    if (result.success) {
+      showResponse('listCheckpointsResponse', result.data, false);
+    } else {
+      showResponse('listCheckpointsResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleExportSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('exportSessionResponse');
+    setLoading('exportSessionBtn', true);
+
+    const sessionId = document.getElementById('exportSessionId').value.trim();
+    const format = document.getElementById('exportSessionFormat').value;
+
+    const result = await sessionsApiRequest('/' + sessionId + '/export?format=' + format, {
+      responseType: 'blob'
+    });
+
+    setLoading('exportSessionBtn', false);
+
+    if (result.success) {
+      // Create download link
+      const url = window.URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'session-' + sessionId + '.' + (format === 'json' ? 'json' : 'md');
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      showResponse('exportSessionResponse', { message: 'Session exported and downloaded!' }, false);
+      showToast('Export downloaded!', 'success');
+    } else {
+      showResponse('exportSessionResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleImportSession(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('importSessionResponse');
+    setLoading('importSessionBtn', true);
+
+    try {
+      const sessionData = JSON.parse(document.getElementById('importSessionData').value);
+      const result = await sessionsApiRequest('/import', {
+        method: 'POST',
+        body: JSON.stringify({ session_data: sessionData })
+      });
+
+      setLoading('importSessionBtn', false);
+
+      if (result.success) {
+        showResponse('importSessionResponse', result.data, false);
+        showToast('Session imported!', 'success');
+        document.getElementById('importSessionForm').reset();
+      } else {
+        showResponse('importSessionResponse', result.error, true);
+      }
+    } catch (err) {
+      setLoading('importSessionBtn', false);
+      showResponse('importSessionResponse', { message: 'Invalid JSON: ' + err.message }, true);
+    }
+    return false;
+  }
+
+  async function handleDeleteAllSessions(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('deleteAllSessionsResponse');
+
+    if (!confirm('Are you sure you want to delete ALL sessions? This cannot be undone!')) {
+      return false;
+    }
+
+    setLoading('deleteAllSessionsBtn', true);
+
+    const result = await sessionsApiRequest('?confirm=true', {
+      method: 'DELETE'
+    });
+
+    setLoading('deleteAllSessionsBtn', false);
+
+    if (result.success) {
+      showResponse('deleteAllSessionsResponse', result.data, false);
+      showToast('All sessions deleted!', 'success');
+      document.getElementById('deleteAllSessionsForm').reset();
+    } else {
+      showResponse('deleteAllSessionsResponse', result.error, true);
+    }
+    return false;
+  }
+
+  async function handleGetArchivedMessages(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('getArchivedMessagesResponse');
+    setLoading('getArchivedMessagesBtn', true);
+
+    const sessionId = document.getElementById('archivedMessagesSessionId').value.trim();
+    const result = await sessionsApiRequest('/' + sessionId + '/archives');
+
+    setLoading('getArchivedMessagesBtn', false);
+
+    if (result.success) {
+      showResponse('getArchivedMessagesResponse', result.data, false);
+    } else {
+      showResponse('getArchivedMessagesResponse', result.error, true);
+    }
+    return false;
+  }
+
+  function handleConnectSse() {
+    if (sseSource) {
+      showToast('Already connected to stream', 'error');
+      return;
+    }
+
+    if (!accessToken) {
+      showToast('Please sign in first', 'error');
+      return;
+    }
+
+    const sessionId = document.getElementById('sseSessionId').value.trim();
+    const eventsContainer = document.getElementById('sseEvents');
+    const statusEl = document.getElementById('sseStatus');
+
+    eventsContainer.classList.remove('hidden');
+
+    // SSE doesn't support custom headers, so we pass the token as a query parameter
+    let url = SESSIONS_API_BASE + '/stream?token=' + encodeURIComponent(accessToken);
+    if (sessionId) {
+      url += '&session_id=' + encodeURIComponent(sessionId);
+    }
+
+    try {
+      sseSource = new EventSource(url, {
+        withCredentials: true
+      });
+
+      sseSource.onopen = function() {
+        statusEl.textContent = 'Status: Connected';
+        statusEl.style.color = '#22c55e';
+        document.getElementById('connectSseBtn').disabled = true;
+        document.getElementById('disconnectSseBtn').disabled = false;
+        showToast('Connected to SSE stream', 'success');
+      };
+
+      sseSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          const eventEl = document.createElement('div');
+          eventEl.style.marginBottom = '8px';
+          eventEl.style.borderLeft = '2px solid #22d3ee';
+          eventEl.style.paddingLeft = '8px';
+          eventEl.innerHTML = '<span style="color: #71717a;">' + new Date().toLocaleTimeString() + '</span> ' +
+            '<span style="color: #22d3ee;">' + (data.type || 'message') + '</span>: ' +
+            JSON.stringify(data);
+          eventsContainer.appendChild(eventEl);
+          eventsContainer.scrollTop = eventsContainer.scrollHeight;
+        } catch (err) {
+          // Handle non-JSON messages (like heartbeats)
+          if (event.data !== ':heartbeat') {
+            const eventEl = document.createElement('div');
+            eventEl.style.marginBottom = '8px';
+            eventEl.style.color = '#71717a';
+            eventEl.textContent = new Date().toLocaleTimeString() + ' - ' + event.data;
+            eventsContainer.appendChild(eventEl);
+            eventsContainer.scrollTop = eventsContainer.scrollHeight;
+          }
+        }
+      };
+
+      sseSource.onerror = function() {
+        statusEl.textContent = 'Status: Error - Check authentication';
+        statusEl.style.color = '#ef4444';
+        handleDisconnectSse();
+        showToast('SSE connection error', 'error');
+      };
+    } catch (err) {
+      statusEl.textContent = 'Status: Failed - ' + err.message;
+      statusEl.style.color = '#ef4444';
+      showToast('Failed to connect: ' + err.message, 'error');
+    }
+  }
+
+  function handleDisconnectSse() {
+    if (sseSource) {
+      sseSource.close();
+      sseSource = null;
+    }
+
+    const statusEl = document.getElementById('sseStatus');
+    statusEl.textContent = 'Status: Disconnected';
+    statusEl.style.color = '#71717a';
+
+    document.getElementById('connectSseBtn').disabled = false;
+    document.getElementById('disconnectSseBtn').disabled = true;
+
+    showToast('Disconnected from stream', 'success');
+  }
+
+  // ── New Message Operations ───────────────────────────────────────────────────
+
+  async function handleSearchMessages(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('searchMessagesResponse');
+    setLoading('searchMessagesBtn', true);
+
+    const query = document.getElementById('searchQuery').value.trim();
+    const sessionId = document.getElementById('searchSessionId').value.trim();
+    const page = document.getElementById('searchPage').value;
+    const limit = document.getElementById('searchLimit').value;
+
+    let endpoint = '/search?q=' + encodeURIComponent(query) + '&page=' + page + '&limit=' + limit;
+    if (sessionId) {
+      endpoint += '&session_id=' + encodeURIComponent(sessionId);
+    }
+
+    const result = await sessionsApiRequest(endpoint);
+
+    setLoading('searchMessagesBtn', false);
+
+    if (result.success) {
+      showResponse('searchMessagesResponse', result.data, false);
+      showToast('Search completed!', 'success');
+    } else {
+      showResponse('searchMessagesResponse', result.error, true);
+      showToast(result.error.message || 'Search failed', 'error');
+    }
+    return false;
+  }
+
+  async function handleEditMessage(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('editMessageResponse');
+    setLoading('editMessageBtn', true);
+
+    const sessionId = document.getElementById('editMessageSessionId').value.trim();
+    const messageId = document.getElementById('editMessageId').value.trim();
+    const content = document.getElementById('editMessageContent').value;
+
+    if (!sessionId) {
+      setLoading('editMessageBtn', false);
+      showResponse('editMessageResponse', { message: 'Session ID is required' }, true);
+      showToast('Session ID is required', 'error');
+      return false;
+    }
+
+    if (!messageId) {
+      setLoading('editMessageBtn', false);
+      showResponse('editMessageResponse', { message: 'Message ID is required' }, true);
+      showToast('Message ID is required', 'error');
+      return false;
+    }
+
+    const result = await sessionsApiRequest('/' + sessionId + '/messages/' + messageId, {
+      method: 'PATCH',
+      body: JSON.stringify({ content })
+    });
+
+    setLoading('editMessageBtn', false);
+
+    if (result.success) {
+      showResponse('editMessageResponse', result.data, false);
+      showToast('Message edited!', 'success');
+      document.getElementById('editMessageForm').reset();
+    } else {
+      showResponse('editMessageResponse', result.error, true);
+      showToast(result.error.message || 'Edit failed', 'error');
+    }
+    return false;
+  }
+
+  async function handleDeleteMessage(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('deleteMessageResponse');
+
+    const sessionId = document.getElementById('deleteMessageSessionId').value.trim();
+    const messageId = document.getElementById('deleteMessageId').value.trim();
+
+    if (!sessionId) {
+      showResponse('deleteMessageResponse', { message: 'Session ID is required' }, true);
+      showToast('Session ID is required', 'error');
+      return false;
+    }
+
+    if (!messageId) {
+      showResponse('deleteMessageResponse', { message: 'Message ID is required' }, true);
+      showToast('Message ID is required', 'error');
+      return false;
+    }
+
+    if (!confirm('Are you sure you want to delete this message?')) {
+      return false;
+    }
+
+    setLoading('deleteMessageBtn', true);
+
+    const result = await sessionsApiRequest('/' + sessionId + '/messages/' + messageId, {
+      method: 'DELETE'
+    });
+
+    setLoading('deleteMessageBtn', false);
+
+    if (result.success) {
+      showResponse('deleteMessageResponse', result.data, false);
+      showToast('Message deleted!', 'success');
+      document.getElementById('deleteMessageForm').reset();
+    } else {
+      showResponse('deleteMessageResponse', result.error, true);
+      showToast(result.error.message || 'Delete failed', 'error');
+    }
+    return false;
+  }
+
+  async function handleAcknowledgeMessages(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('acknowledgeMessagesResponse');
+    setLoading('acknowledgeMessagesBtn', true);
+
+    const sessionId = document.getElementById('ackSessionId').value.trim();
+    const messageIdsStr = document.getElementById('ackMessageIds').value.trim();
+    const messageIds = messageIdsStr.split(',').map(id => id.trim()).filter(id => id);
+
+    const result = await sessionsApiRequest('/' + sessionId + '/messages/acknowledge', {
+      method: 'POST',
+      body: JSON.stringify({ message_ids: messageIds })
+    });
+
+    setLoading('acknowledgeMessagesBtn', false);
+
+    if (result.success) {
+      showResponse('acknowledgeMessagesResponse', result.data, false);
+      showToast('Messages acknowledged!', 'success');
+      document.getElementById('acknowledgeMessagesForm').reset();
+    } else {
+      showResponse('acknowledgeMessagesResponse', result.error, true);
+      showToast(result.error.message || 'Acknowledgment failed', 'error');
+    }
+    return false;
   }
 })();
