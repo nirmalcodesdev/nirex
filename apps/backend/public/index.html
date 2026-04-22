@@ -336,7 +336,7 @@
   <div class="container">
     <header>
       <h1>Nirex Backend API Tester</h1>
-      <p class="subtitle">Test authentication, device management, and chat session endpoints</p>
+      <p class="subtitle">Test authentication, device management, chat session, and usage analytics endpoints</p>
     </header>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -361,6 +361,7 @@
       <div class="nav-tab active" data-tab="public">Public Endpoints</div>
       <div class="nav-tab" data-tab="protected">Protected Endpoints</div>
       <div class="nav-tab" data-tab="sessions">Chat Sessions</div>
+      <div class="nav-tab" data-tab="usage">Usage &amp; Billing</div>
     </div>
 
     <div id="publicTab" class="tab-content">
@@ -722,6 +723,51 @@
       </div>
     </div>
 
+    <div id="usageTab" class="tab-content hidden">
+      <div class="grid">
+        <div class="card">
+          <h2>Usage Overview <span class="badge badge-protected">GET /usage/overview</span></h2>
+          <form id="usageOverviewForm" action="#">
+            <div class="form-group">
+              <label>Range</label>
+              <select id="usageOverviewRange" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="30d">30d</option>
+                <option value="90d">90d</option>
+                <option value="month_to_date">month_to_date</option>
+              </select>
+            </div>
+            <button type="submit" id="usageOverviewBtn"><span>Fetch Overview</span></button>
+          </form>
+          <div class="hint-box">Returns summary KPIs, chart points, cost breakdown, top projects, and current plan.</div>
+          <div id="usageOverviewResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Export Usage Report <span class="badge badge-protected">GET /usage/export</span></h2>
+          <form id="usageExportForm" action="#">
+            <div class="form-group">
+              <label>Range</label>
+              <select id="usageExportRange" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="30d">30d</option>
+                <option value="90d">90d</option>
+                <option value="month_to_date">month_to_date</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Format</label>
+              <select id="usageExportFormat" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="json">json</option>
+                <option value="csv">csv</option>
+              </select>
+            </div>
+            <button type="submit" id="usageExportBtn"><span>Export &amp; Download</span></button>
+          </form>
+          <div class="hint-box">Downloads report directly from backend response headers.</div>
+          <div id="usageExportResponse" class="response hidden"></div>
+        </div>
+      </div>
+    </div>
+
     <div style="height: 80px;"></div>
     </div>
   </div>
@@ -736,6 +782,8 @@
       <code style="color: #22d3ee;">/api/v1/auth</code>
       <span style="color: #71717a; margin-left: 10px;">Sessions:</span>
       <code style="color: #22d3ee;">/api/sessions</code>
+      <span style="color: #71717a; margin-left: 10px;">Usage:</span>
+      <code style="color: #22d3ee;">/api/usage</code>
     </div>
   </div>
 

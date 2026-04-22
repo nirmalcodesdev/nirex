@@ -10,6 +10,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import chatSessionRoutes from './modules/chat-session/chat-session.routes.js';
+import usageRoutes from './modules/usage/usage.routes.js';
 import { configurePassport } from './config/passport.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,6 +60,7 @@ app.get('/health', (_req, res) => {
 // ── Routes ────────────────────────────────────────────────────────────────
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/sessions', chatSessionRoutes);
+app.use('/api/usage', usageRoutes);
 
 // ── Static files (auth test interface) ────────────────────────────────────
 // Serve from project root public folder (works in both src and dist)

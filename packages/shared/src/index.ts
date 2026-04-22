@@ -269,6 +269,34 @@ export {
 } from './utils/index.js';
 
 // ============================================================================
+// Domain: Usage & Billing Analytics
+// ============================================================================
+
+export type {
+  UsageRange,
+  UsageExportFormat,
+  UsageSummary,
+  UsageChartPoint,
+  CostBreakdownKey,
+  UsageCostBreakdownItem,
+  UsageCostBreakdown,
+  UsageTopProject,
+  UsageCurrentPlan,
+  UsageOverviewResponse,
+  UsageOverviewQuery,
+  UsageExportQuery,
+} from './domain/usage/index.js';
+
+export {
+  usageRangeSchema,
+  usageExportFormatSchema,
+  usageOverviewQuerySchema,
+  usageExportQuerySchema,
+  type UsageOverviewQuerySchema,
+  type UsageExportQuerySchema,
+} from './domain/usage/index.js';
+
+// ============================================================================
 // Frontend-specific (kept for backward compatibility, consider moving to UI package)
 // ============================================================================
 
