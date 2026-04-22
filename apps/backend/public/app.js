@@ -3,6 +3,7 @@
 
   const API_BASE = '/api/v1/auth';
   const SESSIONS_API_BASE = '/api/sessions';
+  const USAGE_API_BASE = '/api/usage';
   let accessToken = localStorage.getItem('accessToken');
   let refreshToken = localStorage.getItem('refreshToken');
   let currentUser = null;
@@ -36,6 +37,7 @@
         document.getElementById('publicTab').classList.toggle('hidden', target !== 'public');
         document.getElementById('protectedTab').classList.toggle('hidden', target !== 'protected');
         document.getElementById('sessionsTab').classList.toggle('hidden', target !== 'sessions');
+        document.getElementById('usageTab').classList.toggle('hidden', target !== 'usage');
       });
     });
 
@@ -83,6 +85,8 @@
     document.getElementById('editMessageForm').addEventListener('submit', handleEditMessage);
     document.getElementById('deleteMessageForm').addEventListener('submit', handleDeleteMessage);
     document.getElementById('acknowledgeMessagesForm').addEventListener('submit', handleAcknowledgeMessages);
+    document.getElementById('usageOverviewForm').addEventListener('submit', handleUsageOverview);
+    document.getElementById('usageExportForm').addEventListener('submit', handleUsageExport);
 
     // Check for OAuth callback
     checkOAuthCallback();
@@ -798,6 +802,45 @@
     }
   }
 
+  async function usageApiRequest(endpoint, options = {}) {
+    const url = USAGE_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    if (accessToken) {
+      config.headers['Authorization'] = 'Bearer ' + accessToken;
+    }
+
+    try {
+      const response = await fetch(url, config);
+
+      if (options.responseType === 'blob') {
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          return { success: false, error: { status: response.status, ...data } };
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get('content-disposition') || '';
+        const filenameMatch = disposition.match(/filename="([^"]+)"/i);
+        const filename = filenameMatch && filenameMatch[1] ? filenameMatch[1] : 'usage-report';
+
+        return { success: true, blob, filename: filename };
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
   async function handleSessionStats() {
     hideResponse('sessionStatsResponse');
     setLoading('sessionStatsBtn', true);
@@ -1377,6 +1420,61 @@
     } else {
       showResponse('acknowledgeMessagesResponse', result.error, true);
       showToast(result.error.message || 'Acknowledgment failed', 'error');
+    }
+    return false;
+  }
+
+  async function handleUsageOverview(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('usageOverviewResponse');
+    setLoading('usageOverviewBtn', true);
+
+    const range = document.getElementById('usageOverviewRange').value;
+    const result = await usageApiRequest('/overview?range=' + encodeURIComponent(range));
+
+    setLoading('usageOverviewBtn', false);
+
+    if (result.success) {
+      showResponse('usageOverviewResponse', result.data, false);
+      showToast('Usage overview loaded', 'success');
+    } else {
+      showResponse('usageOverviewResponse', result.error, true);
+      showToast(result.error.message || 'Failed to load usage overview', 'error');
+    }
+    return false;
+  }
+
+  async function handleUsageExport(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('usageExportResponse');
+    setLoading('usageExportBtn', true);
+
+    const range = document.getElementById('usageExportRange').value;
+    const format = document.getElementById('usageExportFormat').value;
+    const result = await usageApiRequest(
+      '/export?range=' + encodeURIComponent(range) + '&format=' + encodeURIComponent(format),
+      { responseType: 'blob' }
+    );
+
+    setLoading('usageExportBtn', false);
+
+    if (result.success) {
+      const url = window.URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || ('usage-report.' + format);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      showResponse('usageExportResponse', { message: 'Usage report exported and downloaded.' }, false);
+      showToast('Usage report downloaded', 'success');
+    } else {
+      showResponse('usageExportResponse', result.error, true);
+      showToast(result.error.message || 'Failed to export usage report', 'error');
     }
     return false;
   }
