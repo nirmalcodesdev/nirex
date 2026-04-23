@@ -68,6 +68,41 @@ const envSchema = z.object({
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((s) => s.trim())),
 
+  // Billing / Stripe
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_API_VERSION: z.string().default('2025-04-30.basil'),
+  STRIPE_BILLING_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  STRIPE_PRICE_PRO_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PRO_YEARLY: z.string().optional(),
+  STRIPE_AUTOMATIC_TAX_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v.toLowerCase() === 'true'),
+  STRIPE_WEBHOOK_TOLERANCE_SECONDS: z
+    .string()
+    .default('300')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_WEBHOOK_STALE_RETRY_SECONDS: z
+    .string()
+    .default('900')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_SYNC_MIN_INTERVAL_SECONDS: z
+    .string()
+    .default('120')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_WEBHOOK_RATE_LIMIT_PER_MINUTE: z
+    .string()
+    .default('600')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_EMAIL_NOTIFICATIONS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() === 'true'),
+  BILLING_DEFAULT_SUCCESS_URL: z.string().url().optional(),
+  BILLING_DEFAULT_CANCEL_URL: z.string().url().optional(),
+
   // Rate limiting
   RATE_LIMIT_WINDOW_MS: z
     .string()

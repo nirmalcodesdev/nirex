@@ -336,7 +336,7 @@
   <div class="container">
     <header>
       <h1>Nirex Backend API Tester</h1>
-      <p class="subtitle">Test authentication, device management, chat session, and usage analytics endpoints</p>
+      <p class="subtitle">Test authentication, device management, chat session, usage analytics, and billing endpoints</p>
     </header>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -765,6 +765,93 @@
           <div class="hint-box">Downloads report directly from backend response headers.</div>
           <div id="usageExportResponse" class="response hidden"></div>
         </div>
+
+        <div class="card">
+          <h2>Billing Overview <span class="badge badge-protected">GET /billing/overview</span></h2>
+          <button type="button" id="billingOverviewBtn">Fetch Billing Overview</button>
+          <div class="hint-box">Returns current plan, subscription status, payment method, invoices, and billing KPIs. Stripe sync is throttled server-side, so rapid repeat calls can return cached snapshots.</div>
+          <div id="billingOverviewResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>List Billing Invoices <span class="badge badge-protected">GET /billing/invoices</span></h2>
+          <form id="billingInvoicesForm" action="#">
+            <div class="form-group"><label>Limit</label><input type="number" id="billingInvoicesLimit" value="20" min="1" max="100"></div>
+            <button type="submit" id="billingInvoicesBtn"><span>Fetch Invoices</span></button>
+          </form>
+          <div class="hint-box">Invoice sync is rate-limited server-side for reliability. Use webhooks for real-time state.</div>
+          <div id="billingInvoicesResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Create Checkout Session <span class="badge badge-protected">POST /billing/checkout-session</span></h2>
+          <form id="billingCheckoutForm" action="#">
+            <div class="form-group">
+              <label>Plan</label>
+              <select id="billingCheckoutPlan" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="pro">pro</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Billing Cycle</label>
+              <select id="billingCheckoutCycle" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="month">month</option>
+                <option value="year">year</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Success URL (optional)</label><input type="url" id="billingCheckoutSuccessUrl" placeholder="https://your-app/main/billing?checkout=success"></div>
+            <div class="form-group"><label>Cancel URL (optional)</label><input type="url" id="billingCheckoutCancelUrl" placeholder="https://your-app/main/billing?checkout=cancelled"></div>
+            <button type="submit" id="billingCheckoutBtn"><span>Create Checkout Session</span></button>
+          </form>
+          <div class="hint-box">Only checkout-enabled plans are shown. If successful, the tester opens Stripe Checkout URL in a new tab.</div>
+          <div id="billingCheckoutResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Create Portal Session <span class="badge badge-protected">POST /billing/portal-session</span></h2>
+          <form id="billingPortalForm" action="#">
+            <div class="form-group"><label>Return URL (optional)</label><input type="url" id="billingPortalReturnUrl" placeholder="https://your-app/main/billing"></div>
+            <button type="submit" id="billingPortalBtn"><span>Create Portal Session</span></button>
+          </form>
+          <div class="hint-box">Return URL origin must be allowlisted by backend config. If successful, the tester opens Stripe Billing Portal URL in a new tab.</div>
+          <div id="billingPortalResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Cancel Subscription <span class="badge badge-protected">POST /billing/subscription/cancel</span></h2>
+          <form id="billingCancelForm" action="#">
+            <div class="form-group">
+              <label><input type="checkbox" id="billingCancelAtPeriodEnd" checked> Cancel at period end (recommended)</label>
+            </div>
+            <button type="submit" id="billingCancelBtn" class="btn-danger"><span>Cancel Subscription</span></button>
+          </form>
+          <div id="billingCancelResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Resume Subscription <span class="badge badge-protected">POST /billing/subscription/resume</span></h2>
+          <button type="button" id="billingResumeBtn">Resume Subscription</button>
+          <div class="hint-box">Resumes paused subscriptions or removes pending cancellation.</div>
+          <div id="billingResumeResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Webhook Probe <span class="badge badge-public">POST /billing/webhooks/stripe</span></h2>
+          <form id="billingWebhookProbeForm" action="#">
+            <div class="form-group"><label>Stripe-Signature (optional)</label><input type="text" id="billingWebhookSignature" placeholder="t=...,v1=..."></div>
+            <div class="form-group">
+              <label>Content-Type</label>
+              <select id="billingWebhookContentType" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="application/json">application/json</option>
+                <option value="text/plain">text/plain</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Payload</label><textarea id="billingWebhookPayload" rows="4" placeholder='{"id":"evt_test","type":"invoice.paid"}'>{"id":"evt_test","type":"invoice.paid"}</textarea></div>
+            <button type="submit" id="billingWebhookProbeBtn"><span>Send Webhook Probe</span></button>
+          </form>
+          <div class="hint-box">This endpoint requires raw application/json body and a valid Stripe signature in production.</div>
+          <div id="billingWebhookProbeResponse" class="response hidden"></div>
+        </div>
       </div>
     </div>
 
@@ -784,6 +871,8 @@
       <code style="color: #22d3ee;">/api/sessions</code>
       <span style="color: #71717a; margin-left: 10px;">Usage:</span>
       <code style="color: #22d3ee;">/api/usage</code>
+      <span style="color: #71717a; margin-left: 10px;">Billing:</span>
+      <code style="color: #22d3ee;">/api/billing</code>
     </div>
   </div>
 

@@ -11,6 +11,7 @@ import { requestLogger } from './middleware/requestLogger.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import chatSessionRoutes from './modules/chat-session/chat-session.routes.js';
 import usageRoutes from './modules/usage/usage.routes.js';
+import billingRoutes, { billingWebhookRouter } from './modules/billing/billing.routes.js';
 import { configurePassport } from './config/passport.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,10 @@ app.use(
   }),
 );
 
+// Stripe webhook route must be mounted before express.json() so signature
+// verification can access the raw request body.
+app.use('/api/billing/webhooks', billingWebhookRouter);
+
 // ── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -61,6 +66,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/sessions', chatSessionRoutes);
 app.use('/api/usage', usageRoutes);
+app.use('/api/billing', billingRoutes);
 
 // ── Static files (auth test interface) ────────────────────────────────────
 // Serve from project root public folder (works in both src and dist)
