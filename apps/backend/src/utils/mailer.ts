@@ -8,6 +8,23 @@ interface SendEmailOptions {
   html: string;
 }
 
+interface BillingEmailBase {
+  to: string;
+  customerName?: string | null;
+  planName?: string | null;
+  billingPortalUrl?: string | null;
+}
+
+interface BillingPaymentEmail extends BillingEmailBase {
+  amountCents: number;
+  currency: string;
+  invoiceNumber?: string | null;
+  invoicePdfUrl?: string | null;
+  hostedInvoiceUrl?: string | null;
+  paidAt?: Date | null;
+  dueDate?: Date | null;
+}
+
 let _transporter: Transporter | null = null;
 let _etherealAccount: { user: string; pass: string } | null = null;
 
@@ -78,6 +95,159 @@ async function sendEmail(options: SendEmailOptions): Promise<void> {
     });
     throw err;
   }
+}
+
+function escapeHtml(input: string | null | undefined): string {
+  if (!input) return '';
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatMoney(amountCents: number, currency: string): string {
+  const safeCurrency = (currency || 'usd').toUpperCase();
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: safeCurrency,
+  }).format(amountCents / 100);
+}
+
+function formatDate(date: Date | null | undefined): string {
+  if (!date) return 'N/A';
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  }).format(date);
+}
+
+function billingShell(content: string): string {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:0 auto;padding:28px 16px;color:#111827;">
+      ${content}
+      <p style="margin-top:22px;font-size:12px;color:#6b7280;">
+        This is an automated billing message from Nirex.
+      </p>
+    </body>
+    </html>
+  `;
+}
+
+function billingPortalLink(url: string | null | undefined): string {
+  if (!url) return '';
+  const safeUrl = escapeHtml(url);
+  return `
+    <p style="margin-top:18px;">
+      <a href="${safeUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">
+        Open Billing Portal
+      </a>
+    </p>
+  `;
+}
+
+export async function sendBillingCheckoutCompletedEmail(
+  input: BillingEmailBase,
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your new plan';
+  await sendEmail({
+    to: input.to,
+    subject: `Subscription activated: ${planName}`,
+    html: billingShell(`
+      <h2 style="margin-top:0;">Subscription confirmed</h2>
+      <p>Hi ${name},</p>
+      <p>Your checkout completed successfully and <strong>${planName}</strong> is now active.</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `),
+  });
+}
+
+export async function sendBillingPaymentSucceededEmail(
+  input: BillingPaymentEmail,
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your current plan';
+  const invoiceNumber = escapeHtml(input.invoiceNumber) || 'N/A';
+  const amount = formatMoney(input.amountCents, input.currency);
+  const paidAt = formatDate(input.paidAt);
+  const hostedInvoiceUrl = input.hostedInvoiceUrl ? escapeHtml(input.hostedInvoiceUrl) : '';
+  const invoicePdfUrl = input.invoicePdfUrl ? escapeHtml(input.invoicePdfUrl) : '';
+
+  await sendEmail({
+    to: input.to,
+    subject: `Payment received: ${amount}`,
+    html: billingShell(`
+      <h2 style="margin-top:0;">Payment received</h2>
+      <p>Hi ${name},</p>
+      <p>We received your payment for <strong>${planName}</strong>.</p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px;">
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Amount</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${amount}</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Invoice</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${invoiceNumber}</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Paid on</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${paidAt}</td></tr>
+      </table>
+      ${hostedInvoiceUrl ? `<p style="margin-top:14px;"><a href="${hostedInvoiceUrl}">View invoice</a></p>` : ''}
+      ${invoicePdfUrl ? `<p style="margin-top:8px;"><a href="${invoicePdfUrl}">Download PDF receipt</a></p>` : ''}
+      ${billingPortalLink(input.billingPortalUrl)}
+    `),
+  });
+}
+
+export async function sendBillingPaymentFailedEmail(
+  input: BillingPaymentEmail,
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your current plan';
+  const invoiceNumber = escapeHtml(input.invoiceNumber) || 'N/A';
+  const amount = formatMoney(input.amountCents, input.currency);
+  const dueDate = formatDate(input.dueDate);
+  const hostedInvoiceUrl = input.hostedInvoiceUrl ? escapeHtml(input.hostedInvoiceUrl) : '';
+
+  await sendEmail({
+    to: input.to,
+    subject: `Payment failed: ${amount}`,
+    html: billingShell(`
+      <h2 style="margin-top:0;">Payment failed</h2>
+      <p>Hi ${name},</p>
+      <p>We could not process your payment for <strong>${planName}</strong>.</p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px;">
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Amount due</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${amount}</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Invoice</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${invoiceNumber}</td></tr>
+        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Due date</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${dueDate}</td></tr>
+      </table>
+      ${hostedInvoiceUrl ? `<p style="margin-top:14px;"><a href="${hostedInvoiceUrl}">View invoice</a></p>` : ''}
+      <p style="margin-top:8px;">Please update your payment method to avoid service interruption.</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `),
+  });
+}
+
+export async function sendBillingSubscriptionStateEmail(
+  input: BillingEmailBase & {
+    statusLabel: string;
+    detail: string;
+  },
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  const statusLabel = escapeHtml(input.statusLabel);
+  const detail = escapeHtml(input.detail);
+
+  await sendEmail({
+    to: input.to,
+    subject: `Subscription update: ${statusLabel}`,
+    html: billingShell(`
+      <h2 style="margin-top:0;">Subscription update</h2>
+      <p>Hi ${name},</p>
+      <p><strong>${planName}</strong> status changed to <strong>${statusLabel}</strong>.</p>
+      <p>${detail}</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `),
+  });
 }
 
 export async function sendVerificationEmail(to: string, rawToken: string): Promise<void> {

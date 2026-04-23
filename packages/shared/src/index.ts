@@ -297,6 +297,54 @@ export {
 } from './domain/usage/index.js';
 
 // ============================================================================
+// Domain: Billing
+// ============================================================================
+
+export type {
+  BillingCycle,
+  BillingPlanId,
+  BillingSubscriptionStatus,
+  BillingInvoiceStatus,
+  BillingPlanPrice,
+  BillingPlan,
+  BillingOverviewSubscription,
+  BillingOverviewPaymentMethod,
+  BillingInvoiceItem,
+  BillingOverviewUsage,
+  BillingOverviewKpis,
+  BillingOverviewResponse,
+  BillingInvoicesQuery,
+  CreateCheckoutSessionRequest,
+  CreateCheckoutSessionResponse,
+  CreatePortalSessionRequest,
+  CreatePortalSessionResponse,
+  CancelSubscriptionRequest,
+  CancelSubscriptionResponse,
+  ResumeSubscriptionResponse,
+  StripeWebhookResponse,
+} from './domain/billing/index.js';
+
+export {
+  BILLING_PLAN_CATALOG,
+  DEFAULT_BILLING_CURRENCY,
+  PRO_MONTHLY_DEFAULT_CENTS,
+  PRO_YEARLY_DEFAULT_CENTS,
+  billingCycleSchema,
+  billingPlanIdSchema,
+  checkoutPlanIdSchema,
+  billingInvoicesQuerySchema,
+  createCheckoutSessionSchema,
+  createPortalSessionSchema,
+  cancelSubscriptionSchema,
+  type BillingInvoicesQuerySchema,
+  type CreateCheckoutSessionSchema,
+  type CreatePortalSessionSchema,
+  type CancelSubscriptionSchema,
+  type BillingCatalogPlanId,
+  type BillingPlanCatalogEntry,
+} from './domain/billing/index.js';
+
+// ============================================================================
 // Frontend-specific (kept for backward compatibility, consider moving to UI package)
 // ============================================================================
 

@@ -4,6 +4,7 @@
   const API_BASE = '/api/v1/auth';
   const SESSIONS_API_BASE = '/api/sessions';
   const USAGE_API_BASE = '/api/usage';
+  const BILLING_API_BASE = '/api/billing';
   let accessToken = localStorage.getItem('accessToken');
   let refreshToken = localStorage.getItem('refreshToken');
   let currentUser = null;
@@ -87,6 +88,13 @@
     document.getElementById('acknowledgeMessagesForm').addEventListener('submit', handleAcknowledgeMessages);
     document.getElementById('usageOverviewForm').addEventListener('submit', handleUsageOverview);
     document.getElementById('usageExportForm').addEventListener('submit', handleUsageExport);
+    document.getElementById('billingOverviewBtn').addEventListener('click', handleBillingOverview);
+    document.getElementById('billingInvoicesForm').addEventListener('submit', handleBillingInvoices);
+    document.getElementById('billingCheckoutForm').addEventListener('submit', handleBillingCheckout);
+    document.getElementById('billingPortalForm').addEventListener('submit', handleBillingPortal);
+    document.getElementById('billingCancelForm').addEventListener('submit', handleBillingCancelSubscription);
+    document.getElementById('billingResumeBtn').addEventListener('click', handleBillingResumeSubscription);
+    document.getElementById('billingWebhookProbeForm').addEventListener('submit', handleBillingWebhookProbe);
 
     // Check for OAuth callback
     checkOAuthCallback();
@@ -841,6 +849,31 @@
     }
   }
 
+  async function billingApiRequest(endpoint, options = {}) {
+    const url = BILLING_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    if (accessToken) {
+      config.headers['Authorization'] = 'Bearer ' + accessToken;
+    }
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
   async function handleSessionStats() {
     hideResponse('sessionStatsResponse');
     setLoading('sessionStatsBtn', true);
@@ -1477,5 +1510,221 @@
       showToast(result.error.message || 'Failed to export usage report', 'error');
     }
     return false;
+  }
+
+  function getBillingErrorMessage(error, fallbackMessage) {
+    const code = error && error.code;
+    if (code === 'INVALID_BILLING_URL') {
+      return 'URL origin is not allowlisted for billing redirects';
+    }
+    if (code === 'ACTIVE_SUBSCRIPTION_EXISTS') {
+      return 'An active subscription already exists. Use the billing portal';
+    }
+    if (code === 'PLAN_NOT_CHECKOUT_ENABLED') {
+      return 'Selected plan is not available for direct checkout';
+    }
+    if (code === 'BILLING_NOT_CONFIGURED') {
+      return 'Billing is not configured in this environment';
+    }
+    if (code === 'INVALID_STRIPE_WEBHOOK_BODY') {
+      return 'Webhook body must be raw application/json';
+    }
+    if (code === 'INVALID_STRIPE_SIGNATURE') {
+      return 'Invalid Stripe signature for webhook payload';
+    }
+    return (error && error.message) || fallbackMessage;
+  }
+
+  async function handleBillingOverview() {
+    hideResponse('billingOverviewResponse');
+    setLoading('billingOverviewBtn', true);
+
+    const result = await billingApiRequest('/overview');
+
+    setLoading('billingOverviewBtn', false);
+
+    if (result.success) {
+      showResponse('billingOverviewResponse', result.data, false);
+      showToast('Billing overview loaded', 'success');
+    } else {
+      showResponse('billingOverviewResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to load billing overview'), 'error');
+    }
+  }
+
+  async function handleBillingInvoices(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('billingInvoicesResponse');
+    setLoading('billingInvoicesBtn', true);
+
+    const limit = document.getElementById('billingInvoicesLimit').value || '20';
+    const result = await billingApiRequest('/invoices?limit=' + encodeURIComponent(limit));
+
+    setLoading('billingInvoicesBtn', false);
+
+    if (result.success) {
+      showResponse('billingInvoicesResponse', result.data, false);
+      showToast('Billing invoices loaded', 'success');
+    } else {
+      showResponse('billingInvoicesResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to load billing invoices'), 'error');
+    }
+    return false;
+  }
+
+  async function handleBillingCheckout(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('billingCheckoutResponse');
+    setLoading('billingCheckoutBtn', true);
+
+    const body = {
+      planId: document.getElementById('billingCheckoutPlan').value,
+      billingCycle: document.getElementById('billingCheckoutCycle').value
+    };
+
+    const successUrl = document.getElementById('billingCheckoutSuccessUrl').value.trim();
+    const cancelUrl = document.getElementById('billingCheckoutCancelUrl').value.trim();
+    if (successUrl) body.successUrl = successUrl;
+    if (cancelUrl) body.cancelUrl = cancelUrl;
+
+    const result = await billingApiRequest('/checkout-session', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('billingCheckoutBtn', false);
+
+    if (result.success) {
+      const checkoutUrl = result.data && result.data.data && result.data.data.checkoutUrl;
+      showResponse('billingCheckoutResponse', result.data, false);
+      if (checkoutUrl) {
+        window.open(checkoutUrl, '_blank', 'noopener,noreferrer');
+      }
+      showToast('Checkout session created', 'success');
+    } else {
+      showResponse('billingCheckoutResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to create checkout session'), 'error');
+    }
+    return false;
+  }
+
+  async function handleBillingPortal(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('billingPortalResponse');
+    setLoading('billingPortalBtn', true);
+
+    const returnUrl = document.getElementById('billingPortalReturnUrl').value.trim();
+    const body = {};
+    if (returnUrl) body.returnUrl = returnUrl;
+
+    const result = await billingApiRequest('/portal-session', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('billingPortalBtn', false);
+
+    if (result.success) {
+      const portalUrl = result.data && result.data.data && result.data.data.portalUrl;
+      showResponse('billingPortalResponse', result.data, false);
+      if (portalUrl) {
+        window.open(portalUrl, '_blank', 'noopener,noreferrer');
+      }
+      showToast('Portal session created', 'success');
+    } else {
+      showResponse('billingPortalResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to create portal session'), 'error');
+    }
+    return false;
+  }
+
+  async function handleBillingCancelSubscription(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('billingCancelResponse');
+    setLoading('billingCancelBtn', true);
+
+    const atPeriodEnd = document.getElementById('billingCancelAtPeriodEnd').checked;
+    const result = await billingApiRequest('/subscription/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ atPeriodEnd: atPeriodEnd })
+    });
+
+    setLoading('billingCancelBtn', false);
+
+    if (result.success) {
+      showResponse('billingCancelResponse', result.data, false);
+      showToast('Subscription cancellation updated', 'success');
+    } else {
+      showResponse('billingCancelResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to cancel subscription'), 'error');
+    }
+    return false;
+  }
+
+  async function handleBillingResumeSubscription() {
+    hideResponse('billingResumeResponse');
+    setLoading('billingResumeBtn', true);
+
+    const result = await billingApiRequest('/subscription/resume', {
+      method: 'POST'
+    });
+
+    setLoading('billingResumeBtn', false);
+
+    if (result.success) {
+      showResponse('billingResumeResponse', result.data, false);
+      showToast('Subscription resumed', 'success');
+    } else {
+      showResponse('billingResumeResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to resume subscription'), 'error');
+    }
+  }
+
+  async function handleBillingWebhookProbe(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('billingWebhookProbeResponse');
+    setLoading('billingWebhookProbeBtn', true);
+
+    const signature = document.getElementById('billingWebhookSignature').value.trim();
+    const contentType = document.getElementById('billingWebhookContentType').value;
+    const payload = document.getElementById('billingWebhookPayload').value;
+    const headers = {
+      'Content-Type': contentType
+    };
+    if (signature) {
+      headers['Stripe-Signature'] = signature;
+    }
+
+    try {
+      const response = await fetch('/api/billing/webhooks/stripe', {
+        method: 'POST',
+        headers: headers,
+        body: payload
+      });
+      const data = await response.json().catch(() => null);
+      setLoading('billingWebhookProbeBtn', false);
+
+      if (!response.ok) {
+        const error = { status: response.status, ...(data || {}) };
+        showResponse('billingWebhookProbeResponse', error, true);
+        showToast(getBillingErrorMessage(error, 'Webhook probe failed'), 'error');
+        return false;
+      }
+
+      showResponse('billingWebhookProbeResponse', data, false);
+      showToast('Webhook probe accepted', 'success');
+      return false;
+    } catch (_error) {
+      setLoading('billingWebhookProbeBtn', false);
+      const networkError = { message: 'Network error. Is server running?' };
+      showResponse('billingWebhookProbeResponse', networkError, true);
+      showToast(networkError.message, 'error');
+      return false;
+    }
   }
 })();

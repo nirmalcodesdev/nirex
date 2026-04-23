@@ -114,6 +114,22 @@ export const uploadLimiter = rateLimit({
   skip: () => env.NODE_ENV === 'test',
 });
 
+/** Limiter for public Stripe webhook endpoint to protect availability. */
+export const billingWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: env.BILLING_WEBHOOK_RATE_LIMIT_PER_MINUTE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createRedisStore('billing_webhook'),
+  keyGenerator: (req) => req.ip || 'unknown',
+  message: {
+    status: 'fail',
+    code: 'RATE_LIMIT',
+    message: 'Too many webhook requests.',
+  },
+  skip: () => env.NODE_ENV === 'test',
+});
+
 /** Rate limiter for SSE connections to prevent connection exhaustion. */
 export const sseConnectionLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
