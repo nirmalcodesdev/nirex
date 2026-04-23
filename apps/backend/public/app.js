@@ -2,11 +2,13 @@
   'use strict';
 
   const API_BASE = '/api/v1/auth';
+  const API_KEYS_API_BASE = '/api/v1/api-keys';
   const SESSIONS_API_BASE = '/api/sessions';
   const USAGE_API_BASE = '/api/usage';
   const BILLING_API_BASE = '/api/billing';
   let accessToken = localStorage.getItem('accessToken');
   let refreshToken = localStorage.getItem('refreshToken');
+  let activeApiKey = localStorage.getItem('activeApiKey') || '';
   let currentUser = null;
 
   function generateClientMessageId() {
@@ -26,6 +28,10 @@
   function init() {
     console.log('Auth Test Interface Loaded');
     attachEventListeners();
+    const activeApiKeyInput = document.getElementById('activeApiKeyInput');
+    if (activeApiKeyInput && activeApiKey) {
+      activeApiKeyInput.value = activeApiKey;
+    }
     updateAuthStatus();
   }
 
@@ -95,6 +101,13 @@
     document.getElementById('billingCancelForm').addEventListener('submit', handleBillingCancelSubscription);
     document.getElementById('billingResumeBtn').addEventListener('click', handleBillingResumeSubscription);
     document.getElementById('billingWebhookProbeForm').addEventListener('submit', handleBillingWebhookProbe);
+    document.getElementById('createApiKeyForm').addEventListener('submit', handleCreateApiKey);
+    document.getElementById('listApiKeysBtn').addEventListener('click', handleListApiKeys);
+    document.getElementById('rotateApiKeyForm').addEventListener('submit', handleRotateApiKey);
+    document.getElementById('revokeApiKeyForm').addEventListener('submit', handleRevokeApiKey);
+    document.getElementById('setActiveApiKeyBtn').addEventListener('click', handleSetActiveApiKey);
+    document.getElementById('clearActiveApiKeyBtn').addEventListener('click', handleClearActiveApiKey);
+    document.getElementById('apiKeySelfBtn').addEventListener('click', handleApiKeySelf);
 
     // Check for OAuth callback
     checkOAuthCallback();
@@ -133,12 +146,15 @@
     if (accessToken) {
       indicator.classList.add('authenticated');
       statusText.textContent = currentUser ? 'Authenticated as ' + currentUser.email : 'Authenticated';
+      if (activeApiKey) {
+        statusText.textContent += ' | API key active for sessions/usage';
+      }
       authStatus.innerHTML = '<p style="color: #22c55e;"> Logged in' + (currentUser ? ' as <strong>' + currentUser.email + '</strong>' : '') + '</p>';
       tokenInfo.classList.remove('hidden');
       document.getElementById('accessTokenDisplay').textContent = accessToken;
     } else {
       indicator.classList.remove('authenticated');
-      statusText.textContent = 'Not authenticated';
+      statusText.textContent = activeApiKey ? 'Not authenticated | API key active for sessions/usage' : 'Not authenticated';
       authStatus.innerHTML = '<p style="color: #71717a;">Not authenticated</p>';
       tokenInfo.classList.add('hidden');
     }
@@ -510,6 +526,183 @@
     showToast('Session cleared', 'success');
   }
 
+  async function handleCreateApiKey(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('apiKeysResponse');
+    setLoading('createApiKeyBtn', true);
+
+    const name = document.getElementById('apiKeyName').value.trim();
+    const scopes = parseScopes(document.getElementById('apiKeyScopes').value);
+    const expiresAt = document.getElementById('apiKeyExpiresAt').value.trim();
+    const body = { name: name, scopes: scopes };
+    if (expiresAt) {
+      body.expiresAt = expiresAt;
+    }
+
+    const result = await apiKeysApiRequest('', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('createApiKeyBtn', false);
+
+    if (result.success) {
+      const key = result.data && result.data.data && result.data.data.apiKey;
+      if (key) {
+        document.getElementById('activeApiKeyInput').value = key;
+      }
+      showResponse('apiKeysResponse', result.data, false);
+      showToast('API key created. Save it now.', 'success');
+      document.getElementById('createApiKeyForm').reset();
+    } else {
+      showResponse('apiKeysResponse', result.error, true);
+      showToast(result.error.message || 'API key creation failed', 'error');
+    }
+    return false;
+  }
+
+  async function handleListApiKeys() {
+    hideResponse('apiKeysResponse');
+    setLoading('listApiKeysBtn', true);
+
+    const result = await apiKeysApiRequest('');
+
+    setLoading('listApiKeysBtn', false);
+
+    if (result.success) {
+      showResponse('apiKeysResponse', result.data, false);
+      showToast('API keys loaded', 'success');
+    } else {
+      showResponse('apiKeysResponse', result.error, true);
+      showToast(result.error.message || 'Failed to list API keys', 'error');
+    }
+  }
+
+  async function handleRotateApiKey(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('apiKeysResponse');
+    setLoading('rotateApiKeyBtn', true);
+
+    const keyId = document.getElementById('rotateApiKeyId').value.trim();
+    if (!keyId) {
+      setLoading('rotateApiKeyBtn', false);
+      showResponse('apiKeysResponse', { message: 'Rotate Key ID is required' }, true);
+      showToast('Rotate Key ID is required', 'error');
+      return false;
+    }
+
+    const result = await apiKeysApiRequest('/' + encodeURIComponent(keyId) + '/rotate', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+
+    setLoading('rotateApiKeyBtn', false);
+
+    if (result.success) {
+      const key = result.data && result.data.data && result.data.data.apiKey;
+      if (key) {
+        document.getElementById('activeApiKeyInput').value = key;
+      }
+      showResponse('apiKeysResponse', result.data, false);
+      showToast('API key rotated', 'success');
+      document.getElementById('rotateApiKeyForm').reset();
+    } else {
+      showResponse('apiKeysResponse', result.error, true);
+      showToast(result.error.message || 'Failed to rotate API key', 'error');
+    }
+    return false;
+  }
+
+  async function handleRevokeApiKey(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('apiKeysResponse');
+    setLoading('revokeApiKeyBtn', true);
+
+    const keyId = document.getElementById('revokeApiKeyId').value.trim();
+    const reason = document.getElementById('revokeApiKeyReason').value.trim();
+    if (!keyId) {
+      setLoading('revokeApiKeyBtn', false);
+      showResponse('apiKeysResponse', { message: 'Revoke Key ID is required' }, true);
+      showToast('Revoke Key ID is required', 'error');
+      return false;
+    }
+
+    const body = {};
+    if (reason) {
+      body.reason = reason;
+    }
+
+    const result = await apiKeysApiRequest('/' + encodeURIComponent(keyId), {
+      method: 'DELETE',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('revokeApiKeyBtn', false);
+
+    if (result.success) {
+      showResponse('apiKeysResponse', result.data, false);
+      showToast('API key revoked', 'success');
+      document.getElementById('revokeApiKeyForm').reset();
+    } else {
+      showResponse('apiKeysResponse', result.error, true);
+      showToast(result.error.message || 'Failed to revoke API key', 'error');
+    }
+    return false;
+  }
+
+  function handleSetActiveApiKey() {
+    const value = document.getElementById('activeApiKeyInput').value.trim();
+    activeApiKey = value;
+    if (activeApiKey) {
+      localStorage.setItem('activeApiKey', activeApiKey);
+      showToast('Active API key set for sessions/usage', 'success');
+    } else {
+      localStorage.removeItem('activeApiKey');
+      showToast('Active API key is empty', 'error');
+    }
+    updateAuthStatus();
+  }
+
+  function handleClearActiveApiKey() {
+    activeApiKey = '';
+    localStorage.removeItem('activeApiKey');
+    document.getElementById('activeApiKeyInput').value = '';
+    updateAuthStatus();
+    showToast('Active API key cleared', 'success');
+  }
+
+  async function handleApiKeySelf() {
+    hideResponse('apiKeysResponse');
+    setLoading('apiKeySelfBtn', true);
+
+    const value = document.getElementById('activeApiKeyInput').value.trim();
+    if (value && value !== activeApiKey) {
+      activeApiKey = value;
+    }
+
+    if (!activeApiKey) {
+      setLoading('apiKeySelfBtn', false);
+      showResponse('apiKeysResponse', { message: 'Set an API key first' }, true);
+      showToast('Set an API key first', 'error');
+      return;
+    }
+
+    const result = await apiKeysApiRequest('/self', { authMode: 'api-key' });
+
+    setLoading('apiKeySelfBtn', false);
+
+    if (result.success) {
+      showResponse('apiKeysResponse', result.data, false);
+      showToast('API key is valid', 'success');
+    } else {
+      showResponse('apiKeysResponse', result.error, true);
+      showToast(result.error.message || 'API key self-check failed', 'error');
+    }
+  }
+
   // Device Management
   let selectedDevices = new Set();
   let currentDevices = [];
@@ -782,9 +975,7 @@
     };
 
     if (options.body) config.body = options.body;
-    if (accessToken) {
-      config.headers['Authorization'] = 'Bearer ' + accessToken;
-    }
+    applyAuthHeaders(config, options.authMode || 'jwt-or-api-key');
 
     try {
       const response = await fetch(url, config);
@@ -818,9 +1009,7 @@
     };
 
     if (options.body) config.body = options.body;
-    if (accessToken) {
-      config.headers['Authorization'] = 'Bearer ' + accessToken;
-    }
+    applyAuthHeaders(config, options.authMode || 'jwt-or-api-key');
 
     try {
       const response = await fetch(url, config);
@@ -857,9 +1046,7 @@
     };
 
     if (options.body) config.body = options.body;
-    if (accessToken) {
-      config.headers['Authorization'] = 'Bearer ' + accessToken;
-    }
+    applyAuthHeaders(config, options.authMode || 'jwt');
 
     try {
       const response = await fetch(url, config);
@@ -872,6 +1059,60 @@
     } catch (err) {
       return { success: false, error: { message: 'Network error. Is server running?' } };
     }
+  }
+
+  function applyAuthHeaders(config, mode) {
+    if (mode === 'api-key') {
+      if (activeApiKey) {
+        config.headers['X-API-Key'] = activeApiKey;
+      }
+      return;
+    }
+
+    if (mode === 'jwt-or-api-key') {
+      if (activeApiKey) {
+        config.headers['X-API-Key'] = activeApiKey;
+        return;
+      }
+      if (accessToken) {
+        config.headers['Authorization'] = 'Bearer ' + accessToken;
+      }
+      return;
+    }
+
+    if (accessToken) {
+      config.headers['Authorization'] = 'Bearer ' + accessToken;
+    }
+  }
+
+  async function apiKeysApiRequest(endpoint, options = {}) {
+    const url = API_KEYS_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    applyAuthHeaders(config, options.authMode || 'jwt');
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (_err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
+  function parseScopes(rawScopes) {
+    return rawScopes
+      .split(',')
+      .map(scope => scope.trim())
+      .filter(scope => scope.length > 0);
   }
 
   async function handleSessionStats() {
@@ -1728,3 +1969,4 @@
     }
   }
 })();
+

@@ -1,6 +1,6 @@
 import { Router, raw } from 'express';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
-import { authenticate } from '../../middleware/authenticate.js';
+import { authenticateUser, requireApiKeyScopes } from '../../middleware/authenticateUser.js';
 import { validate } from '../../middleware/validate.js';
 import {
   apiLimiter,
@@ -36,7 +36,7 @@ const router: Router = Router();
 // ============================================================================
 
 // All routes require JWT authentication
-router.use(asyncWrapper(authenticate));
+router.use(asyncWrapper(authenticateUser(['sessions:read'])));
 
 // ============================================================================
 // Session Search
@@ -66,6 +66,7 @@ router.get(
 router.post(
   '/',
   sessionCreateLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(createSessionSchema),
   asyncWrapper(chatSessionController.createSession)
 );
@@ -125,6 +126,7 @@ router.get(
 router.patch(
   '/:id',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   validate(updateSessionSchema),
   asyncWrapper(chatSessionController.updateSession)
@@ -137,6 +139,7 @@ router.patch(
 router.delete(
   '/:id',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   asyncWrapper(chatSessionController.deleteSession)
 );
@@ -149,6 +152,7 @@ router.delete(
 router.delete(
   '/',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(deleteAllSessionsQuerySchema, 'query'),
   asyncWrapper(chatSessionController.deleteAllSessions)
 );
@@ -166,6 +170,7 @@ router.delete(
 router.post(
   '/:id/messages',
   messageLimiter, // Stricter rate limit for messages
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   validate(addMessageSchema),
   asyncWrapper(chatSessionController.addMessage)
@@ -178,6 +183,7 @@ router.post(
 router.patch(
   '/:id/messages/:messageId',
   messageLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(messageIdParamSchema, 'params'),
   validate(editMessageSchema),
   asyncWrapper(chatSessionController.editMessage)
@@ -190,6 +196,7 @@ router.patch(
 router.delete(
   '/:id/messages/:messageId',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(messageIdParamSchema, 'params'),
   asyncWrapper(chatSessionController.deleteMessage)
 );
@@ -201,6 +208,7 @@ router.delete(
 router.post(
   '/:id/messages/acknowledge',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   validate(acknowledgeMessagesSchema),
   asyncWrapper(chatSessionController.acknowledgeMessages)
@@ -218,6 +226,7 @@ router.post(
 router.post(
   '/:id/checkpoints',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   validate(createCheckpointSchema),
   asyncWrapper(chatSessionController.createCheckpoint)
@@ -274,6 +283,7 @@ router.get(
 router.post(
   '/import',
   apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(importSessionSchema),
   asyncWrapper(chatSessionController.importSession)
 );
@@ -291,6 +301,7 @@ router.post(
 router.post(
   '/:id/attachments',
   uploadLimiter,
+  requireApiKeyScopes(['sessions:write']),
   validate(sessionIdParamSchema, 'params'),
   raw({ type: () => true, limit: '50mb' }),
   asyncWrapper(chatSessionController.uploadAttachment)

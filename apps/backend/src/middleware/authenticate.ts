@@ -118,6 +118,7 @@ export async function authenticate(
 
     req.userId = payload.sub;
     req.sessionId = payload.sessionId;
+    req.authType = 'jwt';
     next();
   } catch (err) {
     // Handle specific token errors with appropriate messages
@@ -180,6 +181,7 @@ export async function authenticateTokenOnly(
 
     req.userId = payload.sub;
     req.sessionId = payload.sessionId;
+    req.authType = 'jwt';
     next();
   } catch (err) {
     if (err instanceof AppError) {
