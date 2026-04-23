@@ -53,6 +53,24 @@ export function hashToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken, 'utf8').digest('hex');
 }
 
+// API keys are high-entropy secrets and should be hashed before persistence.
+// HMAC with a server-side pepper provides defence-in-depth if DB contents leak.
+export function hashApiKey(rawKey: string): string {
+  return crypto
+    .createHmac('sha256', env.API_KEY_SECRET_PEPPER)
+    .update(rawKey, 'utf8')
+    .digest('hex');
+}
+
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 // ─── JWT ─────────────────────────────────────────────────────────────────────
 
 export function signAccessToken(payload: Omit<JwtPayload, 'jti' | 'iat' | 'exp'>): string {

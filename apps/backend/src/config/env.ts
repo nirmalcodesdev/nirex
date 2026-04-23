@@ -116,6 +116,25 @@ const envSchema = z.object({
     .string()
     .default('100')
     .transform((v) => parseInt(v, 10)),
+
+  // API keys
+  API_KEY_SECRET_PEPPER: z
+    .string()
+    .min(32, 'API_KEY_SECRET_PEPPER must be at least 32 characters'),
+  API_KEY_PREFIX: z
+    .string()
+    .default('nrx')
+    .transform((v) => v.trim().toLowerCase())
+    .refine((v) => /^[a-z][a-z0-9]*$/.test(v), {
+      message: 'API_KEY_PREFIX must be alphanumeric and start with a letter',
+    }),
+  API_KEY_DEFAULT_TTL_DAYS: z
+    .string()
+    .default('365')
+    .transform((v) => parseInt(v, 10))
+    .refine((v) => Number.isInteger(v) && v > 0 && v <= 3650, {
+      message: 'API_KEY_DEFAULT_TTL_DAYS must be between 1 and 3650',
+    }),
 });
 
 const result = envSchema.safeParse(process.env);

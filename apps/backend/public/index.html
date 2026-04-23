@@ -336,7 +336,7 @@
   <div class="container">
     <header>
       <h1>Nirex Backend API Tester</h1>
-      <p class="subtitle">Test authentication, device management, chat session, usage analytics, and billing endpoints</p>
+      <p class="subtitle">Test authentication, API keys, device management, chat session, usage analytics, and billing endpoints</p>
     </header>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -500,6 +500,42 @@
           <h2>Sign Out All <span class="badge badge-protected">POST /sign-out-all</span></h2>
           <button type="button" id="signoutAllBtn">Sign Out All Sessions</button>
           <div id="signoutAllResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+          <h2>API Keys <span class="badge badge-protected">/api/v1/api-keys</span></h2>
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+            <div>
+              <form id="createApiKeyForm" action="#">
+                <div class="form-group"><label>Name</label><input type="text" id="apiKeyName" placeholder="CI Runner" required></div>
+                <div class="form-group"><label>Scopes (comma-separated)</label><input type="text" id="apiKeyScopes" value="sessions:read,usage:read" required></div>
+                <div class="form-group"><label>Expires At (optional ISO datetime)</label><input type="text" id="apiKeyExpiresAt" placeholder="2027-01-01T00:00:00.000Z"></div>
+                <button type="submit" id="createApiKeyBtn"><span>Create API Key</span></button>
+              </form>
+            </div>
+            <div>
+              <button type="button" id="listApiKeysBtn">List API Keys</button>
+              <form id="rotateApiKeyForm" action="#" style="margin-top: 12px;">
+                <div class="form-group"><label>Rotate Key ID</label><input type="text" id="rotateApiKeyId" placeholder="Mongo ObjectId"></div>
+                <button type="submit" id="rotateApiKeyBtn"><span>Rotate API Key</span></button>
+              </form>
+              <form id="revokeApiKeyForm" action="#" style="margin-top: 12px;">
+                <div class="form-group"><label>Revoke Key ID</label><input type="text" id="revokeApiKeyId" placeholder="Mongo ObjectId"></div>
+                <div class="form-group"><label>Reason (optional)</label><input type="text" id="revokeApiKeyReason" placeholder="Compromised key"></div>
+                <button type="submit" id="revokeApiKeyBtn" class="btn-danger"><span>Revoke API Key</span></button>
+              </form>
+            </div>
+            <div>
+              <div class="form-group"><label>Active API Key (for /api/sessions and /api/usage)</label><textarea id="activeApiKeyInput" rows="4" placeholder="Paste API key to use for sessions/usage requests"></textarea></div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" id="setActiveApiKeyBtn"><span>Set Active Key</span></button>
+                <button type="button" id="clearActiveApiKeyBtn" class="btn-secondary"><span>Clear Active Key</span></button>
+                <button type="button" id="apiKeySelfBtn"><span>Test /self</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="hint-box">API keys are shown only once on creation. Save them immediately. Active API key mode affects sessions and usage testers.</div>
+          <div id="apiKeysResponse" class="response hidden"></div>
         </div>
 
         <div class="card" style="grid-column: 1 / -1;">
@@ -873,6 +909,8 @@
       <code style="color: #22d3ee;">/api/usage</code>
       <span style="color: #71717a; margin-left: 10px;">Billing:</span>
       <code style="color: #22d3ee;">/api/billing</code>
+      <span style="color: #71717a; margin-left: 10px;">API Keys:</span>
+      <code style="color: #22d3ee;">/api/v1/api-keys</code>
     </div>
   </div>
 
