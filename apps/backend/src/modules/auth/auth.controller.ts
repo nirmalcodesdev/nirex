@@ -98,7 +98,12 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
 export async function signin(req: Request, res: Response): Promise<void> {
   const ip = getIp(req);
   const country = getCountryFromIp(ip);
-  const result = await authService.signin(req.body as SignInRequest, getDeviceInfo(req), ip, country);
+  const result = await authService.signin(
+    req.body as SignInRequest & { twoFactorCode?: string },
+    getDeviceInfo(req),
+    ip,
+    country,
+  );
 
   // Set user context for subsequent logging
   setContextUser(result.userId, result.sessionId);
@@ -487,6 +492,59 @@ export async function terminateDevices(req: Request, res: Response): Promise<voi
       summary: { total: deviceIds.length, terminated, skipped, errors },
       details: results.map(r => r.status === 'fulfilled' ? r.value : { status: 'error', error: 'Unknown error' }),
     },
+  });
+}
+
+// GET /api/v1/auth/2fa/status (requires authentication)
+export async function getTwoFactorStatus(req: Request, res: Response): Promise<void> {
+  const data = await authService.getTwoFactorStatus(req.userId!);
+  res.json({ status: 'success', data });
+}
+
+// POST /api/v1/auth/2fa/setup (requires authentication)
+export async function beginTwoFactorSetup(req: Request, res: Response): Promise<void> {
+  const data = await authService.beginTwoFactorSetup(req.userId!);
+  res.json({
+    status: 'success',
+    message: 'Scan the QR URL with an authenticator app, then verify setup with a code.',
+    data,
+  });
+}
+
+// POST /api/v1/auth/2fa/verify-setup (requires authentication)
+export async function verifyTwoFactorSetup(req: Request, res: Response): Promise<void> {
+  const { code } = req.body as { code: string };
+  const data = await authService.verifyTwoFactorSetup(req.userId!, code);
+
+  logSecurity({
+    type: 'AUTH_SUCCESS',
+    userId: req.userId!,
+    ip: getIp(req),
+    metadata: { event: 'TWO_FACTOR_ENABLED', sessionId: req.sessionId },
+  });
+
+  res.json({
+    status: 'success',
+    message: 'Two-factor authentication enabled. Store your backup codes securely.',
+    data,
+  });
+}
+
+// POST /api/v1/auth/2fa/disable (requires authentication)
+export async function disableTwoFactor(req: Request, res: Response): Promise<void> {
+  const { code } = req.body as { code: string };
+  await authService.disableTwoFactor(req.userId!, code);
+
+  logSecurity({
+    type: 'AUTH_SUCCESS',
+    userId: req.userId!,
+    ip: getIp(req),
+    metadata: { event: 'TWO_FACTOR_DISABLED', sessionId: req.sessionId },
+  });
+
+  res.json({
+    status: 'success',
+    message: 'Two-factor authentication disabled.',
   });
 }
 

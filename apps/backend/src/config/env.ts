@@ -135,6 +135,21 @@ const envSchema = z.object({
     .refine((v) => Number.isInteger(v) && v > 0 && v <= 3650, {
       message: 'API_KEY_DEFAULT_TTL_DAYS must be between 1 and 3650',
     }),
+
+  // Two-factor authentication (TOTP)
+  TWO_FACTOR_ENCRYPTION_KEY: z
+    .string()
+    .min(32, 'TWO_FACTOR_ENCRYPTION_KEY must be at least 32 characters'),
+  TWO_FACTOR_ISSUER: z
+    .string()
+    .default('Nirex'),
+  TWO_FACTOR_SETUP_TTL_MINUTES: z
+    .string()
+    .default('10')
+    .transform((v) => parseInt(v, 10))
+    .refine((v) => Number.isInteger(v) && v >= 5 && v <= 30, {
+      message: 'TWO_FACTOR_SETUP_TTL_MINUTES must be between 5 and 30',
+    }),
 });
 
 const result = envSchema.safeParse(process.env);

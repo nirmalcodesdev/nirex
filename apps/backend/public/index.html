@@ -389,6 +389,7 @@
           <form id="signinForm" action="#">
             <div class="form-group"><label>Email</label><input type="email" id="signinEmail" placeholder="user@example.com" required></div>
             <div class="form-group"><label>Password</label><input type="password" id="signinPassword" placeholder="Your password" required></div>
+            <div class="form-group"><label>2FA Code (optional)</label><input type="text" id="signinTwoFactorCode" placeholder="123456 or backup code"></div>
             <button type="submit" id="signinBtn"><span>Sign In</span></button>
           </form>
           <div id="signinResponse" class="response hidden"></div>
@@ -500,6 +501,24 @@
           <h2>Sign Out All <span class="badge badge-protected">POST /sign-out-all</span></h2>
           <button type="button" id="signoutAllBtn">Sign Out All Sessions</button>
           <div id="signoutAllResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Two-Factor Settings <span class="badge badge-protected">/2fa/*</span></h2>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button type="button" id="twoFactorStatusBtn">2FA Status</button>
+            <button type="button" id="twoFactorSetupBtn">Start Setup</button>
+          </div>
+          <form id="twoFactorVerifyForm" action="#" style="margin-top: 12px;">
+            <div class="form-group"><label>Verify Setup Code</label><input type="text" id="twoFactorVerifyCode" placeholder="123456"></div>
+            <button type="submit" id="twoFactorVerifyBtn"><span>Verify & Enable</span></button>
+          </form>
+          <form id="twoFactorDisableForm" action="#" style="margin-top: 12px;">
+            <div class="form-group"><label>Disable Code</label><input type="text" id="twoFactorDisableCode" placeholder="123456 or backup code"></div>
+            <button type="submit" id="twoFactorDisableBtn" class="btn-danger"><span>Disable 2FA</span></button>
+          </form>
+          <div class="hint-box">Setup returns an `otpauthUrl` and secret. Scan it in Google Authenticator, 1Password, Authy, etc.</div>
+          <div id="twoFactorResponse" class="response hidden"></div>
         </div>
 
         <div class="card" style="grid-column: 1 / -1;">

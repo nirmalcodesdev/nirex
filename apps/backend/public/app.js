@@ -63,6 +63,10 @@
     document.getElementById('signoutBtn').addEventListener('click', handleSignOut);
     document.getElementById('signoutAllBtn').addEventListener('click', handleSignOutAll);
     document.getElementById('devicesBtn').addEventListener('click', handleLoadDevices);
+    document.getElementById('twoFactorStatusBtn').addEventListener('click', handleTwoFactorStatus);
+    document.getElementById('twoFactorSetupBtn').addEventListener('click', handleTwoFactorSetup);
+    document.getElementById('twoFactorVerifyForm').addEventListener('submit', handleTwoFactorVerifySetup);
+    document.getElementById('twoFactorDisableForm').addEventListener('submit', handleTwoFactorDisable);
     document.getElementById('copyTokenBtn').addEventListener('click', copyToken);
     document.getElementById('clearSessionBtn').addEventListener('click', clearSession);
     document.getElementById('googleSignInBtn').addEventListener('click', () => handleOAuthSignIn('google'));
@@ -230,12 +234,18 @@
     hideResponse('signinResponse');
     setLoading('signinBtn', true);
 
+    const twoFactorCode = document.getElementById('signinTwoFactorCode').value.trim();
+    const body = {
+      email: document.getElementById('signinEmail').value,
+      password: document.getElementById('signinPassword').value
+    };
+    if (twoFactorCode) {
+      body.twoFactorCode = twoFactorCode;
+    }
+
     const result = await apiRequest('/sign-in', {
       method: 'POST',
-      body: JSON.stringify({
-        email: document.getElementById('signinEmail').value,
-        password: document.getElementById('signinPassword').value
-      })
+      body: JSON.stringify(body)
     });
 
     setLoading('signinBtn', false);
@@ -524,6 +534,90 @@
     localStorage.removeItem('refreshToken');
     updateAuthStatus();
     showToast('Session cleared', 'success');
+  }
+
+  async function handleTwoFactorStatus() {
+    hideResponse('twoFactorResponse');
+    setLoading('twoFactorStatusBtn', true);
+
+    const result = await apiRequest('/2fa/status');
+
+    setLoading('twoFactorStatusBtn', false);
+
+    if (result.success) {
+      showResponse('twoFactorResponse', result.data, false);
+      showToast('2FA status loaded', 'success');
+    } else {
+      showResponse('twoFactorResponse', result.error, true);
+      showToast(result.error.message || 'Failed to load 2FA status', 'error');
+    }
+  }
+
+  async function handleTwoFactorSetup() {
+    hideResponse('twoFactorResponse');
+    setLoading('twoFactorSetupBtn', true);
+
+    const result = await apiRequest('/2fa/setup', { method: 'POST' });
+
+    setLoading('twoFactorSetupBtn', false);
+
+    if (result.success) {
+      showResponse('twoFactorResponse', result.data, false);
+      showToast('2FA setup started. Verify with authenticator code.', 'success');
+    } else {
+      showResponse('twoFactorResponse', result.error, true);
+      showToast(result.error.message || 'Failed to start 2FA setup', 'error');
+    }
+  }
+
+  async function handleTwoFactorVerifySetup(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('twoFactorResponse');
+    setLoading('twoFactorVerifyBtn', true);
+
+    const code = document.getElementById('twoFactorVerifyCode').value.trim();
+    const result = await apiRequest('/2fa/verify-setup', {
+      method: 'POST',
+      body: JSON.stringify({ code: code })
+    });
+
+    setLoading('twoFactorVerifyBtn', false);
+
+    if (result.success) {
+      showResponse('twoFactorResponse', result.data, false);
+      showToast('2FA enabled. Save backup codes.', 'success');
+      document.getElementById('twoFactorVerifyForm').reset();
+    } else {
+      showResponse('twoFactorResponse', result.error, true);
+      showToast(result.error.message || 'Failed to enable 2FA', 'error');
+    }
+    return false;
+  }
+
+  async function handleTwoFactorDisable(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('twoFactorResponse');
+    setLoading('twoFactorDisableBtn', true);
+
+    const code = document.getElementById('twoFactorDisableCode').value.trim();
+    const result = await apiRequest('/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ code: code })
+    });
+
+    setLoading('twoFactorDisableBtn', false);
+
+    if (result.success) {
+      showResponse('twoFactorResponse', result.data, false);
+      showToast('2FA disabled', 'success');
+      document.getElementById('twoFactorDisableForm').reset();
+    } else {
+      showResponse('twoFactorResponse', result.error, true);
+      showToast(result.error.message || 'Failed to disable 2FA', 'error');
+    }
+    return false;
   }
 
   async function handleCreateApiKey(e) {
