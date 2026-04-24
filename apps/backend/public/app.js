@@ -102,8 +102,7 @@
     document.getElementById('billingInvoicesForm').addEventListener('submit', handleBillingInvoices);
     document.getElementById('billingCheckoutForm').addEventListener('submit', handleBillingCheckout);
     document.getElementById('billingPortalForm').addEventListener('submit', handleBillingPortal);
-    document.getElementById('billingCancelForm').addEventListener('submit', handleBillingCancelSubscription);
-    document.getElementById('billingResumeBtn').addEventListener('click', handleBillingResumeSubscription);
+    document.getElementById('billingDeleteForm').addEventListener('submit', handleBillingDeleteSubscription);
     document.getElementById('billingWebhookProbeForm').addEventListener('submit', handleBillingWebhookProbe);
     document.getElementById('createApiKeyForm').addEventListener('submit', handleCreateApiKey);
     document.getElementById('listApiKeysBtn').addEventListener('click', handleListApiKeys);
@@ -1976,47 +1975,39 @@
     return false;
   }
 
-  async function handleBillingCancelSubscription(e) {
+  async function handleBillingDeleteSubscription(e) {
     e.preventDefault();
     e.stopPropagation();
-    hideResponse('billingCancelResponse');
-    setLoading('billingCancelBtn', true);
+    hideResponse('billingDeleteResponse');
 
-    const atPeriodEnd = document.getElementById('billingCancelAtPeriodEnd').checked;
-    const result = await billingApiRequest('/subscription/cancel', {
-      method: 'POST',
-      body: JSON.stringify({ atPeriodEnd: atPeriodEnd })
+    const confirmed = document.getElementById('billingDeleteConfirm').checked;
+    if (!confirmed) {
+      showResponse('billingDeleteResponse', { message: 'Please confirm subscription deletion.' }, true);
+      showToast('Confirmation is required', 'error');
+      return false;
+    }
+
+    if (!confirm('Delete the active subscription immediately? This cannot be undone.')) {
+      return false;
+    }
+
+    setLoading('billingDeleteBtn', true);
+
+    const result = await billingApiRequest('/subscription', {
+      method: 'DELETE'
     });
 
-    setLoading('billingCancelBtn', false);
+    setLoading('billingDeleteBtn', false);
 
     if (result.success) {
-      showResponse('billingCancelResponse', result.data, false);
-      showToast('Subscription cancellation updated', 'success');
+      showResponse('billingDeleteResponse', result.data, false);
+      showToast('Subscription deleted', 'success');
+      document.getElementById('billingDeleteForm').reset();
     } else {
-      showResponse('billingCancelResponse', result.error, true);
-      showToast(getBillingErrorMessage(result.error, 'Failed to cancel subscription'), 'error');
+      showResponse('billingDeleteResponse', result.error, true);
+      showToast(getBillingErrorMessage(result.error, 'Failed to delete subscription'), 'error');
     }
     return false;
-  }
-
-  async function handleBillingResumeSubscription() {
-    hideResponse('billingResumeResponse');
-    setLoading('billingResumeBtn', true);
-
-    const result = await billingApiRequest('/subscription/resume', {
-      method: 'POST'
-    });
-
-    setLoading('billingResumeBtn', false);
-
-    if (result.success) {
-      showResponse('billingResumeResponse', result.data, false);
-      showToast('Subscription resumed', 'success');
-    } else {
-      showResponse('billingResumeResponse', result.error, true);
-      showToast(getBillingErrorMessage(result.error, 'Failed to resume subscription'), 'error');
-    }
   }
 
   async function handleBillingWebhookProbe(e) {

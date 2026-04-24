@@ -4,12 +4,10 @@ import type {
   BillingInvoicesQuery,
   CreateCheckoutSessionRequest,
   CreatePortalSessionRequest,
-  CancelSubscriptionRequest,
 } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
 import { billingService } from './billing.service.js';
 import type {
-  CancelSubscriptionInput,
   CreateCheckoutSessionInput,
   CreatePortalSessionInput,
 } from './billing.types.js';
@@ -81,30 +79,12 @@ export async function createPortalSession(
   });
 }
 
-export async function cancelSubscription(
+export async function deleteSubscription(
   req: Request,
   res: Response,
 ): Promise<void> {
   const userId = getUserId(req);
-  const body = req.body as CancelSubscriptionRequest;
-  const input: CancelSubscriptionInput = {
-    atPeriodEnd: body.atPeriodEnd ?? true,
-  };
-
-  const subscription = await billingService.cancelSubscription(userId, input);
-
-  res.json({
-    status: 'success',
-    data: subscription,
-  });
-}
-
-export async function resumeSubscription(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const userId = getUserId(req);
-  const subscription = await billingService.resumeSubscription(userId);
+  const subscription = await billingService.deleteSubscription(userId);
 
   res.json({
     status: 'success',

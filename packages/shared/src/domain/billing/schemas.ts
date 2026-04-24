@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 export const billingCycleSchema = z.enum(['month', 'year']);
-export const billingPlanIdSchema = z.enum(['hobby', 'pro', 'enterprise', 'custom']);
-export const checkoutPlanIdSchema = z.enum(['hobby', 'pro', 'enterprise']);
+export const billingPlanIdSchema = z.enum(['free', 'pro', 'enterprise', 'custom']);
+export const checkoutPlanIdSchema = z.enum(['free', 'pro', 'enterprise']);
 
 export const billingInvoicesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
