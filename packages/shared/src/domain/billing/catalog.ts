@@ -8,7 +8,7 @@ export type BillingCatalogPlanId = Exclude<BillingPlanId, 'custom'>;
 
 export type BillingPlanCatalogEntry = Pick<
   BillingPlan,
-  'id' | 'name' | 'description' | 'features' | 'includedComputeSeconds'
+  'id' | 'name' | 'description' | 'features' | 'includedCredits'
 >;
 
 export const BILLING_PLAN_CATALOG: Record<
@@ -20,24 +20,22 @@ export const BILLING_PLAN_CATALOG: Record<
     name: 'Hobby',
     description: 'Perfect for side projects and learning.',
     features: [
-      'Up to 3 projects',
-      '10,000s cloud compute',
-      'Community support',
-      'Basic analytics',
+      'Limited Chat Sessions',
+      'Access to free ai models',
+      'Limited to Agentic Team AI',
     ],
-    includedComputeSeconds: 10_000,
+    includedCredits: 10_000,
   },
   pro: {
     id: 'pro',
     name: 'Pro',
     description: 'For professional developers and growing teams.',
     features: [
-      'Unlimited local executions',
-      '50,000s cloud compute',
-      'Advanced analytics',
-      'Priority support',
+      'Unlimited Chat Sessions',
+      'Access to pro + free ai models',
+      'Access to Agentic Team AI',
     ],
-    includedComputeSeconds: 50_000,
+    includedCredits: 50_000,
   },
   enterprise: {
     id: 'enterprise',
@@ -49,7 +47,7 @@ export const BILLING_PLAN_CATALOG: Record<
       'SSO and advanced security controls',
       'Custom SLAs and onboarding',
     ],
-    includedComputeSeconds: null,
+    includedCredits: null,
   },
 };
 

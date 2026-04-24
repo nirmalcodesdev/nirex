@@ -533,11 +533,8 @@ Exports the same overview payload as a downloadable report.
 
 **Metric formulas**
 - `total_requests`: non-deleted message count in range
-- `compute_hours_used`: usage event compute hours, or fallback `total_tokens / 1000`
-- `compute_cost`: token-pricing cost (fallback path) or compute-hours pricing (`$0.05/hr`) when compute events exist
-- `storage_cost`: `storage_gb * $0.25`
-- `bandwidth_cost`: `bandwidth_gb * $0.01`
-- `edge_request_cost`: `requests * ($0.001 / 1000)`
+- `credits_used`: usage event credits, or fallback `total_tokens / 1000`
+- `credits_cost`: token-pricing cost (fallback path) or credit pricing (`$0.05/credit`) when credit events exist
 - `trend_pct`: percentage delta vs immediately preceding window of equal duration
 
 ---

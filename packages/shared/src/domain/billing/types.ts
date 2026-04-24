@@ -37,7 +37,7 @@ export interface BillingPlan {
   name: string;
   description: string;
   features: string[];
-  includedComputeSeconds: number | null;
+  includedCredits: number | null;
   prices: Partial<Record<BillingCycle, BillingPlanPrice>>;
   checkoutEnabled: boolean;
 }
@@ -79,9 +79,9 @@ export interface BillingInvoiceItem {
 }
 
 export interface BillingOverviewUsage {
-  computeSecondsUsed: number | null;
-  computeSecondsIncluded: number | null;
-  computeUsagePct: number | null;
+  creditsUsed: number | null;
+  creditsIncluded: number | null;
+  creditsUsagePct: number | null;
 }
 
 export interface BillingOverviewKpis {

@@ -8,9 +8,9 @@ export type UsageExportFormat = 'json' | 'csv';
 export interface UsageSummary {
   total_usage_cost_usd: number;
   total_usage_cost_trend_pct: number;
-  compute_hours_used: number;
-  compute_hours_limit: number;
-  compute_hours_used_pct: number;
+  credits_used: number;
+  credits_limit: number;
+  credits_used_pct: number;
   total_requests: number;
   total_requests_trend_pct: number;
   avg_response_time_ms: number | null;
@@ -19,16 +19,10 @@ export interface UsageSummary {
 
 export interface UsageChartPoint {
   date: string; // YYYY-MM-DD
-  compute: number;
-  storage: number;
-  network: number;
+  credits: number;
 }
 
-export type CostBreakdownKey =
-  | 'compute_hours'
-  | 'database_storage'
-  | 'bandwidth'
-  | 'edge_requests';
+export type CostBreakdownKey = 'credits';
 
 export interface UsageCostBreakdownItem {
   key: CostBreakdownKey;
@@ -46,7 +40,7 @@ export interface UsageCostBreakdown {
 export interface UsageTopProject {
   project_id: string;
   project_name: string;
-  compute_hours: number;
+  credits: number;
   requests: number;
   cost_usd: number;
   trend_pct: number;
@@ -56,9 +50,7 @@ export interface UsageCurrentPlan {
   plan_id: string;
   plan_name: string;
   price_usd_monthly: number;
-  included_compute_hours: number;
-  included_storage_gb: number;
-  included_bandwidth_gb: number;
+  included_credits: number;
   next_billing_date: string; // ISO date
 }
 

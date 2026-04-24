@@ -566,28 +566,28 @@ export class BillingService {
     userId: Types.ObjectId,
     currentPlan: BillingPlan,
   ): Promise<{
-    computeSecondsUsed: number | null;
-    computeSecondsIncluded: number | null;
-    computeUsagePct: number | null;
+    creditsUsed: number | null;
+    creditsIncluded: number | null;
+    creditsUsagePct: number | null;
   }> {
     try {
       const usageOverview = await usageService.getOverview(userId, 'month_to_date');
-      const computeSecondsUsed = Math.round(usageOverview.summary.compute_hours_used * 3600);
-      const included = currentPlan.includedComputeSeconds;
+      const creditsUsed = Math.round(usageOverview.summary.credits_used);
+      const includedCredits = currentPlan.includedCredits;
 
       return {
-        computeSecondsUsed,
-        computeSecondsIncluded: included,
-        computeUsagePct:
-          included && included > 0
-            ? Number(((computeSecondsUsed / included) * 100).toFixed(2))
+        creditsUsed,
+        creditsIncluded: includedCredits,
+        creditsUsagePct:
+          includedCredits && includedCredits > 0
+            ? Number(((creditsUsed / includedCredits) * 100).toFixed(2))
             : null,
       };
     } catch {
       return {
-        computeSecondsUsed: null,
-        computeSecondsIncluded: currentPlan.includedComputeSeconds,
-        computeUsagePct: null,
+        creditsUsed: null,
+        creditsIncluded: currentPlan.includedCredits,
+        creditsUsagePct: null,
       };
     }
   }
@@ -605,9 +605,9 @@ export class BillingService {
         subscription: this.mapSubscriptionOverview(null),
         paymentMethod: null,
         usage: {
-          computeSecondsUsed: null,
-          computeSecondsIncluded: hobbyPlan.includedComputeSeconds,
-          computeUsagePct: null,
+          creditsUsed: null,
+          creditsIncluded: hobbyPlan.includedCredits,
+          creditsUsagePct: null,
         },
         kpis: {
           currentPlanAmountCents: 0,
