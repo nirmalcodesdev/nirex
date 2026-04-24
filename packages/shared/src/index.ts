@@ -345,6 +345,36 @@ export {
 } from './domain/billing/index.js';
 
 // ============================================================================
+// Domain: Notifications
+// ============================================================================
+
+export type {
+  NotificationKind,
+  NotificationSeverity,
+  NotificationItem,
+  ListNotificationsQuery,
+  ListNotificationsResponse,
+  NotificationUnreadCountResponse,
+  CreateNotificationRequest,
+  CreateNotificationResponse,
+  MarkNotificationReadResponse,
+  MarkNotificationUnreadResponse,
+  ArchiveNotificationResponse,
+  ReadAllNotificationsResponse,
+} from './domain/notifications/index.js';
+
+export {
+  notificationKindSchema,
+  notificationSeveritySchema,
+  listNotificationsQuerySchema,
+  createNotificationSchema,
+  notificationIdParamSchema,
+  type ListNotificationsQuerySchema,
+  type CreateNotificationSchema,
+  type NotificationIdParamSchema,
+} from './domain/notifications/index.js';
+
+// ============================================================================
 // Frontend-specific (kept for backward compatibility, consider moving to UI package)
 // ============================================================================
 

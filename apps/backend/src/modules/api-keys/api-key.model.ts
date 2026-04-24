@@ -5,7 +5,9 @@ export type ApiKeyScope =
   | 'sessions:write'
   | 'usage:read'
   | 'billing:read'
-  | 'billing:write';
+  | 'billing:write'
+  | 'notifications:read'
+  | 'notifications:write';
 
 export const API_KEY_SCOPES: ApiKeyScope[] = [
   'sessions:read',
@@ -13,6 +15,8 @@ export const API_KEY_SCOPES: ApiKeyScope[] = [
   'usage:read',
   'billing:read',
   'billing:write',
+  'notifications:read',
+  'notifications:write',
 ];
 
 export interface IApiKeyDocument extends Document<Types.ObjectId> {

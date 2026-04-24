@@ -9,6 +9,7 @@ import {
   sendBillingPaymentSucceededEmail,
   sendBillingSubscriptionStateEmail,
 } from '../../utils/mailer.js';
+import { notificationsService } from '../notifications/notifications.service.js';
 import { usageService } from '../usage/usage.service.js';
 import { userRepository } from '../user/user.repository.js';
 import {
@@ -261,6 +262,34 @@ export class BillingService {
     }
 
     return null;
+  }
+
+  private async resolveBillingUserIdByStripeCustomerId(
+    stripeCustomerId: string | null,
+  ): Promise<Types.ObjectId | null> {
+    if (!stripeCustomerId) return null;
+    const customer = await billingRepository.findCustomerByStripeCustomerId(stripeCustomerId);
+    return customer?.userId ?? null;
+  }
+
+  private async createInAppBillingNotification(input: {
+    userId: Types.ObjectId | null;
+    eventId: string;
+    severity: 'info' | 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!input.userId) return;
+    await notificationsService.createNotification(input.userId, {
+      kind: 'billing',
+      severity: input.severity,
+      title: input.title,
+      message: input.message,
+      action_url: this.billingPortalUrl(),
+      dedupe_key: `billing-event:${input.eventId}`,
+      metadata: input.metadata,
+    });
   }
 
   private async getOrCreateCustomer(
@@ -984,71 +1013,125 @@ export class BillingService {
   }
 
   private async sendBillingNotificationForEvent(event: Stripe.Event): Promise<void> {
-    if (!this.shouldSendBillingEmails()) return;
-
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.mode !== 'subscription') return;
-        const recipient = await this.resolveBillingRecipientByStripeCustomerId(
-          getStripeCustomerId(session.customer),
-        );
-        if (!recipient) return;
-
-
+        const stripeCustomerId = getStripeCustomerId(session.customer);
+        const [recipient, userId] = await Promise.all([
+          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
+          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
+        ]);
         const planId = session.metadata?.['planId'] as BillingPlanId | undefined;
         const planName = planId ? getBillingPlan(planId)?.name ?? null : null;
-        await sendBillingCheckoutCompletedEmail({
-          to: recipient.email,
-          customerName: recipient.name,
-          planName,
-          billingPortalUrl: this.billingPortalUrl(),
+        await this.createInAppBillingNotification({
+          userId,
+          eventId: event.id,
+          severity: 'success',
+          title: 'Checkout completed',
+          message: planName
+            ? `Your ${planName} subscription checkout is complete.`
+            : 'Your subscription checkout is complete.',
+          metadata: {
+            stripeEventType: event.type,
+            planId: planId ?? null,
+            planName,
+          },
         });
+        if (this.shouldSendBillingEmails() && recipient) {
+          await sendBillingCheckoutCompletedEmail({
+            to: recipient.email,
+            customerName: recipient.name,
+            planName,
+            billingPortalUrl: this.billingPortalUrl(),
+          });
+        }
         return;
       }
 
       case 'invoice.paid': {
         const invoice = event.data.object as Stripe.Invoice;
-        const recipient = await this.resolveBillingRecipientByStripeCustomerId(
-          getStripeCustomerId(invoice.customer),
-        );
-        if (!recipient) return;
+        const stripeCustomerId = getStripeCustomerId(invoice.customer);
+        const [recipient, userId] = await Promise.all([
+          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
+          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
+        ]);
 
         const firstPriceId = getInvoicePrimaryPriceId(invoice);
-        await sendBillingPaymentSucceededEmail({
-          to: recipient.email,
-          customerName: recipient.name,
-          planName: resolvePlanNameFromPriceId(firstPriceId),
-          amountCents: invoice.amount_paid ?? invoice.total ?? 0,
-          currency: invoice.currency ?? 'usd',
-          invoiceNumber: invoice.number ?? null,
-          invoicePdfUrl: invoice.invoice_pdf ?? null,
-          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-          paidAt: toDateFromUnix(invoice.status_transitions.paid_at),
-          billingPortalUrl: this.billingPortalUrl(),
+        const planName = resolvePlanNameFromPriceId(firstPriceId);
+        await this.createInAppBillingNotification({
+          userId,
+          eventId: event.id,
+          severity: 'success',
+          title: 'Invoice paid',
+          message: planName
+            ? `${planName} invoice ${invoice.number ?? ''} has been paid.`.trim()
+            : `Invoice ${invoice.number ?? ''} has been paid.`.trim(),
+          metadata: {
+            stripeEventType: event.type,
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.number ?? null,
+            amountCents: invoice.amount_paid ?? invoice.total ?? 0,
+            currency: invoice.currency ?? 'usd',
+          },
         });
+        if (this.shouldSendBillingEmails() && recipient) {
+          await sendBillingPaymentSucceededEmail({
+            to: recipient.email,
+            customerName: recipient.name,
+            planName,
+            amountCents: invoice.amount_paid ?? invoice.total ?? 0,
+            currency: invoice.currency ?? 'usd',
+            invoiceNumber: invoice.number ?? null,
+            invoicePdfUrl: invoice.invoice_pdf ?? null,
+            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+            paidAt: toDateFromUnix(invoice.status_transitions.paid_at),
+            billingPortalUrl: this.billingPortalUrl(),
+          });
+        }
         return;
       }
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice;
-        const recipient = await this.resolveBillingRecipientByStripeCustomerId(
-          getStripeCustomerId(invoice.customer),
-        );
-        if (!recipient) return;
+        const stripeCustomerId = getStripeCustomerId(invoice.customer);
+        const [recipient, userId] = await Promise.all([
+          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
+          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
+        ]);
 
         const firstPriceId = getInvoicePrimaryPriceId(invoice);
-        await sendBillingPaymentFailedEmail({
-          to: recipient.email,
-          customerName: recipient.name,
-          planName: resolvePlanNameFromPriceId(firstPriceId),
-          amountCents: invoice.amount_due ?? invoice.total ?? 0,
-          currency: invoice.currency ?? 'usd',
-          invoiceNumber: invoice.number ?? null,
-          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-          dueDate: toDateFromUnix(invoice.due_date),
-          billingPortalUrl: this.billingPortalUrl(),
+        const planName = resolvePlanNameFromPriceId(firstPriceId);
+        await this.createInAppBillingNotification({
+          userId,
+          eventId: event.id,
+          severity: 'warning',
+          title: 'Payment failed',
+          message: planName
+            ? `Payment failed for your ${planName} subscription invoice.`
+            : 'Payment failed for your subscription invoice.',
+          metadata: {
+            stripeEventType: event.type,
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.number ?? null,
+            amountCents: invoice.amount_due ?? invoice.total ?? 0,
+            currency: invoice.currency ?? 'usd',
+            dueDate: toDateFromUnix(invoice.due_date)?.toISOString() ?? null,
+          },
         });
+        if (this.shouldSendBillingEmails() && recipient) {
+          await sendBillingPaymentFailedEmail({
+            to: recipient.email,
+            customerName: recipient.name,
+            planName,
+            amountCents: invoice.amount_due ?? invoice.total ?? 0,
+            currency: invoice.currency ?? 'usd',
+            invoiceNumber: invoice.number ?? null,
+            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+            dueDate: toDateFromUnix(invoice.due_date),
+            billingPortalUrl: this.billingPortalUrl(),
+          });
+        }
         return;
       }
 
@@ -1056,10 +1139,11 @@ export class BillingService {
       case 'customer.subscription.paused':
       case 'customer.subscription.resumed': {
         const subscription = event.data.object as Stripe.Subscription;
-        const recipient = await this.resolveBillingRecipientByStripeCustomerId(
-          getStripeCustomerId(subscription.customer),
-        );
-        if (!recipient) return;
+        const stripeCustomerId = getStripeCustomerId(subscription.customer);
+        const [recipient, userId] = await Promise.all([
+          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
+          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
+        ]);
 
         const planName = resolvePlanNameFromPriceId(subscription.items.data[0]?.price?.id);
         const detailsByEvent: Record<string, { label: string; detail: string }> = {
@@ -1079,14 +1163,31 @@ export class BillingService {
 
         const details = detailsByEvent[event.type];
         if (!details) return;
-        await sendBillingSubscriptionStateEmail({
-          to: recipient.email,
-          customerName: recipient.name,
-          planName,
-          statusLabel: details.label,
-          detail: details.detail,
-          billingPortalUrl: this.billingPortalUrl(),
+        await this.createInAppBillingNotification({
+          userId,
+          eventId: event.id,
+          severity: event.type === 'customer.subscription.paused' ? 'warning' : 'info',
+          title: `Subscription ${details.label.toLowerCase()}`,
+          message: planName
+            ? `${details.detail} Plan: ${planName}.`
+            : details.detail,
+          metadata: {
+            stripeEventType: event.type,
+            subscriptionId: subscription.id,
+            planName,
+            statusLabel: details.label,
+          },
         });
+        if (this.shouldSendBillingEmails() && recipient) {
+          await sendBillingSubscriptionStateEmail({
+            to: recipient.email,
+            customerName: recipient.name,
+            planName,
+            statusLabel: details.label,
+            detail: details.detail,
+            billingPortalUrl: this.billingPortalUrl(),
+          });
+        }
         return;
       }
 

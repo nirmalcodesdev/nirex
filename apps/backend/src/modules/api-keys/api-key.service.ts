@@ -5,6 +5,7 @@ import { env } from '../../config/env.js';
 import { hashApiKey, timingSafeEqualHex } from '../../utils/crypto.js';
 import { logger } from '../../utils/logger.js';
 import { apiKeyRepository } from './api-key.repository.js';
+import { notificationsService } from '../notifications/notifications.service.js';
 import { type ApiKeyScope } from './api-key.model.js';
 
 export interface CreateApiKeyInput {
@@ -67,6 +68,34 @@ function ensureScopes(requiredScopes: ApiKeyScope[], grantedScopes: ApiKeyScope[
 }
 
 export class ApiKeyService {
+  private async createSecurityNotification(
+    userId: Types.ObjectId,
+    input: {
+      severity: 'info' | 'success' | 'warning' | 'error';
+      title: string;
+      message: string;
+      dedupeKey?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    try {
+      await notificationsService.createNotification(userId, {
+        kind: 'security',
+        severity: input.severity,
+        title: input.title,
+        message: input.message,
+        dedupe_key: input.dedupeKey,
+        metadata: input.metadata,
+      });
+    } catch (error) {
+      logger.warn('Failed to create security notification for API key event.', {
+        userId: userId.toHexString(),
+        title: input.title,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async createApiKey(
     userId: Types.ObjectId,
     input: CreateApiKeyInput,
@@ -112,6 +141,18 @@ export class ApiKeyService {
       scopes: input.scopes,
       expiresAt,
       createdBySessionId: input.createdBySessionId,
+    });
+
+    await this.createSecurityNotification(userId, {
+      severity: 'success',
+      title: 'API key created',
+      message: `A new API key "${doc.name}" was created with ${doc.scopes.length} scope(s).`,
+      metadata: {
+        apiKeyId: doc._id.toString(),
+        keyPrefix: doc.keyPrefix,
+        scopes: doc.scopes,
+        expiresAt: doc.expiresAt?.toISOString() ?? null,
+      },
     });
 
     return {
@@ -168,6 +209,15 @@ export class ApiKeyService {
     }
 
     await apiKeyRepository.revokeByIdAndUser(apiKeyId, userId, reason);
+    await this.createSecurityNotification(userId, {
+      severity: 'warning',
+      title: 'API key revoked',
+      message: `API key "${existing.name}" has been revoked.`,
+      metadata: {
+        apiKeyId: existing._id.toString(),
+        reason: reason ?? null,
+      },
+    });
   }
 
   async rotateApiKey(
@@ -199,12 +249,23 @@ export class ApiKeyService {
       'Rotated by user',
     );
 
-    return this.createApiKey(userId, {
+    const created = await this.createApiKey(userId, {
       name: existing.name,
       scopes: existing.scopes,
       expiresAt: existing.expiresAt,
       createdBySessionId: sessionId,
     });
+    await this.createSecurityNotification(userId, {
+      severity: 'info',
+      title: 'API key rotated',
+      message: `API key "${existing.name}" has been rotated.`,
+      dedupeKey: `api-key-rotated:${apiKeyId}`,
+      metadata: {
+        previousApiKeyId: apiKeyId,
+        newApiKeyId: created.key.id,
+      },
+    });
+    return created;
   }
 
   async authenticateApiKey(
