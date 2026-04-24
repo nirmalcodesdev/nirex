@@ -14,6 +14,14 @@ export class UserRepository {
     return UserModel.findOne({ email: email.toLowerCase().trim() }).exec();
   }
 
+  async findByEmailForAuth(email: string): Promise<IUserDocument | null> {
+    return UserModel.findOne({ email: email.toLowerCase().trim() })
+      .select(
+        '+twoFactor.secret +twoFactor.pendingSecret +twoFactor.pendingExpiresAt +twoFactor.backupCodes.codeHash'
+      )
+      .exec();
+  }
+
   // Locate a user by their OAuth provider ID.
   // fieldMap translates provider type to the nested Mixed field path.
   async findByProvider(
@@ -88,6 +96,98 @@ export class UserRepository {
       $unset: { lockedUntil: '' },
       failedSigninAttempts: 0,
     }).exec();
+  }
+
+  async setTwoFactorPendingSetup(
+    userId: Types.ObjectId,
+    encryptedPendingSecret: { iv: string; tag: string; ciphertext: string },
+    pendingExpiresAt: Date,
+  ): Promise<void> {
+    await UserModel.findByIdAndUpdate(userId, {
+      $set: {
+        'twoFactor.pendingSecret': encryptedPendingSecret,
+        'twoFactor.pendingExpiresAt': pendingExpiresAt,
+      },
+    }).exec();
+  }
+
+  async findByIdWithTwoFactorSecrets(
+    userId: Types.ObjectId,
+  ): Promise<IUserDocument | null> {
+    return UserModel.findById(userId)
+      .select(
+        '+twoFactor.secret +twoFactor.pendingSecret +twoFactor.pendingExpiresAt +twoFactor.backupCodes.codeHash'
+      )
+      .exec();
+  }
+
+  async enableTwoFactor(
+    userId: Types.ObjectId,
+    encryptedSecret: { iv: string; tag: string; ciphertext: string },
+    backupCodeHashes: string[],
+    enabledAt: Date,
+  ): Promise<void> {
+    await UserModel.findByIdAndUpdate(userId, {
+      $set: {
+        'twoFactor.enabled': true,
+        'twoFactor.secret': encryptedSecret,
+        'twoFactor.backupCodes': backupCodeHashes.map((codeHash) => ({ codeHash })),
+        'twoFactor.enabledAt': enabledAt,
+        'twoFactor.lastVerifiedAt': enabledAt,
+      },
+      $unset: {
+        'twoFactor.pendingSecret': '',
+        'twoFactor.pendingExpiresAt': '',
+      },
+    }).exec();
+  }
+
+  async clearTwoFactorPendingSetup(userId: Types.ObjectId): Promise<void> {
+    await UserModel.findByIdAndUpdate(userId, {
+      $unset: {
+        'twoFactor.pendingSecret': '',
+        'twoFactor.pendingExpiresAt': '',
+      },
+    }).exec();
+  }
+
+  async disableTwoFactor(userId: Types.ObjectId): Promise<void> {
+    await UserModel.findByIdAndUpdate(userId, {
+      $set: {
+        'twoFactor.enabled': false,
+      },
+      $unset: {
+        'twoFactor.secret': '',
+        'twoFactor.pendingSecret': '',
+        'twoFactor.pendingExpiresAt': '',
+        'twoFactor.backupCodes': '',
+        'twoFactor.enabledAt': '',
+        'twoFactor.lastVerifiedAt': '',
+      },
+    }).exec();
+  }
+
+  async updateTwoFactorLastVerified(userId: Types.ObjectId, date: Date): Promise<void> {
+    await UserModel.findByIdAndUpdate(userId, {
+      $set: { 'twoFactor.lastVerifiedAt': date },
+    }).exec();
+  }
+
+  async consumeTwoFactorBackupCode(
+    userId: Types.ObjectId,
+    codeHash: string,
+  ): Promise<boolean> {
+    const result = await UserModel.updateOne(
+      {
+        _id: userId,
+        'twoFactor.backupCodes': { $elemMatch: { codeHash, usedAt: { $exists: false } } },
+      },
+      {
+        $set: { 'twoFactor.backupCodes.$.usedAt': new Date() },
+      },
+    ).exec();
+
+    return result.modifiedCount > 0;
   }
 
   /**

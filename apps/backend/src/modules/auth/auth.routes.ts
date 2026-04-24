@@ -5,7 +5,6 @@ import { authLimiter } from '../../middleware/rateLimiter.js';
 import {
   validate,
   signUpSchema,
-  signInSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   changePasswordSchema,
@@ -13,6 +12,7 @@ import {
   updateProfileSchema,
   terminateDevicesSchema,
 } from '../../middleware/validate.js';
+import { signInWithTwoFactorSchema, twoFactorVerifySchema } from './auth.schemas.js';
 import * as authController from './auth.controller.js';
 
 const router: Router = Router();
@@ -20,7 +20,7 @@ const router: Router = Router();
 // ── Public ────────────────────────────────────────────────────────────────────
 router.post('/sign-up', authLimiter, validate(signUpSchema), asyncWrapper(authController.signup));
 router.get('/verify-email', asyncWrapper(authController.verifyEmail));
-router.post('/sign-in', authLimiter, validate(signInSchema), asyncWrapper(authController.signin));
+router.post('/sign-in', authLimiter, validate(signInWithTwoFactorSchema), asyncWrapper(authController.signin));
 router.post('/refresh', validate(refreshSchema), asyncWrapper(authController.refresh));
 router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), asyncWrapper(authController.forgotPassword));
 router.post('/reset-password', authLimiter, validate(resetPasswordSchema), asyncWrapper(authController.resetPassword));
@@ -45,5 +45,9 @@ router.get('/sessions', asyncWrapper(authController.listSessions));
 router.get('/devices', asyncWrapper(authController.listDevices));
 router.post('/devices/terminate', validate(terminateDevicesSchema), asyncWrapper(authController.terminateDevices));
 router.delete('/sessions/:sessionId', asyncWrapper(authController.deleteSession));
+router.get('/2fa/status', asyncWrapper(authController.getTwoFactorStatus));
+router.post('/2fa/setup', asyncWrapper(authController.beginTwoFactorSetup));
+router.post('/2fa/verify-setup', validate(twoFactorVerifySchema), asyncWrapper(authController.verifyTwoFactorSetup));
+router.post('/2fa/disable', validate(twoFactorVerifySchema), asyncWrapper(authController.disableTwoFactor));
 
 export default router;

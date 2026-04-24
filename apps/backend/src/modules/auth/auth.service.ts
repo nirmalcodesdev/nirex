@@ -18,6 +18,7 @@ import { tokenService } from '../token/token.service.js';
 import { sessionService } from '../session/session.service.js';
 import { userService } from '../user/user.service.js';
 import type { IUserDocument } from '../user/user.model.js';
+import { twoFactorService } from './two-factor.service.js';
 
 // Re-export shared types for convenience
 export type SignupInput = SignUpRequest;
@@ -50,12 +51,12 @@ export async function verifyEmail(rawToken: string): Promise<void> {
 
 // ── Sign In ────────────────────────────────────────────────────────────────────
 export async function signin(
-  input: SigninInput,
+  input: SigninInput & { twoFactorCode?: string },
   deviceInfo: string,
   ipAddress: string,
   country?: string,
 ): Promise<SigninResult> {
-  const user = await userRepository.findByEmail(input.email);
+  const user = await userRepository.findByEmailForAuth(input.email);
 
   // Constant-time path: always run through lockout + verification checks
   // before returning, even for unknown emails, to prevent timing attacks.
@@ -94,6 +95,8 @@ export async function signin(
     );
   }
 
+  await twoFactorService.assertSecondFactorForSignin(user._id, input.twoFactorCode);
+
   await userService.resetFailedSignins(user._id);
 
   const { session, rawRefreshToken } = await sessionService.createSession(
@@ -114,6 +117,22 @@ export async function signin(
     userId: user._id.toString(),
     sessionId: session._id.toString(),
   };
+}
+
+export async function getTwoFactorStatus(userId: string) {
+  return twoFactorService.getStatus(new Types.ObjectId(userId));
+}
+
+export async function beginTwoFactorSetup(userId: string) {
+  return twoFactorService.beginSetup(new Types.ObjectId(userId));
+}
+
+export async function verifyTwoFactorSetup(userId: string, code: string) {
+  return twoFactorService.verifyAndEnable(new Types.ObjectId(userId), code);
+}
+
+export async function disableTwoFactor(userId: string, code: string): Promise<void> {
+  await twoFactorService.disable(new Types.ObjectId(userId), code);
 }
 
 // ── Refresh ───────────────────────────────────────────────────────────────────

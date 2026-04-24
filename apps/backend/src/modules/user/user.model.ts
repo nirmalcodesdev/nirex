@@ -17,6 +17,26 @@ export type { LocalProviderData, GoogleProviderData, GithubProviderData, Provide
 
 export interface IUserDocument extends IUser, Document {
   _id: Types.ObjectId;
+  twoFactor?: {
+    enabled: boolean;
+    secret?: {
+      iv: string;
+      tag: string;
+      ciphertext: string;
+    };
+    pendingSecret?: {
+      iv: string;
+      tag: string;
+      ciphertext: string;
+    };
+    pendingExpiresAt?: Date;
+    backupCodes: Array<{
+      codeHash: string;
+      usedAt?: Date;
+    }>;
+    enabledAt?: Date;
+    lastVerifiedAt?: Date;
+  };
 }
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -30,6 +50,36 @@ const ProviderSchema = new Schema<IProvider>(
     },
     // Mixed allows per-provider data shapes while keeping one collection.
     data: { type: Schema.Types.Mixed, required: true },
+  },
+  { _id: false }
+);
+
+const EncryptedSecretSchema = new Schema(
+  {
+    iv: { type: String, required: true, select: false },
+    tag: { type: String, required: true, select: false },
+    ciphertext: { type: String, required: true, select: false },
+  },
+  { _id: false }
+);
+
+const TwoFactorBackupCodeSchema = new Schema(
+  {
+    codeHash: { type: String, required: true, select: false },
+    usedAt: { type: Date, required: false },
+  },
+  { _id: false }
+);
+
+const TwoFactorSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    secret: { type: EncryptedSecretSchema, required: false },
+    pendingSecret: { type: EncryptedSecretSchema, required: false },
+    pendingExpiresAt: { type: Date, required: false, select: false },
+    backupCodes: { type: [TwoFactorBackupCodeSchema], default: [] },
+    enabledAt: { type: Date, required: false },
+    lastVerifiedAt: { type: Date, required: false },
   },
   { _id: false }
 );
@@ -50,6 +100,7 @@ const UserSchema = new Schema<IUserDocument>(
     providers: { type: [ProviderSchema], default: [] },
     failedSigninAttempts: { type: Number, default: 0 },
     lockedUntil: { type: Date },
+    twoFactor: { type: TwoFactorSchema, default: () => ({ enabled: false, backupCodes: [] }) },
   },
   { timestamps: true }
 );
