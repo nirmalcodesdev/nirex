@@ -36,10 +36,7 @@ export interface DailyEventAggregate {
 }
 
 export interface EventTotals {
-  compute_hours: number;
-  storage_gb: number;
-  bandwidth_gb: number;
-  edge_requests: number;
+  credits: number;
 }
 
 function projectNameFromPath(path: string): string {
@@ -174,7 +171,7 @@ export class UsageRepository {
         $match: {
           user_id: userId,
           event_type: {
-            $in: ['compute_hours', 'storage_gb', 'bandwidth_gb', 'edge_requests'],
+            $in: ['credits'],
           },
           timestamp: { $gte: range.start, $lte: range.end },
         },
@@ -188,10 +185,7 @@ export class UsageRepository {
     ]).exec();
 
     const totals: EventTotals = {
-      compute_hours: 0,
-      storage_gb: 0,
-      bandwidth_gb: 0,
-      edge_requests: 0,
+      credits: 0,
     };
 
     for (const doc of docs) {

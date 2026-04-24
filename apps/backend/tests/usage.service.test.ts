@@ -21,10 +21,7 @@ describe('usage service', () => {
     vi.spyOn(usageRepository, 'listSessionProjectMeta').mockResolvedValue([]);
     vi.spyOn(usageRepository, 'getSessionUsageFromMessages').mockResolvedValue([]);
     vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
-      compute_hours: 0,
-      storage_gb: 0,
-      bandwidth_gb: 0,
-      edge_requests: 0,
+      credits: 0,
     });
     vi.spyOn(usageRepository, 'getAverageResponseTimeMs').mockResolvedValue(null);
     vi.spyOn(usageRepository, 'getDailyTokenTotals').mockResolvedValue([]);
@@ -72,10 +69,7 @@ describe('usage service', () => {
         },
       ]);
     vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
-      compute_hours: 0,
-      storage_gb: 0,
-      bandwidth_gb: 0,
-      edge_requests: 0,
+      credits: 0,
     });
     vi
       .spyOn(usageRepository, 'getAverageResponseTimeMs')
@@ -92,7 +86,7 @@ describe('usage service', () => {
 
     expect(overview.summary.total_requests).toBe(100);
     expect(overview.summary.total_requests_trend_pct).toBe(100);
-    expect(overview.summary.total_usage_cost_usd).toBe(10.0001);
+    expect(overview.summary.total_usage_cost_usd).toBe(10);
     expect(overview.summary.total_usage_cost_trend_pct).toBe(100);
     expect(overview.summary.avg_response_time_ms).toBe(100);
     expect(overview.summary.avg_response_time_trend_pct).toBe(-50);
@@ -105,10 +99,7 @@ describe('usage service', () => {
     vi.spyOn(usageRepository, 'listSessionProjectMeta').mockResolvedValue([]);
     vi.spyOn(usageRepository, 'getSessionUsageFromMessages').mockResolvedValue([]);
     vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
-      compute_hours: 0,
-      storage_gb: 0,
-      bandwidth_gb: 0,
-      edge_requests: 0,
+      credits: 0,
     });
     vi.spyOn(usageRepository, 'getAverageResponseTimeMs').mockResolvedValue(null);
     vi.spyOn(usageRepository, 'getDailyTokenTotals').mockResolvedValue([]);

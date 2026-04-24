@@ -9,20 +9,14 @@ import { tokenPricingService } from '../chat-session/token-pricing.service.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
 import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
 
-const COMPUTE_UNIT_PRICE_USD = 0.05;
-const STORAGE_UNIT_PRICE_USD = 0.25;
-const BANDWIDTH_UNIT_PRICE_USD = 0.01;
-const EDGE_REQUESTS_UNIT_PRICE_USD = 0.001 / 1000; // $0.001 per 1K requests
-const DEFAULT_COMPUTE_HOURS_LIMIT = 1000;
+const CREDIT_UNIT_PRICE_USD = 0.05;
+const DEFAULT_CREDITS_LIMIT = 1000;
 
 interface Snapshot {
   total_requests: number;
   total_token_cost_usd: number;
-  derived_compute_hours: number;
-  event_compute_hours: number;
-  storage_gb: number;
-  bandwidth_gb: number;
-  edge_requests: number;
+  derived_credits: number;
+  event_credits: number;
   avg_response_time_ms: number | null;
   projects: UsageTopProject[];
 }
@@ -185,7 +179,7 @@ export class UsageService {
       string,
       {
         project_name: string;
-        compute_hours: number;
+        credits: number;
         requests: number;
         cost_usd: number;
       }
@@ -193,7 +187,7 @@ export class UsageService {
 
     let totalRequests = 0;
     let totalTokenCost = 0;
-    let derivedComputeHours = 0;
+    let derivedCredits = 0;
 
     for (const meta of sessionMeta) {
       const usage = usageBySession.get(meta.session_id);
@@ -208,37 +202,28 @@ export class UsageService {
         usage.cached_tokens || 0
       );
 
-      const computeHours = (usage.total_tokens || 0) / 1000;
+      const credits = (usage.total_tokens || 0) / 1000;
       totalRequests += usage.requests || 0;
       totalTokenCost += cost.cost;
-      derivedComputeHours += computeHours;
+      derivedCredits += credits;
 
       const existing = projectMap.get(meta.project_id) || {
         project_name: meta.project_name,
-        compute_hours: 0,
+        credits: 0,
         requests: 0,
         cost_usd: 0,
       };
 
-      existing.compute_hours += computeHours;
+      existing.credits += credits;
       existing.requests += usage.requests || 0;
       existing.cost_usd += cost.cost;
       projectMap.set(meta.project_id, existing);
     }
 
-    // Allocate edge request cost proportionally by request volume.
-    const edgeRequests = eventTotals.edge_requests > 0 ? eventTotals.edge_requests : totalRequests;
-    const totalEdgeCost = edgeRequests * EDGE_REQUESTS_UNIT_PRICE_USD;
-    if (totalRequests > 0 && totalEdgeCost > 0) {
-      for (const project of projectMap.values()) {
-        project.cost_usd += totalEdgeCost * (project.requests / totalRequests);
-      }
-    }
-
     const projects: UsageTopProject[] = [...projectMap.entries()].map(([projectId, project]) => ({
       project_id: projectId,
       project_name: project.project_name,
-      compute_hours: round(project.compute_hours, 2),
+      credits: round(project.credits, 2),
       requests: Math.round(project.requests),
       cost_usd: round(project.cost_usd, 4),
       trend_pct: 0,
@@ -247,11 +232,8 @@ export class UsageService {
     return {
       total_requests: totalRequests,
       total_token_cost_usd: round(totalTokenCost, 6),
-      derived_compute_hours: round(derivedComputeHours, 4),
-      event_compute_hours: round(eventTotals.compute_hours, 4),
-      storage_gb: round(eventTotals.storage_gb, 4),
-      bandwidth_gb: round(eventTotals.bandwidth_gb, 4),
-      edge_requests: round(edgeRequests, 0),
+      derived_credits: round(derivedCredits, 4),
+      event_credits: round(eventTotals.credits, 4),
       avg_response_time_ms: responseAvg === null ? null : round(responseAvg, 2),
       projects,
     };
@@ -278,38 +260,20 @@ export class UsageService {
       this.buildSnapshot(userId, current),
       this.buildSnapshot(userId, previous),
       usageRepository.getDailyTokenTotals(userId, current),
-      usageRepository.getDailyEventTotals(userId, current, [
-        'compute_hours',
-        'storage_gb',
-        'bandwidth_gb',
-      ]),
+      usageRepository.getDailyEventTotals(userId, current, ['credits']),
     ]);
 
-    const computeHoursUsed = currentSnapshot.event_compute_hours > 0
-      ? currentSnapshot.event_compute_hours
-      : currentSnapshot.derived_compute_hours;
-    const previousComputeHoursUsed = previousSnapshot.event_compute_hours > 0
-      ? previousSnapshot.event_compute_hours
-      : previousSnapshot.derived_compute_hours;
-
-    const computeCost = currentSnapshot.event_compute_hours > 0
-      ? currentSnapshot.event_compute_hours * COMPUTE_UNIT_PRICE_USD
+    const creditsUsed = currentSnapshot.event_credits > 0
+      ? currentSnapshot.event_credits
+      : currentSnapshot.derived_credits;
+    const creditsCost = currentSnapshot.event_credits > 0
+      ? currentSnapshot.event_credits * CREDIT_UNIT_PRICE_USD
       : currentSnapshot.total_token_cost_usd;
-    const previousComputeCost = previousSnapshot.event_compute_hours > 0
-      ? previousSnapshot.event_compute_hours * COMPUTE_UNIT_PRICE_USD
+    const previousCreditsCost = previousSnapshot.event_credits > 0
+      ? previousSnapshot.event_credits * CREDIT_UNIT_PRICE_USD
       : previousSnapshot.total_token_cost_usd;
-
-    const storageCost = currentSnapshot.storage_gb * STORAGE_UNIT_PRICE_USD;
-    const prevStorageCost = previousSnapshot.storage_gb * STORAGE_UNIT_PRICE_USD;
-
-    const bandwidthCost = currentSnapshot.bandwidth_gb * BANDWIDTH_UNIT_PRICE_USD;
-    const prevBandwidthCost = previousSnapshot.bandwidth_gb * BANDWIDTH_UNIT_PRICE_USD;
-
-    const edgeCost = currentSnapshot.edge_requests * EDGE_REQUESTS_UNIT_PRICE_USD;
-    const prevEdgeCost = previousSnapshot.edge_requests * EDGE_REQUESTS_UNIT_PRICE_USD;
-
-    const totalCost = computeCost + storageCost + bandwidthCost + edgeCost;
-    const previousTotalCost = previousComputeCost + prevStorageCost + prevBandwidthCost + prevEdgeCost;
+    const totalCost = creditsCost;
+    const previousTotalCost = previousCreditsCost;
 
     const previousProjects = new Map(
       previousSnapshot.projects.map((project) => [project.project_id, project.cost_usd])
@@ -327,23 +291,19 @@ export class UsageService {
       .slice(0, 10);
 
     const tokenByDate = new Map(dailyTokens.map((d) => [d.date, d.total_tokens / 1000]));
-    const eventMap = new Map<string, { compute: number; storage: number; network: number }>();
+    const eventMap = new Map<string, { credits: number }>();
     for (const event of dailyEvents) {
-      const existing = eventMap.get(event.date) || { compute: 0, storage: 0, network: 0 };
-      if (event.event_type === 'compute_hours') existing.compute += event.total;
-      if (event.event_type === 'storage_gb') existing.storage += event.total;
-      if (event.event_type === 'bandwidth_gb') existing.network += event.total;
+      const existing = eventMap.get(event.date) || { credits: 0 };
+      if (event.event_type === 'credits') existing.credits += event.total;
       eventMap.set(event.date, existing);
     }
 
     const chart = dayRange(current).map((date) => {
-      const fromEvents = eventMap.get(date) || { compute: 0, storage: 0, network: 0 };
-      const fallbackCompute = tokenByDate.get(date) || 0;
+      const fromEvents = eventMap.get(date) || { credits: 0 };
+      const fallbackCredits = tokenByDate.get(date) || 0;
       return {
         date,
-        compute: round(fromEvents.compute > 0 ? fromEvents.compute : fallbackCompute, 4),
-        storage: round(fromEvents.storage, 4),
-        network: round(fromEvents.network, 4),
+        credits: round(fromEvents.credits > 0 ? fromEvents.credits : fallbackCredits, 4),
       };
     });
 
@@ -351,10 +311,10 @@ export class UsageService {
       summary: {
         total_usage_cost_usd: round(totalCost, 4),
         total_usage_cost_trend_pct: percentageChange(totalCost, previousTotalCost),
-        compute_hours_used: round(computeHoursUsed, 2),
-        compute_hours_limit: DEFAULT_COMPUTE_HOURS_LIMIT,
-        compute_hours_used_pct: round(
-          (computeHoursUsed / DEFAULT_COMPUTE_HOURS_LIMIT) * 100,
+        credits_used: round(creditsUsed, 2),
+        credits_limit: DEFAULT_CREDITS_LIMIT,
+        credits_used_pct: round(
+          (creditsUsed / DEFAULT_CREDITS_LIMIT) * 100,
           2
         ),
         total_requests: Math.round(currentSnapshot.total_requests),
@@ -376,35 +336,14 @@ export class UsageService {
       cost_breakdown: {
         items: [
           {
-            key: 'compute_hours',
-            units: round(computeHoursUsed, 4),
+            key: 'credits',
+            units: round(creditsUsed, 4),
             unit_price_usd: round(
-              computeHoursUsed > 0 ? computeCost / computeHoursUsed : COMPUTE_UNIT_PRICE_USD,
+              creditsUsed > 0 ? creditsCost / creditsUsed : CREDIT_UNIT_PRICE_USD,
               6
             ),
-            cost_usd: round(computeCost, 4),
-            description: 'Compute hours and model execution costs',
-          },
-          {
-            key: 'database_storage',
-            units: round(currentSnapshot.storage_gb, 4),
-            unit_price_usd: STORAGE_UNIT_PRICE_USD,
-            cost_usd: round(storageCost, 4),
-            description: 'Database storage consumption',
-          },
-          {
-            key: 'bandwidth',
-            units: round(currentSnapshot.bandwidth_gb, 4),
-            unit_price_usd: BANDWIDTH_UNIT_PRICE_USD,
-            cost_usd: round(bandwidthCost, 4),
-            description: 'Network bandwidth transfer',
-          },
-          {
-            key: 'edge_requests',
-            units: Math.round(currentSnapshot.edge_requests),
-            unit_price_usd: EDGE_REQUESTS_UNIT_PRICE_USD,
-            cost_usd: round(edgeCost, 4),
-            description: 'Edge/API request volume',
+            cost_usd: round(creditsCost, 4),
+            description: 'Credits consumed by model execution',
           },
         ],
         total_cost_usd: round(totalCost, 4),
@@ -414,9 +353,7 @@ export class UsageService {
         plan_id: 'pro',
         plan_name: 'Pro Plan',
         price_usd_monthly: 49,
-        included_compute_hours: DEFAULT_COMPUTE_HOURS_LIMIT,
-        included_storage_gb: 50,
-        included_bandwidth_gb: 1024,
+        included_credits: DEFAULT_CREDITS_LIMIT,
         next_billing_date: nextBillingDate(new Date()),
       },
     };
@@ -449,14 +386,14 @@ export class UsageService {
     );
 
     rows.push(
-      ['summary', 'totals', '', overview.summary.total_usage_cost_usd, overview.summary.total_requests, overview.summary.compute_hours_used, overview.summary.avg_response_time_ms ?? '']
+      ['summary', 'totals', '', overview.summary.total_usage_cost_usd, overview.summary.total_requests, overview.summary.credits_used, overview.summary.avg_response_time_ms ?? '']
         .map(escapeCsv)
         .join(',')
     );
 
     for (const point of overview.chart) {
       rows.push(
-        ['chart', 'daily_usage', point.date, point.compute, point.storage, point.network, '']
+        ['chart', 'daily_usage', point.date, point.credits, '', '', '']
           .map(escapeCsv)
           .join(',')
       );
@@ -472,7 +409,7 @@ export class UsageService {
 
     for (const project of overview.top_projects) {
       rows.push(
-        ['top_projects', project.project_id, project.project_name, project.compute_hours, project.requests, project.cost_usd, project.trend_pct]
+        ['top_projects', project.project_id, project.project_name, project.credits, project.requests, project.cost_usd, project.trend_pct]
           .map(escapeCsv)
           .join(',')
       );

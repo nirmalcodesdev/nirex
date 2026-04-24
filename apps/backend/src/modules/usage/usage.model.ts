@@ -1,10 +1,7 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export type UsageEventType =
-  | 'compute_hours'
-  | 'storage_gb'
-  | 'bandwidth_gb'
-  | 'edge_requests'
+  | 'credits'
   | 'response_time_ms';
 
 export interface IUsageEventDocument extends Document<Types.ObjectId> {
@@ -35,10 +32,7 @@ const UsageEventSchema = new Schema<IUsageEventDocument>(
       type: String,
       required: true,
       enum: [
-        'compute_hours',
-        'storage_gb',
-        'bandwidth_gb',
-        'edge_requests',
+        'credits',
         'response_time_ms',
       ],
       index: true,
