@@ -13,6 +13,7 @@ import chatSessionRoutes from './modules/chat-session/chat-session.routes.js';
 import usageRoutes from './modules/usage/usage.routes.js';
 import billingRoutes, { billingWebhookRouter } from './modules/billing/billing.routes.js';
 import apiKeyRoutes from './modules/api-keys/api-key.routes.js';
+import notificationsRoutes from './modules/notifications/notifications.routes.js';
 import { configurePassport } from './config/passport.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -68,6 +69,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/sessions', chatSessionRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/notifications', notificationsRoutes);
 app.use('/api/v1/api-keys', apiKeyRoutes);
 
 // ── Static files (auth test interface) ────────────────────────────────────

@@ -6,6 +6,7 @@
   const SESSIONS_API_BASE = '/api/sessions';
   const USAGE_API_BASE = '/api/usage';
   const BILLING_API_BASE = '/api/billing';
+  const NOTIFICATIONS_API_BASE = '/api/notifications';
   let accessToken = localStorage.getItem('accessToken');
   let refreshToken = localStorage.getItem('refreshToken');
   let activeApiKey = localStorage.getItem('activeApiKey') || '';
@@ -104,6 +105,13 @@
     document.getElementById('billingPortalForm').addEventListener('submit', handleBillingPortal);
     document.getElementById('billingDeleteForm').addEventListener('submit', handleBillingDeleteSubscription);
     document.getElementById('billingWebhookProbeForm').addEventListener('submit', handleBillingWebhookProbe);
+    document.getElementById('notificationsListForm').addEventListener('submit', handleNotificationsList);
+    document.getElementById('notificationsUnreadBtn').addEventListener('click', handleNotificationsUnreadCount);
+    document.getElementById('notificationsCreateForm').addEventListener('submit', handleNotificationsCreate);
+    document.getElementById('notificationsMarkReadForm').addEventListener('submit', handleNotificationsMarkRead);
+    document.getElementById('notificationsMarkUnreadForm').addEventListener('submit', handleNotificationsMarkUnread);
+    document.getElementById('notificationsArchiveForm').addEventListener('submit', handleNotificationsArchive);
+    document.getElementById('notificationsReadAllBtn').addEventListener('click', handleNotificationsReadAll);
     document.getElementById('createApiKeyForm').addEventListener('submit', handleCreateApiKey);
     document.getElementById('listApiKeysBtn').addEventListener('click', handleListApiKeys);
     document.getElementById('rotateApiKeyForm').addEventListener('submit', handleRotateApiKey);
@@ -150,14 +158,14 @@
       indicator.classList.add('authenticated');
       statusText.textContent = currentUser ? 'Authenticated as ' + currentUser.email : 'Authenticated';
       if (activeApiKey) {
-        statusText.textContent += ' | API key active for sessions/usage';
+        statusText.textContent += ' | API key active for sessions/usage/notifications';
       }
       authStatus.innerHTML = '<p style="color: #22c55e;"> Logged in' + (currentUser ? ' as <strong>' + currentUser.email + '</strong>' : '') + '</p>';
       tokenInfo.classList.remove('hidden');
       document.getElementById('accessTokenDisplay').textContent = accessToken;
     } else {
       indicator.classList.remove('authenticated');
-      statusText.textContent = activeApiKey ? 'Not authenticated | API key active for sessions/usage' : 'Not authenticated';
+      statusText.textContent = activeApiKey ? 'Not authenticated | API key active for sessions/usage/notifications' : 'Not authenticated';
       authStatus.innerHTML = '<p style="color: #71717a;">Not authenticated</p>';
       tokenInfo.classList.add('hidden');
     }
@@ -748,11 +756,11 @@
 
   function handleSetActiveApiKey() {
     const value = document.getElementById('activeApiKeyInput').value.trim();
-    activeApiKey = value;
-    if (activeApiKey) {
-      localStorage.setItem('activeApiKey', activeApiKey);
-      showToast('Active API key set for sessions/usage', 'success');
-    } else {
+      activeApiKey = value;
+      if (activeApiKey) {
+        localStorage.setItem('activeApiKey', activeApiKey);
+        showToast('Active API key set for sessions/usage/notifications', 'success');
+      } else {
       localStorage.removeItem('activeApiKey');
       showToast('Active API key is empty', 'error');
     }
@@ -1150,6 +1158,29 @@
       }
       return { success: true, data: data };
     } catch (err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
+  async function notificationsApiRequest(endpoint, options = {}) {
+    const url = NOTIFICATIONS_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    applyAuthHeaders(config, options.authMode || 'jwt-or-api-key');
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (_err) {
       return { success: false, error: { message: 'Network error. Is server running?' } };
     }
   }
@@ -2051,6 +2082,183 @@
       showResponse('billingWebhookProbeResponse', networkError, true);
       showToast(networkError.message, 'error');
       return false;
+    }
+  }
+
+  function parseCommaSeparatedValues(rawValue) {
+    return rawValue
+      .split(',')
+      .map(item => item.trim())
+      .filter(item => item.length > 0);
+  }
+
+  async function handleNotificationsList(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('notificationsListResponse');
+    setLoading('notificationsListBtn', true);
+
+    const params = new URLSearchParams();
+    params.set('limit', document.getElementById('notificationsListLimit').value || '20');
+    const cursor = document.getElementById('notificationsListCursor').value.trim();
+    if (cursor) params.set('cursor', cursor);
+    params.set('include_read', String(document.getElementById('notificationsIncludeRead').checked));
+    params.set('include_archived', String(document.getElementById('notificationsIncludeArchived').checked));
+
+    const kinds = parseCommaSeparatedValues(document.getElementById('notificationsKinds').value);
+    if (kinds.length > 0) params.set('kinds', kinds.join(','));
+    const severities = parseCommaSeparatedValues(document.getElementById('notificationsSeverities').value);
+    if (severities.length > 0) params.set('severities', severities.join(','));
+
+    const result = await notificationsApiRequest('?' + params.toString());
+    setLoading('notificationsListBtn', false);
+
+    if (result.success) {
+      showResponse('notificationsListResponse', result.data, false);
+      showToast('Notifications loaded', 'success');
+    } else {
+      showResponse('notificationsListResponse', result.error, true);
+      showToast(result.error.message || 'Failed to load notifications', 'error');
+    }
+    return false;
+  }
+
+  async function handleNotificationsUnreadCount() {
+    hideResponse('notificationsUnreadResponse');
+    setLoading('notificationsUnreadBtn', true);
+
+    const result = await notificationsApiRequest('/unread-count');
+    setLoading('notificationsUnreadBtn', false);
+
+    if (result.success) {
+      showResponse('notificationsUnreadResponse', result.data, false);
+      showToast('Unread count loaded', 'success');
+    } else {
+      showResponse('notificationsUnreadResponse', result.error, true);
+      showToast(result.error.message || 'Failed to load unread count', 'error');
+    }
+  }
+
+  async function handleNotificationsCreate(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('notificationsCreateResponse');
+    setLoading('notificationsCreateBtn', true);
+
+    const body = {
+      kind: document.getElementById('notificationsCreateKind').value,
+      severity: document.getElementById('notificationsCreateSeverity').value,
+      title: document.getElementById('notificationsCreateTitle').value.trim(),
+      message: document.getElementById('notificationsCreateMessage').value.trim()
+    };
+
+    const actionUrl = document.getElementById('notificationsCreateActionUrl').value.trim();
+    if (actionUrl) body.action_url = actionUrl;
+    const dedupeKey = document.getElementById('notificationsCreateDedupeKey').value.trim();
+    if (dedupeKey) body.dedupe_key = dedupeKey;
+
+    const result = await notificationsApiRequest('', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+
+    setLoading('notificationsCreateBtn', false);
+
+    if (result.success) {
+      showResponse('notificationsCreateResponse', result.data, false);
+      showToast('Notification created', 'success');
+      document.getElementById('notificationsCreateForm').reset();
+    } else {
+      showResponse('notificationsCreateResponse', result.error, true);
+      showToast(result.error.message || 'Failed to create notification', 'error');
+    }
+    return false;
+  }
+
+  async function handleNotificationsMarkRead(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('notificationsActionsResponse');
+    setLoading('notificationsMarkReadBtn', true);
+
+    const notificationId = document.getElementById('notificationsMarkReadId').value.trim();
+    const result = await notificationsApiRequest('/' + encodeURIComponent(notificationId) + '/read', {
+      method: 'PATCH'
+    });
+
+    setLoading('notificationsMarkReadBtn', false);
+    if (result.success) {
+      showResponse('notificationsActionsResponse', result.data, false);
+      showToast('Notification marked as read', 'success');
+      document.getElementById('notificationsMarkReadForm').reset();
+    } else {
+      showResponse('notificationsActionsResponse', result.error, true);
+      showToast(result.error.message || 'Failed to mark notification as read', 'error');
+    }
+    return false;
+  }
+
+  async function handleNotificationsMarkUnread(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('notificationsActionsResponse');
+    setLoading('notificationsMarkUnreadBtn', true);
+
+    const notificationId = document.getElementById('notificationsMarkUnreadId').value.trim();
+    const result = await notificationsApiRequest('/' + encodeURIComponent(notificationId) + '/unread', {
+      method: 'PATCH'
+    });
+
+    setLoading('notificationsMarkUnreadBtn', false);
+    if (result.success) {
+      showResponse('notificationsActionsResponse', result.data, false);
+      showToast('Notification marked as unread', 'success');
+      document.getElementById('notificationsMarkUnreadForm').reset();
+    } else {
+      showResponse('notificationsActionsResponse', result.error, true);
+      showToast(result.error.message || 'Failed to mark notification as unread', 'error');
+    }
+    return false;
+  }
+
+  async function handleNotificationsArchive(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('notificationsActionsResponse');
+    setLoading('notificationsArchiveBtn', true);
+
+    const notificationId = document.getElementById('notificationsArchiveId').value.trim();
+    const result = await notificationsApiRequest('/' + encodeURIComponent(notificationId), {
+      method: 'DELETE'
+    });
+
+    setLoading('notificationsArchiveBtn', false);
+    if (result.success) {
+      showResponse('notificationsActionsResponse', result.data, false);
+      showToast('Notification archived', 'success');
+      document.getElementById('notificationsArchiveForm').reset();
+    } else {
+      showResponse('notificationsActionsResponse', result.error, true);
+      showToast(result.error.message || 'Failed to archive notification', 'error');
+    }
+    return false;
+  }
+
+  async function handleNotificationsReadAll() {
+    hideResponse('notificationsActionsResponse');
+    setLoading('notificationsReadAllBtn', true);
+
+    const result = await notificationsApiRequest('/read-all', {
+      method: 'PATCH'
+    });
+
+    setLoading('notificationsReadAllBtn', false);
+    if (result.success) {
+      showResponse('notificationsActionsResponse', result.data, false);
+      showToast('All notifications marked as read', 'success');
+    } else {
+      showResponse('notificationsActionsResponse', result.error, true);
+      showToast(result.error.message || 'Failed to mark all notifications as read', 'error');
     }
   }
 })();

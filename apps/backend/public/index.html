@@ -336,7 +336,7 @@
   <div class="container">
     <header>
       <h1>Nirex Backend API Tester</h1>
-      <p class="subtitle">Test authentication, API keys, device management, chat session, usage analytics, and billing endpoints</p>
+      <p class="subtitle">Test authentication, API keys, device management, chat session, usage analytics, billing, and notifications endpoints</p>
     </header>
 
     <div class="card" style="margin-bottom: 20px;">
@@ -527,7 +527,7 @@
             <div>
               <form id="createApiKeyForm" action="#">
                 <div class="form-group"><label>Name</label><input type="text" id="apiKeyName" placeholder="CI Runner" required></div>
-                <div class="form-group"><label>Scopes (comma-separated)</label><input type="text" id="apiKeyScopes" value="sessions:read,usage:read" required></div>
+                <div class="form-group"><label>Scopes (comma-separated)</label><input type="text" id="apiKeyScopes" value="sessions:read,usage:read,notifications:read" required></div>
                 <div class="form-group"><label>Expires At (optional ISO datetime)</label><input type="text" id="apiKeyExpiresAt" placeholder="2027-01-01T00:00:00.000Z"></div>
                 <button type="submit" id="createApiKeyBtn"><span>Create API Key</span></button>
               </form>
@@ -545,7 +545,7 @@
               </form>
             </div>
             <div>
-              <div class="form-group"><label>Active API Key (for /api/sessions and /api/usage)</label><textarea id="activeApiKeyInput" rows="4" placeholder="Paste API key to use for sessions/usage requests"></textarea></div>
+              <div class="form-group"><label>Active API Key (for /api/sessions, /api/usage, and /api/notifications)</label><textarea id="activeApiKeyInput" rows="4" placeholder="Paste API key to use for sessions/usage/notifications requests"></textarea></div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button type="button" id="setActiveApiKeyBtn"><span>Set Active Key</span></button>
                 <button type="button" id="clearActiveApiKeyBtn" class="btn-secondary"><span>Clear Active Key</span></button>
@@ -553,7 +553,7 @@
               </div>
             </div>
           </div>
-          <div class="hint-box">API keys are shown only once on creation. Save them immediately. Active API key mode affects sessions and usage testers.</div>
+          <div class="hint-box">API keys are shown only once on creation. Save them immediately. Active API key mode affects sessions, usage, and notifications testers. New scopes: <code>notifications:read</code>, <code>notifications:write</code>.</div>
           <div id="apiKeysResponse" class="response hidden"></div>
         </div>
 
@@ -901,6 +901,79 @@
           <div class="hint-box">This endpoint requires raw application/json body and a valid Stripe signature in production.</div>
           <div id="billingWebhookProbeResponse" class="response hidden"></div>
         </div>
+
+        <div class="card">
+          <h2>Notifications List <span class="badge badge-protected">GET /notifications</span></h2>
+          <form id="notificationsListForm" action="#">
+            <div class="form-group"><label>Limit</label><input type="number" id="notificationsListLimit" value="20" min="1" max="100"></div>
+            <div class="form-group"><label>Cursor (optional)</label><input type="text" id="notificationsListCursor" placeholder="Pagination cursor from previous response"></div>
+            <div class="form-group">
+              <label><input type="checkbox" id="notificationsIncludeRead" checked> Include read</label>
+            </div>
+            <div class="form-group">
+              <label><input type="checkbox" id="notificationsIncludeArchived"> Include archived</label>
+            </div>
+            <div class="form-group"><label>Kinds (comma-separated, optional)</label><input type="text" id="notificationsKinds" placeholder="billing,usage,security"></div>
+            <div class="form-group"><label>Severities (comma-separated, optional)</label><input type="text" id="notificationsSeverities" placeholder="info,warning,error"></div>
+            <button type="submit" id="notificationsListBtn"><span>Fetch Notifications</span></button>
+          </form>
+          <div id="notificationsListResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Unread Count <span class="badge badge-protected">GET /notifications/unread-count</span></h2>
+          <button type="button" id="notificationsUnreadBtn">Get Unread Count</button>
+          <div id="notificationsUnreadResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Create Notification <span class="badge badge-protected">POST /notifications</span></h2>
+          <form id="notificationsCreateForm" action="#">
+            <div class="form-group">
+              <label>Kind</label>
+              <select id="notificationsCreateKind" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="system">system</option>
+                <option value="billing">billing</option>
+                <option value="usage">usage</option>
+                <option value="security">security</option>
+                <option value="project">project</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Severity</label>
+              <select id="notificationsCreateSeverity" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="info">info</option>
+                <option value="success">success</option>
+                <option value="warning">warning</option>
+                <option value="error">error</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Title</label><input type="text" id="notificationsCreateTitle" placeholder="Notification title" required></div>
+            <div class="form-group"><label>Message</label><textarea id="notificationsCreateMessage" rows="3" placeholder="Notification message" required></textarea></div>
+            <div class="form-group"><label>Action URL (optional)</label><input type="url" id="notificationsCreateActionUrl" placeholder="https://app.example.com/main/billing"></div>
+            <div class="form-group"><label>Dedupe Key (optional)</label><input type="text" id="notificationsCreateDedupeKey" placeholder="billing-event:evt_123"></div>
+            <button type="submit" id="notificationsCreateBtn"><span>Create Notification</span></button>
+          </form>
+          <div id="notificationsCreateResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2>Notification Actions <span class="badge badge-protected">PATCH/DELETE /notifications/:id</span></h2>
+          <form id="notificationsMarkReadForm" action="#">
+            <div class="form-group"><label>Notification ID (mark read)</label><input type="text" id="notificationsMarkReadId" placeholder="Mongo ObjectId" required></div>
+            <button type="submit" id="notificationsMarkReadBtn"><span>Mark Read</span></button>
+          </form>
+          <form id="notificationsMarkUnreadForm" action="#" style="margin-top: 12px;">
+            <div class="form-group"><label>Notification ID (mark unread)</label><input type="text" id="notificationsMarkUnreadId" placeholder="Mongo ObjectId" required></div>
+            <button type="submit" id="notificationsMarkUnreadBtn"><span>Mark Unread</span></button>
+          </form>
+          <form id="notificationsArchiveForm" action="#" style="margin-top: 12px;">
+            <div class="form-group"><label>Notification ID (archive)</label><input type="text" id="notificationsArchiveId" placeholder="Mongo ObjectId" required></div>
+            <button type="submit" id="notificationsArchiveBtn" class="btn-danger"><span>Archive Notification</span></button>
+          </form>
+          <button type="button" id="notificationsReadAllBtn" style="margin-top: 12px;">Mark All Read</button>
+          <div id="notificationsActionsResponse" class="response hidden"></div>
+        </div>
       </div>
     </div>
 
@@ -922,6 +995,8 @@
       <code style="color: #22d3ee;">/api/usage</code>
       <span style="color: #71717a; margin-left: 10px;">Billing:</span>
       <code style="color: #22d3ee;">/api/billing</code>
+      <span style="color: #71717a; margin-left: 10px;">Notifications:</span>
+      <code style="color: #22d3ee;">/api/notifications</code>
       <span style="color: #71717a; margin-left: 10px;">API Keys:</span>
       <code style="color: #22d3ee;">/api/v1/api-keys</code>
     </div>
