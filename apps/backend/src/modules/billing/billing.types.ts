@@ -1,6 +1,6 @@
 export type BillingCycle = 'month' | 'year';
 
-export type BillingPlanId = 'hobby' | 'pro' | 'enterprise' | 'custom';
+export type BillingPlanId = 'free' | 'pro' | 'enterprise' | 'custom';
 
 export interface BillingPlanPrice {
   billingCycle: BillingCycle;
@@ -106,8 +106,4 @@ export interface CreatePortalSessionInput {
 
 export interface CreatePortalSessionResult {
   portalUrl: string;
-}
-
-export interface CancelSubscriptionInput {
-  atPeriodEnd: boolean;
 }

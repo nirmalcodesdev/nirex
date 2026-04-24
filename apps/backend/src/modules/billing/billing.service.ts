@@ -33,7 +33,6 @@ import type {
   BillingOverviewSubscription,
   BillingPlan,
   BillingPlanId,
-  CancelSubscriptionInput,
   CreateCheckoutSessionInput,
   CreateCheckoutSessionResult,
   CreatePortalSessionInput,
@@ -153,7 +152,18 @@ function getInvoicePrimaryPriceId(invoice: Stripe.Invoice): string | null {
   return null;
 }
 
+function normalizePlanId(rawPlanId: string | undefined): BillingPlanId {
+  if (rawPlanId === 'hobby' || rawPlanId === 'free') return 'free';
+  if (rawPlanId === 'pro' || rawPlanId === 'enterprise' || rawPlanId === 'custom') {
+    return rawPlanId;
+  }
+  return 'free';
+}
+
 export class BillingService {
+  private readonly stripeSubscriptionSyncLimit = 200;
+  private readonly stripeInvoiceSyncLimit = 300;
+
   private billingSyncMinIntervalMs(): number {
     const seconds = Math.max(15, env.BILLING_SYNC_MIN_INTERVAL_SECONDS);
     return seconds * 1000;
@@ -388,6 +398,7 @@ export class BillingService {
 
   private async syncInvoiceFromStripe(
     invoice: Stripe.Invoice,
+    options?: { strictCustomerMapping?: boolean },
   ): Promise<IBillingInvoiceDocument | null> {
     if (!invoice.id) {
       logger.warn('Skipping invoice sync because Stripe invoice id is missing.');
@@ -400,11 +411,76 @@ export class BillingService {
     const customerDoc = await billingRepository.findCustomerByStripeCustomerId(
       stripeCustomerId,
     );
-    if (!customerDoc) {
+
+    let resolvedCustomer = customerDoc;
+    if (!resolvedCustomer && isStripeConfigured()) {
+      const stripe = getStripeClient();
+      let mappedUserId: Types.ObjectId | null = null;
+
+      try {
+        const stripeCustomer = await stripe.customers.retrieve(stripeCustomerId);
+        const metadataUserId =
+          !('deleted' in stripeCustomer && stripeCustomer.deleted)
+            ? stripeCustomer.metadata?.['userId']
+            : undefined;
+        if (
+          metadataUserId &&
+          Types.ObjectId.isValid(metadataUserId)
+        ) {
+          mappedUserId = new Types.ObjectId(metadataUserId);
+        }
+      } catch (error) {
+        logger.warn('Failed to retrieve Stripe customer while syncing invoice.', {
+          invoiceId: invoice.id,
+          stripeCustomerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      if (!mappedUserId) {
+        const stripeSubscriptionId = getStripeResourceId(
+          invoice.parent?.subscription_details?.subscription,
+        );
+        if (stripeSubscriptionId) {
+          try {
+            const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+            const metadataUserId = subscription.metadata?.['userId'];
+            if (metadataUserId && Types.ObjectId.isValid(metadataUserId)) {
+              mappedUserId = new Types.ObjectId(metadataUserId);
+            }
+          } catch (error) {
+            logger.warn('Failed to retrieve Stripe subscription while syncing invoice.', {
+              invoiceId: invoice.id,
+              stripeCustomerId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
+      if (mappedUserId) {
+        const user = await userRepository.findById(mappedUserId);
+        resolvedCustomer = await this.syncCustomerFromStripe(
+          mappedUserId,
+          stripeCustomerId,
+          user?.email,
+          user?.fullName,
+        );
+      }
+    }
+
+    if (!resolvedCustomer) {
       logger.warn('Skipping invoice sync without customer mapping.', {
         invoiceId: invoice.id,
         stripeCustomerId,
       });
+      if (options?.strictCustomerMapping) {
+        throw new AppError(
+          'Unable to map invoice to a billing customer.',
+          409,
+          'BILLING_CUSTOMER_MAPPING_NOT_FOUND',
+        );
+      }
       return null;
     }
 
@@ -423,7 +499,7 @@ export class BillingService {
       ) ?? 0;
 
     return billingRepository.upsertInvoice({
-      userId: customerDoc.userId,
+      userId: resolvedCustomer.userId,
       stripeCustomerId,
       stripeInvoiceId: invoice.id,
       stripeSubscriptionId: stripeSubscriptionId ?? undefined,
@@ -444,6 +520,65 @@ export class BillingService {
       periodEnd,
       stripeCreatedAt: toDateFromUnix(invoice.created) ?? new Date(),
     });
+  }
+
+  private async listSubscriptionsForCustomer(
+    stripe: Stripe,
+    stripeCustomerId: string,
+    maxItems: number,
+  ): Promise<Stripe.Subscription[]> {
+    const data: Stripe.Subscription[] = [];
+    let startingAfter: string | undefined;
+
+    while (data.length < maxItems) {
+      const page = await stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status: 'all',
+        limit: Math.min(100, maxItems - data.length),
+        starting_after: startingAfter,
+      });
+      data.push(...page.data);
+      if (!page.has_more || page.data.length === 0) break;
+      startingAfter = page.data[page.data.length - 1]?.id;
+    }
+
+    if (data.length >= maxItems) {
+      logger.warn('Subscription sync truncated at configured maximum.', {
+        stripeCustomerId,
+        maxItems,
+      });
+    }
+
+    return data;
+  }
+
+  private async listInvoicesForCustomer(
+    stripe: Stripe,
+    stripeCustomerId: string,
+    maxItems: number,
+  ): Promise<Stripe.Invoice[]> {
+    const data: Stripe.Invoice[] = [];
+    let startingAfter: string | undefined;
+
+    while (data.length < maxItems) {
+      const page = await stripe.invoices.list({
+        customer: stripeCustomerId,
+        limit: Math.min(100, maxItems - data.length),
+        starting_after: startingAfter,
+      });
+      data.push(...page.data);
+      if (!page.has_more || page.data.length === 0) break;
+      startingAfter = page.data[page.data.length - 1]?.id;
+    }
+
+    if (data.length >= maxItems) {
+      logger.warn('Invoice sync truncated at configured maximum.', {
+        stripeCustomerId,
+        maxItems,
+      });
+    }
+
+    return data;
   }
 
   private async refreshBillingState(
@@ -469,25 +604,26 @@ export class BillingService {
     );
 
     const [subscriptions, invoices] = await Promise.all([
-      stripe.subscriptions.list({
-        customer: customer.stripeCustomerId,
-        status: 'all',
-        limit: 10,
-      }),
-      stripe.invoices.list({
-        customer: customer.stripeCustomerId,
-        limit: 30,
-      }),
+      this.listSubscriptionsForCustomer(
+        stripe,
+        customer.stripeCustomerId,
+        this.stripeSubscriptionSyncLimit,
+      ),
+      this.listInvoicesForCustomer(
+        stripe,
+        customer.stripeCustomerId,
+        this.stripeInvoiceSyncLimit,
+      ),
     ]);
 
     await Promise.all(
-      subscriptions.data.map((subscription) =>
+      subscriptions.map((subscription) =>
         this.syncSubscriptionFromStripe(subscription),
       ),
     );
 
     await Promise.all(
-      invoices.data.map((invoice) => this.syncInvoiceFromStripe(invoice)),
+      invoices.map((invoice) => this.syncInvoiceFromStripe(invoice)),
     );
 
     await billingRepository.markCustomerStripeSynced(userId);
@@ -597,16 +733,16 @@ export class BillingService {
     const now = new Date();
 
     if (!isStripeConfigured()) {
-      const hobbyPlan = getBillingPlan('hobby') as BillingPlan;
+      const freePlan = getBillingPlan('free') as BillingPlan;
       return {
         billingEnabled: false,
         customerId: null,
-        currentPlan: hobbyPlan,
+        currentPlan: freePlan,
         subscription: this.mapSubscriptionOverview(null),
         paymentMethod: null,
         usage: {
           creditsUsed: null,
-          creditsIncluded: hobbyPlan.includedCredits,
+          creditsIncluded: freePlan.includedCredits,
           creditsUsagePct: null,
         },
         kpis: {
@@ -630,25 +766,28 @@ export class BillingService {
       });
     }
 
-    const [customer, subscription] = await Promise.all([
+    const [customer, activeSubscription] = await Promise.all([
       billingRepository.findCustomerByUserId(userId),
-      billingRepository.findLatestSubscriptionByUserId(userId),
+      billingRepository.findLatestSubscriptionByUserId(
+        userId,
+        ACTIVE_SUBSCRIPTION_STATUSES,
+      ),
     ]);
 
-    const currentPlanId = (subscription?.planId ?? 'hobby') as BillingPlanId;
-    const currentPlan = getBillingPlan(currentPlanId) ?? (getBillingPlan('hobby') as BillingPlan);
+    const currentPlanId = normalizePlanId(activeSubscription?.planId);
+    const currentPlan = getBillingPlan(currentPlanId) ?? (getBillingPlan('free') as BillingPlan);
     const usage = await this.resolveUsageData(userId, currentPlan);
     const [invoices, totalPaidYtdCents] = await Promise.all([
       billingRepository.listInvoicesByUserId(userId, 20),
       billingRepository.getPaidInvoicesYtdTotalCents(userId, now.getUTCFullYear()),
     ]);
 
-    const subscriptionCycle: BillingCycle | null = subscription
-      ? subscription.billingCycle
+    const subscriptionCycle: BillingCycle | null = activeSubscription
+      ? activeSubscription.billingCycle
       : null;
 
     const currentPlanAmountCents =
-      subscription?.amountCents ??
+      activeSubscription?.amountCents ??
       currentPlan.prices.month?.amountCents ??
       0;
 
@@ -656,14 +795,14 @@ export class BillingService {
       billingEnabled: true,
       customerId: customer?.stripeCustomerId ?? null,
       currentPlan,
-      subscription: this.mapSubscriptionOverview(subscription),
+      subscription: this.mapSubscriptionOverview(activeSubscription),
       paymentMethod: this.mapPaymentMethod(customer?.defaultPaymentMethod),
       usage,
       kpis: {
         currentPlanAmountCents,
-        currency: subscription?.currency ?? currentPlan.prices.month?.currency ?? 'usd',
+        currency: activeSubscription?.currency ?? currentPlan.prices.month?.currency ?? 'usd',
         totalPaidYtdCents,
-        nextBillingDate: toIsoString(subscription?.currentPeriodEnd),
+        nextBillingDate: toIsoString(activeSubscription?.currentPeriodEnd),
         yearlySavingsCents: this.calculateYearlySavings(currentPlan, subscriptionCycle),
       },
       invoices: invoices.map((invoice) => this.mapInvoice(invoice)),
@@ -793,63 +932,19 @@ export class BillingService {
     return { portalUrl: session.url };
   }
 
-  async cancelSubscription(
-    userId: Types.ObjectId,
-    input: CancelSubscriptionInput,
-  ): Promise<BillingOverviewSubscription> {
+  async deleteSubscription(userId: Types.ObjectId): Promise<BillingOverviewSubscription> {
     this.assertStripeEnabled();
     const stripe = getStripeClient();
-
     const current = await billingRepository.findLatestSubscriptionByUserId(
       userId,
       ACTIVE_SUBSCRIPTION_STATUSES,
     );
+
     if (!current) {
       throw new AppError('No active subscription found.', 404, 'SUBSCRIPTION_NOT_FOUND');
     }
 
-    const updated = input.atPeriodEnd
-      ? await stripe.subscriptions.update(current.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      })
-      : await stripe.subscriptions.cancel(current.stripeSubscriptionId);
-
-    const synced = await this.syncSubscriptionFromStripe(updated);
-    return this.mapSubscriptionOverview(synced);
-  }
-
-  async resumeSubscription(userId: Types.ObjectId): Promise<BillingOverviewSubscription> {
-    this.assertStripeEnabled();
-    const stripe = getStripeClient();
-    const current = await billingRepository.findLatestSubscriptionByUserId(userId, [
-      'paused',
-      'active',
-      'trialing',
-      'past_due',
-      'unpaid',
-    ]);
-
-    if (!current) {
-      throw new AppError('No subscription found to resume.', 404, 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    let updated: Stripe.Subscription;
-    if (current.status === 'paused') {
-      updated = await stripe.subscriptions.resume(current.stripeSubscriptionId, {
-        billing_cycle_anchor: 'unchanged',
-      });
-    } else if (current.cancelAtPeriodEnd) {
-      updated = await stripe.subscriptions.update(current.stripeSubscriptionId, {
-        cancel_at_period_end: false,
-      });
-    } else {
-      throw new AppError(
-        'Subscription is already active and not scheduled for cancellation.',
-        409,
-        'SUBSCRIPTION_NOT_CANCELLING',
-      );
-    }
-
+    const updated = await stripe.subscriptions.cancel(current.stripeSubscriptionId);
     const synced = await this.syncSubscriptionFromStripe(updated);
     return this.mapSubscriptionOverview(synced);
   }
@@ -885,7 +980,7 @@ export class BillingService {
   }
 
   private async handleInvoiceEvent(invoice: Stripe.Invoice): Promise<void> {
-    await this.syncInvoiceFromStripe(invoice);
+    await this.syncInvoiceFromStripe(invoice, { strictCustomerMapping: true });
   }
 
   private async sendBillingNotificationForEvent(event: Stripe.Event): Promise<void> {

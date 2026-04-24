@@ -873,21 +873,15 @@
         </div>
 
         <div class="card">
-          <h2>Cancel Subscription <span class="badge badge-protected">POST /billing/subscription/cancel</span></h2>
-          <form id="billingCancelForm" action="#">
+          <h2>Delete Subscription <span class="badge badge-protected">DELETE /billing/subscription</span></h2>
+          <form id="billingDeleteForm" action="#">
             <div class="form-group">
-              <label><input type="checkbox" id="billingCancelAtPeriodEnd" checked> Cancel at period end (recommended)</label>
+              <label><input type="checkbox" id="billingDeleteConfirm" required> Confirm permanent subscription deletion</label>
             </div>
-            <button type="submit" id="billingCancelBtn" class="btn-danger"><span>Cancel Subscription</span></button>
+            <button type="submit" id="billingDeleteBtn" class="btn-danger"><span>Delete Subscription</span></button>
           </form>
-          <div id="billingCancelResponse" class="response hidden"></div>
-        </div>
-
-        <div class="card">
-          <h2>Resume Subscription <span class="badge badge-protected">POST /billing/subscription/resume</span></h2>
-          <button type="button" id="billingResumeBtn">Resume Subscription</button>
-          <div class="hint-box">Resumes paused subscriptions or removes pending cancellation.</div>
-          <div id="billingResumeResponse" class="response hidden"></div>
+          <div class="hint-box">Deletes the current active subscription immediately.</div>
+          <div id="billingDeleteResponse" class="response hidden"></div>
         </div>
 
         <div class="card">

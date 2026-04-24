@@ -8,9 +8,21 @@ import type {
 import { tokenPricingService } from '../chat-session/token-pricing.service.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
 import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
+import { billingRepository } from '../billing/billing.repository.js';
+import { getBillingPlan, getPlanPrice } from '../billing/billing.catalog.js';
+import type { BillingPlanId } from '../billing/billing.types.js';
+import type { BillingSubscriptionStatus } from '../billing/billing.model.js';
 
 const CREDIT_UNIT_PRICE_USD = 0.05;
-const DEFAULT_CREDITS_LIMIT = 1000;
+const DEFAULT_CREDITS_LIMIT = 10000;
+const ACTIVE_SUBSCRIPTION_STATUSES: BillingSubscriptionStatus[] = [
+  'trialing',
+  'active',
+  'incomplete',
+  'past_due',
+  'unpaid',
+  'paused',
+];
 
 interface Snapshot {
   total_requests: number;
@@ -25,6 +37,17 @@ interface ExportPayload {
   content: string;
   contentType: string;
   fileName: string;
+}
+
+interface ResolvedCurrentPlan {
+  planId: string;
+  planName: string;
+  priceUsdMonthly: number;
+  includedCredits: number;
+  nextBillingDate: string;
+  billingCycle: 'month' | 'year' | null;
+  subscriptionPeriodStart: Date | null;
+  subscriptionPeriodEnd: Date | null;
 }
 
 const inMemoryCache = new Map<
@@ -60,6 +83,25 @@ function addDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setUTCDate(d.getUTCDate() + days);
   return d;
+}
+
+function addMonthsClamped(date: Date, months: number, anchorDay: number): Date {
+  const next = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + months,
+      1,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds(),
+    ),
+  );
+  const daysInTargetMonth = new Date(
+    Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  next.setUTCDate(Math.min(anchorDay, daysInTargetMonth));
+  return next;
 }
 
 function toISODate(date: Date): string {
@@ -119,9 +161,34 @@ function escapeCsv(value: string | number): string {
   return str;
 }
 
+function isBillingPlanId(value: string | undefined): value is BillingPlanId {
+  return value === 'free' || value === 'pro' || value === 'enterprise' || value === 'custom';
+}
+
+function normalizePlanId(value: string | undefined): BillingPlanId {
+  if (value === 'hobby' || value === 'free') return 'free';
+  if (isBillingPlanId(value)) return value;
+  return 'free';
+}
+
 export class UsageService {
   private readonly overviewCachePrefix = 'usage:overview';
   private readonly overviewCacheTtlSeconds = 120;
+  private readonly overviewInMemoryCacheMaxEntries = 5000;
+
+  private pruneInMemoryCache(nowMs: number = Date.now()): void {
+    for (const [key, item] of inMemoryCache) {
+      if (item.expiresAt < nowMs) {
+        inMemoryCache.delete(key);
+      }
+    }
+
+    while (inMemoryCache.size >= this.overviewInMemoryCacheMaxEntries) {
+      const oldestKey = inMemoryCache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      inMemoryCache.delete(oldestKey);
+    }
+  }
 
   private async getCachedOverview(cacheKey: string): Promise<UsageOverviewResponse | null> {
     if (isRedisAvailable()) {
@@ -155,10 +222,124 @@ export class UsageService {
       }
     }
 
+    this.pruneInMemoryCache();
     inMemoryCache.set(cacheKey, {
       value: data,
       expiresAt: Date.now() + this.overviewCacheTtlSeconds * 1000,
     });
+  }
+
+  private async resolveCurrentPlan(userId: Types.ObjectId): Promise<ResolvedCurrentPlan> {
+    const freePlan = getBillingPlan('free');
+    const defaultPlanName = freePlan?.name ?? 'Free';
+    const defaultMonthlyPrice = (getPlanPrice('free', 'month')?.amountCents ?? 0) / 100;
+
+    try {
+      const subscription = await billingRepository.findLatestSubscriptionByUserId(
+        userId,
+        ACTIVE_SUBSCRIPTION_STATUSES,
+      );
+      const rawPlanId = subscription?.planId;
+      const planId = normalizePlanId(rawPlanId);
+
+      if (planId === 'custom') {
+        const monthlyPrice = subscription
+          ? subscription.billingCycle === 'year'
+            ? subscription.amountCents / 1200
+            : subscription.amountCents / 100
+          : 0;
+
+        return {
+          planId: 'custom',
+          planName: 'Custom',
+          priceUsdMonthly: round(monthlyPrice, 2),
+          includedCredits: DEFAULT_CREDITS_LIMIT,
+          nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? nextBillingDate(new Date()),
+          billingCycle: subscription?.billingCycle ?? null,
+          subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
+          subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
+        };
+      }
+
+      const plan = getBillingPlan(planId) ?? freePlan;
+      const monthlyPriceCents =
+        getPlanPrice(planId, 'month')?.amountCents ??
+        (subscription
+          ? subscription.billingCycle === 'year'
+            ? Math.round(subscription.amountCents / 12)
+            : subscription.amountCents
+          : 0);
+
+      return {
+        planId: plan?.id ?? 'free',
+        planName: plan?.name ?? defaultPlanName,
+        priceUsdMonthly: round(monthlyPriceCents / 100, 2),
+        includedCredits: plan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
+        nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? nextBillingDate(new Date()),
+        billingCycle: subscription?.billingCycle ?? null,
+        subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
+        subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
+      };
+    } catch {
+      return {
+        planId: 'free',
+        planName: defaultPlanName,
+        priceUsdMonthly: round(defaultMonthlyPrice, 2),
+        includedCredits: freePlan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
+        nextBillingDate: nextBillingDate(new Date()),
+        billingCycle: null,
+        subscriptionPeriodStart: null,
+        subscriptionPeriodEnd: null,
+      };
+    }
+  }
+
+  private resolveCreditUsageRange(
+    now: Date,
+    plan: ResolvedCurrentPlan,
+  ): DateRange {
+    const nowEnd = endOfDay(now);
+
+    if (
+      plan.billingCycle === 'month' &&
+      plan.subscriptionPeriodStart &&
+      plan.subscriptionPeriodEnd
+    ) {
+      return {
+        start: plan.subscriptionPeriodStart,
+        end: nowEnd < plan.subscriptionPeriodEnd ? nowEnd : plan.subscriptionPeriodEnd,
+      };
+    }
+
+    if (
+      plan.billingCycle === 'year' &&
+      plan.subscriptionPeriodStart &&
+      plan.subscriptionPeriodEnd
+    ) {
+      const anchorDay = plan.subscriptionPeriodStart.getUTCDate();
+      let windowStart = new Date(plan.subscriptionPeriodStart);
+      let nextWindowStart = addMonthsClamped(windowStart, 1, anchorDay);
+
+      while (nextWindowStart <= now && nextWindowStart < plan.subscriptionPeriodEnd) {
+        windowStart = nextWindowStart;
+        nextWindowStart = addMonthsClamped(windowStart, 1, anchorDay);
+      }
+
+      const maxEnd = nextWindowStart.getTime() - 1;
+      const entitlementEnd = new Date(
+        Math.min(maxEnd, plan.subscriptionPeriodEnd.getTime(), nowEnd.getTime()),
+      );
+
+      return {
+        start: windowStart,
+        end: entitlementEnd,
+      };
+    }
+
+    return {
+      start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+      end: nowEnd,
+    };
   }
 
   private async buildSnapshot(userId: Types.ObjectId, range: DateRange): Promise<Snapshot> {
@@ -251,21 +432,26 @@ export class UsageService {
 
     const { current, previous } = resolveRange(range, new Date());
 
+    const currentPlan = await this.resolveCurrentPlan(userId);
+    const creditRange = this.resolveCreditUsageRange(new Date(), currentPlan);
+
     const [
       currentSnapshot,
       previousSnapshot,
       dailyTokens,
       dailyEvents,
+      creditSnapshot,
     ] = await Promise.all([
       this.buildSnapshot(userId, current),
       this.buildSnapshot(userId, previous),
       usageRepository.getDailyTokenTotals(userId, current),
       usageRepository.getDailyEventTotals(userId, current, ['credits']),
+      this.buildSnapshot(userId, creditRange),
     ]);
 
-    const creditsUsed = currentSnapshot.event_credits > 0
-      ? currentSnapshot.event_credits
-      : currentSnapshot.derived_credits;
+    const creditsUsed = creditSnapshot.event_credits > 0
+      ? creditSnapshot.event_credits
+      : creditSnapshot.derived_credits;
     const creditsCost = currentSnapshot.event_credits > 0
       ? currentSnapshot.event_credits * CREDIT_UNIT_PRICE_USD
       : currentSnapshot.total_token_cost_usd;
@@ -307,14 +493,16 @@ export class UsageService {
       };
     });
 
+    const creditsLimit = Math.max(1, currentPlan.includedCredits);
+
     const result: UsageOverviewResponse = {
       summary: {
         total_usage_cost_usd: round(totalCost, 4),
         total_usage_cost_trend_pct: percentageChange(totalCost, previousTotalCost),
         credits_used: round(creditsUsed, 2),
-        credits_limit: DEFAULT_CREDITS_LIMIT,
+        credits_limit: creditsLimit,
         credits_used_pct: round(
-          (creditsUsed / DEFAULT_CREDITS_LIMIT) * 100,
+          (creditsUsed / creditsLimit) * 100,
           2
         ),
         total_requests: Math.round(currentSnapshot.total_requests),
@@ -350,11 +538,11 @@ export class UsageService {
       },
       top_projects: topProjects,
       current_plan: {
-        plan_id: 'pro',
-        plan_name: 'Pro Plan',
-        price_usd_monthly: 49,
-        included_credits: DEFAULT_CREDITS_LIMIT,
-        next_billing_date: nextBillingDate(new Date()),
+        plan_id: currentPlan.planId,
+        plan_name: currentPlan.planName,
+        price_usd_monthly: currentPlan.priceUsdMonthly,
+        included_credits: creditsLimit,
+        next_billing_date: currentPlan.nextBillingDate,
       },
     };
 

@@ -34,7 +34,7 @@ export function getBillingPlans(): BillingPlan[] {
 
   return [
     {
-      ...BILLING_PLAN_CATALOG.hobby,
+      ...BILLING_PLAN_CATALOG.free,
       prices: {
         month: {
           billingCycle: 'month',

@@ -15,9 +15,9 @@ export const BILLING_PLAN_CATALOG: Record<
   BillingCatalogPlanId,
   BillingPlanCatalogEntry
 > = {
-  hobby: {
-    id: 'hobby',
-    name: 'Hobby',
+  free: {
+    id: 'free',
+    name: 'Free',
     description: 'Perfect for side projects and learning.',
     features: [
       'Limited Chat Sessions',

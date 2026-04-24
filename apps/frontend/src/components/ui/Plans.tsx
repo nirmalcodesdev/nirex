@@ -6,7 +6,7 @@ import MagneticButton from "@nirex/ui/MagneticButton";
 
 const plans = [
   {
-    name: "Hobby",
+    name: "Free",
     description: "Perfect for side projects and learning.",
     price: { monthly: "$0", yearly: "$0" },
     features: [
