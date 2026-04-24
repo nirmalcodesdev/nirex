@@ -375,6 +375,25 @@ export {
 } from './domain/notifications/index.js';
 
 // ============================================================================
+// Domain: Dashboard
+// ============================================================================
+
+export type {
+  DashboardHealthStatus,
+  DashboardOverviewQuery,
+  DashboardUsageOverview,
+  DashboardBillingOverview,
+  DashboardNotificationsOverview,
+  DashboardKpis,
+  DashboardOverviewResponse,
+} from './domain/dashboard/index.js';
+
+export {
+  dashboardOverviewQuerySchema,
+  type DashboardOverviewQuerySchema,
+} from './domain/dashboard/index.js';
+
+// ============================================================================
 // Frontend-specific (kept for backward compatibility, consider moving to UI package)
 // ============================================================================
 
