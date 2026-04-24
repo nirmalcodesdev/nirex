@@ -5,6 +5,7 @@
   const API_KEYS_API_BASE = '/api/v1/api-keys';
   const SESSIONS_API_BASE = '/api/sessions';
   const USAGE_API_BASE = '/api/usage';
+  const DASHBOARD_API_BASE = '/api/dashboard';
   const BILLING_API_BASE = '/api/billing';
   const NOTIFICATIONS_API_BASE = '/api/notifications';
   let accessToken = localStorage.getItem('accessToken');
@@ -97,6 +98,7 @@
     document.getElementById('editMessageForm').addEventListener('submit', handleEditMessage);
     document.getElementById('deleteMessageForm').addEventListener('submit', handleDeleteMessage);
     document.getElementById('acknowledgeMessagesForm').addEventListener('submit', handleAcknowledgeMessages);
+    document.getElementById('dashboardOverviewForm').addEventListener('submit', handleDashboardOverview);
     document.getElementById('usageOverviewForm').addEventListener('submit', handleUsageOverview);
     document.getElementById('usageExportForm').addEventListener('submit', handleUsageExport);
     document.getElementById('billingOverviewBtn').addEventListener('click', handleBillingOverview);
@@ -1162,6 +1164,29 @@
     }
   }
 
+  async function dashboardApiRequest(endpoint, options = {}) {
+    const url = DASHBOARD_API_BASE + endpoint;
+    const config = {
+      headers: { 'Content-Type': 'application/json' },
+      method: options.method || 'GET'
+    };
+
+    if (options.body) config.body = options.body;
+    applyAuthHeaders(config, options.authMode || 'jwt-or-api-key');
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        return { success: false, error: { status: response.status, ...data } };
+      }
+      return { success: true, data: data };
+    } catch (_err) {
+      return { success: false, error: { message: 'Network error. Is server running?' } };
+    }
+  }
+
   async function notificationsApiRequest(endpoint, options = {}) {
     const url = NOTIFICATIONS_API_BASE + endpoint;
     const config = {
@@ -2119,6 +2144,37 @@
     } else {
       showResponse('notificationsListResponse', result.error, true);
       showToast(result.error.message || 'Failed to load notifications', 'error');
+    }
+    return false;
+  }
+
+  async function handleDashboardOverview(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideResponse('dashboardOverviewResponse');
+    setLoading('dashboardOverviewBtn', true);
+
+    const params = new URLSearchParams();
+    params.set('usage_range', document.getElementById('dashboardUsageRange').value);
+    params.set(
+      'include_recent_notifications',
+      String(document.getElementById('dashboardIncludeNotifications').checked),
+    );
+    params.set(
+      'notifications_limit',
+      document.getElementById('dashboardNotificationsLimit').value || '5',
+    );
+
+    const result = await dashboardApiRequest('/overview?' + params.toString());
+
+    setLoading('dashboardOverviewBtn', false);
+
+    if (result.success) {
+      showResponse('dashboardOverviewResponse', result.data, false);
+      showToast('Dashboard overview loaded', 'success');
+    } else {
+      showResponse('dashboardOverviewResponse', result.error, true);
+      showToast(result.error.message || 'Failed to load dashboard overview', 'error');
     }
     return false;
   }

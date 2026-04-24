@@ -6,6 +6,7 @@ export type ApiKeyScope =
   | 'usage:read'
   | 'billing:read'
   | 'billing:write'
+  | 'dashboard:read'
   | 'notifications:read'
   | 'notifications:write';
 
@@ -15,6 +16,7 @@ export const API_KEY_SCOPES: ApiKeyScope[] = [
   'usage:read',
   'billing:read',
   'billing:write',
+  'dashboard:read',
   'notifications:read',
   'notifications:write',
 ];

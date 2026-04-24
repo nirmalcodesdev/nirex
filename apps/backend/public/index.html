@@ -781,6 +781,27 @@
     <div id="usageTab" class="tab-content hidden">
       <div class="grid">
         <div class="card">
+          <h2>Dashboard Overview <span class="badge badge-protected">GET /dashboard/overview</span></h2>
+          <form id="dashboardOverviewForm" action="#">
+            <div class="form-group">
+              <label>Usage Range</label>
+              <select id="dashboardUsageRange" style="width: 100%; padding: 10px; background: #09090b; border: 1px solid #27272a; border-radius: 8px; color: #e4e4e7;">
+                <option value="30d">30d</option>
+                <option value="90d">90d</option>
+                <option value="month_to_date">month_to_date</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label><input type="checkbox" id="dashboardIncludeNotifications" checked> Include recent notifications</label>
+            </div>
+            <div class="form-group"><label>Notifications Limit</label><input type="number" id="dashboardNotificationsLimit" value="5" min="1" max="20"></div>
+            <button type="submit" id="dashboardOverviewBtn"><span>Fetch Dashboard</span></button>
+          </form>
+          <div class="hint-box">Aggregated overview combining usage, billing, and notifications with health status and partial-failure handling.</div>
+          <div id="dashboardOverviewResponse" class="response hidden"></div>
+        </div>
+
+        <div class="card">
           <h2>Usage Overview <span class="badge badge-protected">GET /usage/overview</span></h2>
           <form id="usageOverviewForm" action="#">
             <div class="form-group">
@@ -993,6 +1014,8 @@
       <code style="color: #22d3ee;">/api/sessions</code>
       <span style="color: #71717a; margin-left: 10px;">Usage:</span>
       <code style="color: #22d3ee;">/api/usage</code>
+      <span style="color: #71717a; margin-left: 10px;">Dashboard:</span>
+      <code style="color: #22d3ee;">/api/dashboard</code>
       <span style="color: #71717a; margin-left: 10px;">Billing:</span>
       <code style="color: #22d3ee;">/api/billing</code>
       <span style="color: #71717a; margin-left: 10px;">Notifications:</span>
