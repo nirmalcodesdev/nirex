@@ -22,6 +22,13 @@ import {
   isUserGloballyBlacklisted,
 } from './token-blacklist.service.js';
 import { env } from '../../config/env.js';
+import {
+  clearAuthCookies,
+  readAccessTokenCookie,
+  readRefreshTokenCookie,
+  readRememberSessionCookie,
+  setAuthCookies,
+} from './auth.cookies.js';
 
 function getIp(req: Request): string {
   const ip = (
@@ -62,6 +69,41 @@ function getCountryFromIp(ip: string): string {
 
 function getDeviceInfo(req: Request): string {
   return req.headers['user-agent'] ?? 'unknown';
+}
+
+function getAccessToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  return readAccessTokenCookie(req);
+}
+
+async function blacklistCurrentAccessToken(req: Request): Promise<void> {
+  const token = getAccessToken(req);
+  if (!token) return;
+
+  try {
+    const decoded = jwt.decode(token) as { jti?: string; exp?: number } | null;
+    if (decoded?.jti && decoded?.exp) {
+      const expiresInSeconds = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
+      await blacklistToken(decoded.jti, expiresInSeconds);
+    }
+  } catch {
+    // Ignore decode errors - token will naturally expire anyway.
+  }
+}
+
+function toUserDto(user: Awaited<ReturnType<typeof authService.getMe>>) {
+  return {
+    id: user._id,
+    email: user.email,
+    fullName: user.fullName,
+    isEmailVerified: user.isEmailVerified,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 }
 
 // POST /api/v1/auth/sign-up
@@ -114,41 +156,42 @@ export async function signin(req: Request, res: Response): Promise<void> {
     deviceInfo: getDeviceInfo(req),
   });
 
+  setAuthCookies(res, {
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+  }, {
+    rememberMe: (req.body as { rememberMe?: boolean }).rememberMe === true,
+  });
+
   res.json({
     status: 'success',
+    message: 'Signed in successfully.',
     data: {
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
+      userId: result.userId,
+      sessionId: result.sessionId,
     },
   });
 }
 
 // POST /api/v1/auth/refresh
 export async function refresh(req: Request, res: Response): Promise<void> {
-  const { refreshToken } = req.body as { refreshToken: string };
+  const body = req.body as { refreshToken?: string };
+  const refreshToken = body.refreshToken ?? readRefreshTokenCookie(req);
+  if (!refreshToken) {
+    throw new AppError('Refresh token is required', 401, 'TOKEN_INVALID');
+  }
+
   const tokens = await authService.refresh(refreshToken, getIp(req));
-  res.json({ status: 'success', data: tokens });
+  setAuthCookies(res, tokens, { rememberMe: readRememberSessionCookie(req) });
+  res.json({ status: 'success', message: 'Session refreshed.' });
 }
 
 // POST /api/v1/auth/sign-out  (requires authentication)
 export async function signout(req: Request, res: Response): Promise<void> {
-  // Blacklist the current access token to prevent further use
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    try {
-      // Decode without verification to get jti and exp
-      const decoded = jwt.decode(token) as { jti?: string; exp?: number } | null;
-      if (decoded?.jti && decoded?.exp) {
-        const expiresInSeconds = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
-        await blacklistToken(decoded.jti, expiresInSeconds);
-      }
-    } catch {
-      // Ignore decode errors - token will naturally expire anyway
-    }
-  }
+  await blacklistCurrentAccessToken(req);
 
   await authService.signout(req.sessionId!);
+  clearAuthCookies(res);
 
   audit.signout(req.userId!, getIp(req), {
     sessionId: req.sessionId,
@@ -163,21 +206,10 @@ export async function signoutAll(req: Request, res: Response): Promise<void> {
   await blacklistAllUserTokens(req.userId!);
 
   // Also blacklist the current access token
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    try {
-      const decoded = jwt.decode(token) as { jti?: string; exp?: number } | null;
-      if (decoded?.jti && decoded?.exp) {
-        const expiresInSeconds = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
-        await blacklistToken(decoded.jti, expiresInSeconds);
-      }
-    } catch {
-      // Ignore decode errors
-    }
-  }
+  await blacklistCurrentAccessToken(req);
 
   await authService.signoutAll(req.userId!);
+  clearAuthCookies(res);
 
   audit.signout(req.userId!, getIp(req), {
     action: 'SIGNOUT_ALL',
@@ -201,6 +233,7 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
 export async function resetPassword(req: Request, res: Response): Promise<void> {
   const { token, password } = req.body as ResetPasswordRequest;
   await authService.resetPassword(token, password);
+  clearAuthCookies(res);
 
   // Note: We don't have userId here since it's a public endpoint
   // The audit log is created in the service layer
@@ -220,6 +253,7 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
 export async function changePassword(req: Request, res: Response): Promise<void> {
   const { currentPassword, newPassword } = req.body as ChangePasswordRequest;
   await authService.changePassword(req.userId!, currentPassword, newPassword);
+  clearAuthCookies(res);
 
   audit.passwordChange(req.userId!, getIp(req), {
     sessionId: req.sessionId,
@@ -234,21 +268,17 @@ export async function getMe(req: Request, res: Response): Promise<void> {
   res.json({
     status: 'success',
     data: {
-      id: user._id,
-      email: user.email,
-      fullName: user.fullName,
-      isEmailVerified: user.isEmailVerified,
-      createdAt: user.createdAt,
+      ...toUserDto(user),
     },
   });
 }
 
 // GET /api/v1/auth/check  (public endpoint - checks if user is signed in)
 export async function checkAuth(req: Request, res: Response): Promise<void> {
-  const authHeader = req.headers.authorization;
+  const token = getAccessToken(req);
 
   // No token provided
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!token) {
     res.json({
       status: 'success',
       data: {
@@ -258,8 +288,6 @@ export async function checkAuth(req: Request, res: Response): Promise<void> {
     });
     return;
   }
-
-  const token = authHeader.slice(7);
 
   try {
     // Verify the token
@@ -317,13 +345,7 @@ export async function checkAuth(req: Request, res: Response): Promise<void> {
       status: 'success',
       data: {
         isAuthenticated: true,
-        user: {
-          id: user._id,
-          email: user.email,
-          fullName: user.fullName,
-          isEmailVerified: user.isEmailVerified,
-          createdAt: user.createdAt,
-        },
+        user: toUserDto(user),
         session: {
           id: session._id.toString(),
           deviceInfo: session.deviceInfo,
@@ -415,11 +437,7 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     message: 'Profile updated successfully.',
     data: {
       user: {
-        id: user._id,
-        email: user.email,
-        fullName: user.fullName,
-        isEmailVerified: user.isEmailVerified,
-        createdAt: user.createdAt,
+        ...toUserDto(user),
       },
     },
   });
@@ -507,7 +525,10 @@ export async function beginTwoFactorSetup(req: Request, res: Response): Promise<
   res.json({
     status: 'success',
     message: 'Scan the QR URL with an authenticator app, then verify setup with a code.',
-    data,
+    data: {
+      otpauthUrl: data.otpauthUrl,
+      expiresAt: data.expiresAt,
+    },
   });
 }
 
@@ -652,13 +673,15 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
       provider: 'google',
     });
 
-    // Redirect back to frontend with tokens
+    setAuthCookies(res, {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+
+    // Redirect back to frontend without exposing tokens to JavaScript or URLs.
     const redirectUrl = new URL(env.APP_URL);
     redirectUrl.searchParams.set('oauth_success', 'true');
     redirectUrl.searchParams.set('provider', 'google');
-    redirectUrl.searchParams.set('access_token', result.accessToken);
-    redirectUrl.searchParams.set('refresh_token', result.refreshToken);
-    redirectUrl.searchParams.set('user_id', result.userId);
 
     return res.redirect(redirectUrl.toString());
   } catch (err) {
@@ -797,13 +820,15 @@ export async function githubCallback(req: Request, res: Response): Promise<void>
       provider: 'github',
     });
 
-    // Redirect back to frontend with tokens
+    setAuthCookies(res, {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+
+    // Redirect back to frontend without exposing tokens to JavaScript or URLs.
     const redirectUrl = new URL(env.APP_URL);
     redirectUrl.searchParams.set('oauth_success', 'true');
     redirectUrl.searchParams.set('provider', 'github');
-    redirectUrl.searchParams.set('access_token', result.accessToken);
-    redirectUrl.searchParams.set('refresh_token', result.refreshToken);
-    redirectUrl.searchParams.set('user_id', result.userId);
 
     return res.redirect(redirectUrl.toString());
   } catch (err) {

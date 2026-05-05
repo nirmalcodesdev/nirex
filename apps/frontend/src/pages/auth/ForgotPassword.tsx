@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, ArrowLeft, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
-import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
+import { APP_NAME, APP_NAME_SUFFIX, forgotPasswordSchema } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { authApi } from "../../features/auth/authApi";
 
 export function ForgotPassword() {
     const [email, setEmail] = useState("");
@@ -12,13 +13,12 @@ export function ForgotPassword() {
     const [error, setError] = useState<string>("");
 
     const validateEmail = () => {
-        if (!email.trim()) {
-            setError("Email is required");
-            return false;
-        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            setError("Please enter a valid email address");
+        const parsed = forgotPasswordSchema.safeParse({ email });
+        if (!parsed.success) {
+            setError(parsed.error.issues[0]?.message ?? "Please enter a valid email address");
             return false;
         }
+
         setError("");
         return true;
     };
@@ -31,10 +31,15 @@ export function ForgotPassword() {
         }
 
         setIsLoading(true);
-        setTimeout(() => {
-            setIsLoading(false);
+
+        try {
+            await authApi.forgotPassword({ email });
             setIsSubmitted(true);
-        }, 1200);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unable to send reset link. Please try again.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (

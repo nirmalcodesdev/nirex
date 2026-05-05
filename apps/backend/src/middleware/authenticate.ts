@@ -8,6 +8,7 @@ import {
 } from '../modules/auth/token-blacklist.service.js';
 import { logger } from '../utils/logger.js';
 import { sessionService } from '../modules/session/session.service.js';
+import { readAccessTokenCookie } from '../modules/auth/auth.cookies.js';
 
 /**
  * Extract token from request (header or query param for SSE)
@@ -17,6 +18,11 @@ function extractToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7);
+  }
+
+  const cookieToken = readAccessTokenCookie(req);
+  if (cookieToken) {
+    return cookieToken;
   }
 
   // Fall back to query parameter (for SSE connections)
@@ -33,10 +39,12 @@ function extractToken(req: Request): string | null {
  */
 function logTokenDebug(req: Request): void {
   const hasAuthHeader = !!req.headers.authorization;
+  const hasAuthCookie = !!readAccessTokenCookie(req);
   const hasTokenParam = !!req.query.token;
   logger.debug('Token extraction debug', {
     path: req.path,
     hasAuthHeader,
+    hasAuthCookie,
     hasTokenParam,
     queryKeys: Object.keys(req.query),
   });

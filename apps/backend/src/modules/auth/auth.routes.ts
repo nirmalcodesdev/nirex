@@ -8,7 +8,6 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   changePasswordSchema,
-  refreshSchema,
   updateProfileSchema,
   terminateDevicesSchema,
 } from '../../middleware/validate.js';
@@ -21,7 +20,7 @@ const router: Router = Router();
 router.post('/sign-up', authLimiter, validate(signUpSchema), asyncWrapper(authController.signup));
 router.get('/verify-email', asyncWrapper(authController.verifyEmail));
 router.post('/sign-in', authLimiter, validate(signInWithTwoFactorSchema), asyncWrapper(authController.signin));
-router.post('/refresh', validate(refreshSchema), asyncWrapper(authController.refresh));
+router.post('/refresh', asyncWrapper(authController.refresh));
 router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), asyncWrapper(authController.forgotPassword));
 router.post('/reset-password', authLimiter, validate(resetPasswordSchema), asyncWrapper(authController.resetPassword));
 router.get('/check', asyncWrapper(authController.checkAuth)); // Check if user is signed in

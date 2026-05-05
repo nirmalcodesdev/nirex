@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { apiLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { csrfProtection } from './middleware/csrfProtection.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import chatSessionRoutes from './modules/chat-session/chat-session.routes.js';
 import usageRoutes from './modules/usage/usage.routes.js';
@@ -21,6 +22,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app: Express = express();
+
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
 // ── Security headers ──────────────────────────────────────────────────────
 app.use(helmet());
@@ -52,6 +57,7 @@ app.use('/api/billing/webhooks', billingWebhookRouter);
 // ── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(csrfProtection);
 
 // ── Passport ──────────────────────────────────────────────────────────────
 configurePassport();

@@ -18,15 +18,20 @@ export function createApiResponse<T>(
   message?: string,
   meta?: Partial<ResponseMeta>
 ): ApiResponse<T> {
-  return {
+  const response: ApiResponse<T> = {
     status: 'success',
-    message,
     data,
     meta: {
       timestamp: new Date().toISOString(),
       ...meta,
     },
   };
+
+  if (message !== undefined) {
+    response.message = message;
+  }
+
+  return response;
 }
 
 /**
@@ -40,8 +45,11 @@ export function createApiError(
   const error: ApiError = {
     code,
     message,
-    details,
   };
+
+  if (details !== undefined) {
+    error.details = details;
+  }
 
   return {
     status: 'error',

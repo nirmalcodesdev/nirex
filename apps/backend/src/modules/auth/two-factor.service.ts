@@ -16,6 +16,16 @@ interface EncryptedSecret {
   ciphertext: string;
 }
 
+function isEncryptedSecret(value: unknown): value is EncryptedSecret {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Partial<EncryptedSecret>).iv === 'string' &&
+    typeof (value as Partial<EncryptedSecret>).tag === 'string' &&
+    typeof (value as Partial<EncryptedSecret>).ciphertext === 'string'
+  );
+}
+
 function getEncryptionKey(): Buffer {
   return crypto.createHash('sha256').update(env.TWO_FACTOR_ENCRYPTION_KEY, 'utf8').digest();
 }
@@ -34,6 +44,10 @@ function encryptSecret(secret: string): EncryptedSecret {
 }
 
 function decryptSecret(payload: EncryptedSecret): string {
+  if (!isEncryptedSecret(payload)) {
+    throw new AppError('Two-factor setup is invalid. Start setup again.', 400, 'TWO_FACTOR_SETUP_INVALID');
+  }
+
   const decipher = crypto.createDecipheriv(
     'aes-256-gcm',
     getEncryptionKey(),
@@ -226,6 +240,10 @@ export class TwoFactorService {
     if (!pendingSecret || !pendingExpiresAt) {
       throw new AppError('2FA setup is not initialized', 400, 'TWO_FACTOR_SETUP_NOT_STARTED');
     }
+    if (!isEncryptedSecret(pendingSecret)) {
+      await userRepository.clearTwoFactorPendingSetup(userId);
+      throw new AppError('2FA setup is invalid. Start setup again.', 400, 'TWO_FACTOR_SETUP_INVALID');
+    }
     if (pendingExpiresAt.getTime() < Date.now()) {
       await userRepository.clearTwoFactorPendingSetup(userId);
       throw new AppError('2FA setup has expired. Start setup again.', 400, 'TWO_FACTOR_SETUP_EXPIRED');
@@ -259,6 +277,9 @@ export class TwoFactorService {
     if (!user.twoFactor?.enabled || !user.twoFactor.secret) {
       throw new AppError('2FA is not enabled', 400, 'TWO_FACTOR_NOT_ENABLED');
     }
+    if (!isEncryptedSecret(user.twoFactor.secret)) {
+      throw new AppError('Two-factor configuration is invalid', 500, 'TWO_FACTOR_CONFIG_INVALID');
+    }
 
     const secret = decryptSecret(user.twoFactor.secret);
     const valid = await verifyTotpOrBackupCode(userId, secret, codeOrBackupCode);
@@ -286,7 +307,7 @@ export class TwoFactorService {
       throw new AppError('Two-factor code is required', 401, 'TWO_FACTOR_REQUIRED');
     }
 
-    if (!user.twoFactor.secret) {
+    if (!user.twoFactor.secret || !isEncryptedSecret(user.twoFactor.secret)) {
       throw new AppError('Two-factor configuration is invalid', 500, 'TWO_FACTOR_CONFIG_INVALID');
     }
 

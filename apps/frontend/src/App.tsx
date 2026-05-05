@@ -11,6 +11,8 @@ import { Layout } from "./components/main/Layout";
 import { ToastProvider } from "./components/ToastProvider"; // Keep ToastProvider import here
 import { ThemeProvider } from "./components/ui/ThemeProvider";
 import { RouteTransition } from "./components/main/RouteTransition";
+import { AuthBootstrap } from "./features/auth/AuthBootstrap";
+import { ProtectedRoute, PublicOnlyRoute } from "./features/auth/AuthGuards";
 
 // Constants
 import { ROUTES } from "./constant/routes";
@@ -82,6 +84,7 @@ const App = () => (
           <Toaster />
           <SonnerToaster />
           <BrowserRouter>
+            <AuthBootstrap />
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 {/* Public Marketing Routes */}
@@ -91,10 +94,10 @@ const App = () => (
                 <Route path={ROUTES.DOCS} element={<Documentation />} />
                 <Route path={ROUTES.DOCUMENTATION} element={<Documentation />} />
                 {/* Onboarding Route */}
-                <Route path={ROUTES.ONBOARDING} element={<RouteTransition><OnboardingPage /></RouteTransition>} />
+                <Route path={ROUTES.ONBOARDING} element={<ProtectedRoute><RouteTransition><OnboardingPage /></RouteTransition></ProtectedRoute>} />
 
                 {/* Authentication System */}
-                <Route path={ROUTES.AUTH.ROOT} element={<AuthLayout />}>
+                <Route path={ROUTES.AUTH.ROOT} element={<PublicOnlyRoute><AuthLayout /></PublicOnlyRoute>}>
                   <Route path="signin" element={<Signin />} />
                   <Route path="signup" element={<Signup />} />
                   <Route path="forgot-password" element={<ForgotPassword />} />
@@ -103,7 +106,7 @@ const App = () => (
                 </Route>
 
                 {/* Core Application (Protected Area) */}
-                <Route path={ROUTES.DASHBOARD.ROOT} element={<MainLayout />}>
+                <Route path={ROUTES.DASHBOARD.ROOT} element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
                   <Route index element={<RouteTransition><Home /></RouteTransition>} />
                   <Route path="sessions" element={<RouteTransition><Sessions /></RouteTransition>} />
                   <Route path={ROUTES.DASHBOARD.SESSION_DETAILS_RAW} element={<RouteTransition><SessionDetails /></RouteTransition>} />

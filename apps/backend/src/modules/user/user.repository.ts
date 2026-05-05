@@ -4,6 +4,16 @@ import type { ProviderType } from '../../types/index.js';
 
 // All DB calls are isolated to the repository layer.
 // Services and controllers must never call Mongoose directly.
+const TWO_FACTOR_SECRET_SELECT = [
+  '+twoFactor.secret.iv',
+  '+twoFactor.secret.tag',
+  '+twoFactor.secret.ciphertext',
+  '+twoFactor.pendingSecret.iv',
+  '+twoFactor.pendingSecret.tag',
+  '+twoFactor.pendingSecret.ciphertext',
+  '+twoFactor.pendingExpiresAt',
+  '+twoFactor.backupCodes.codeHash',
+].join(' ');
 
 export class UserRepository {
   async findById(id: string | Types.ObjectId): Promise<IUserDocument | null> {
@@ -16,9 +26,7 @@ export class UserRepository {
 
   async findByEmailForAuth(email: string): Promise<IUserDocument | null> {
     return UserModel.findOne({ email: email.toLowerCase().trim() })
-      .select(
-        '+twoFactor.secret +twoFactor.pendingSecret +twoFactor.pendingExpiresAt +twoFactor.backupCodes.codeHash'
-      )
+      .select(TWO_FACTOR_SECRET_SELECT)
       .exec();
   }
 
@@ -115,9 +123,7 @@ export class UserRepository {
     userId: Types.ObjectId,
   ): Promise<IUserDocument | null> {
     return UserModel.findById(userId)
-      .select(
-        '+twoFactor.secret +twoFactor.pendingSecret +twoFactor.pendingExpiresAt +twoFactor.backupCodes.codeHash'
-      )
+      .select(TWO_FACTOR_SECRET_SELECT)
       .exec();
   }
 

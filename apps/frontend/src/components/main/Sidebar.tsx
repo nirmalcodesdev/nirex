@@ -9,10 +9,8 @@ import {
     CreditCard,
     Settings,
     Bell,
-    X,
     LogOut,
     User,
-    Hexagon,
     Sparkles,
     ChevronDown,
     HelpCircle,
@@ -24,6 +22,8 @@ import { APP_NAME, APP_NAME_SUFFIX, cn } from "@nirex/shared";
 import { useToast } from "../../components/ToastProvider";
 import { UserAvatar } from "../../components/ui/UserAvatar";
 import { usePlansDialog } from "../../hooks/usePlansDialog";
+import { signOutUser } from "../../features/auth/authSlice";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
 
 // ============================================================================
 // Types & Context
@@ -131,6 +131,8 @@ export function DesktopSidebar() {
     const { isCollapsed, toggleCollapse } = useSidebar();
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const location = useLocation();
+    const dispatch = useAppDispatch();
+    const user = useAppSelector((state) => state.auth.user);
 
     return (
         <motion.aside
@@ -320,7 +322,7 @@ export function DesktopSidebar() {
                                 : "border-transparent hover:bg-muted/50"
                         )}
                     >
-                        <UserAvatar className="w-7 h-7" showStatusIndicator />
+                        <UserAvatar className="w-7 h-7" showStatusIndicator name={user?.fullName} />
                         <AnimatePresence mode="popLayout">
                             {!isCollapsed && (
                                 <motion.div
@@ -330,9 +332,9 @@ export function DesktopSidebar() {
                                     transition={{ duration: 0.2 }}
                                     className="flex-1 min-w-0 text-left overflow-hidden"
                                 >
-                                    <p className="text-sm font-medium truncate">Alex Chen</p>
+                                    <p className="text-sm font-medium truncate">{user?.fullName ?? "Account"}</p>
                                     <p className="text-[11px] text-muted-foreground truncate">
-                                        Pro Plan
+                                        {user?.email ?? "Signed in"}
                                     </p>
                                 </motion.div>
                             )}
@@ -401,9 +403,11 @@ export function DesktopSidebar() {
                                     <div className="p-1.5 border-t border-border">
                                         <button
                                             onClick={() => {
-                                                toast("Logged out", "success");
                                                 setIsUserMenuOpen(false);
-                                                navigate(ROUTES.AUTH.SIGNIN);
+                                                void dispatch(signOutUser()).then(() => {
+                                                    toast("Signed out", "success");
+                                                    navigate(ROUTES.AUTH.SIGNIN, { replace: true });
+                                                });
                                             }}
                                             className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-nirex-error hover:bg-nirex-error/10 rounded-md"
                                         >
@@ -429,6 +433,8 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     const { toast } = useToast();
     const { openPlansDialog } = usePlansDialog();
     const location = useLocation();
+    const dispatch = useAppDispatch();
+    const user = useAppSelector((state) => state.auth.user);
 
     if (!isOpen) return null;
 
@@ -440,10 +446,10 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
 
                 <div className="p-4 border-b border-border">
                     <div className="flex items-center gap-3">
-                        <UserAvatar className="w-10 h-10" />
+                        <UserAvatar className="w-10 h-10" name={user?.fullName} />
                         <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm truncate">Alex Chen</p>
-                            <p className="text-xs text-muted-foreground truncate">alex@company.com</p>
+                            <p className="font-semibold text-sm truncate">{user?.fullName ?? "Account"}</p>
+                            <p className="text-xs text-muted-foreground truncate">{user?.email ?? "Signed in"}</p>
                         </div>
                     </div>
                 </div>
@@ -474,7 +480,7 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                 <div className="p-4 border-t border-border space-y-2">
                     <button onClick={() => { navigate(ROUTES.DOCUMENTATION); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-border hover:bg-muted/50 font-medium"><HelpCircle size={16} /> Help & Docs</button>
                     <button onClick={() => { openPlansDialog(); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg bg-nirex-accent text-nirex-text-inverse font-medium"><Sparkles size={16} /> Upgrade</button>
-                    <button onClick={() => { toast("Logged out", "success"); onClose(); navigate(ROUTES.AUTH.SIGNIN); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-nirex-error hover:bg-nirex-error/10 font-medium"><LogOut size={16} /> Sign out</button>
+                    <button onClick={() => { onClose(); void dispatch(signOutUser()).then(() => { toast("Signed out", "success"); navigate(ROUTES.AUTH.SIGNIN, { replace: true }); }); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-nirex-error hover:bg-nirex-error/10 font-medium"><LogOut size={16} /> Sign out</button>
                 </div>
             </motion.div>
         </AnimatePresence>

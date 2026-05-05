@@ -8,8 +8,9 @@ export const signInWithTwoFactorSchema = signInSchema.extend({
     .min(6)
     .max(32)
     .optional(),
+  rememberMe: z.boolean().optional(),
 });
 
 export const twoFactorVerifySchema = z.object({
-  code: z.string().trim().min(6).max(32),
+  code: z.string().trim().min(6).max(200),
 });
