@@ -103,6 +103,27 @@ describe('two-factor service', () => {
     vi.useRealTimers();
   });
 
+  it('returns a controlled error and clears pending setup when encrypted setup data is incomplete', async () => {
+    const userId = new Types.ObjectId();
+    const clearSpy = vi.spyOn(userRepository, 'clearTwoFactorPendingSetup').mockResolvedValue();
+    vi.spyOn(userRepository, 'findByIdWithTwoFactorSecrets').mockResolvedValue({
+      _id: userId,
+      email: 'user@example.com',
+      twoFactor: {
+        enabled: false,
+        pendingSecret: {} as never,
+        pendingExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        backupCodes: [],
+      },
+    } as never);
+
+    await expect(twoFactorService.verifyAndEnable(userId, '123456')).rejects.toMatchObject({
+      code: 'TWO_FACTOR_SETUP_INVALID',
+      statusCode: 400,
+    });
+    expect(clearSpy).toHaveBeenCalledWith(userId);
+  });
+
   it('requires code during sign-in when 2FA is enabled', async () => {
     const userId = new Types.ObjectId();
     vi.spyOn(userRepository, 'findByIdWithTwoFactorSecrets').mockResolvedValue({

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Mail, Lock, ArrowRight, User, Check, AlertCircle } from "lucide-react";
-import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
+import { APP_NAME, APP_NAME_SUFFIX, signUpSchema } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { authApi } from "../../features/auth/authApi";
+import { ROUTES } from "../../constant/routes";
 
 export function Signup() {
     const [formData, setFormData] = useState({
@@ -15,12 +17,14 @@ export function Signup() {
     const [showPassword, setShowPassword] = useState(false);
     const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [oauthProvider, setOauthProvider] = useState<"google" | "github" | null>(null);
     const [errors, setErrors] = useState<{
         name?: string;
         email?: string;
         password?: string;
         confirmPassword?: string;
         terms?: string;
+        form?: string;
     }>({});
     const navigate = useNavigate();
 
@@ -51,22 +55,21 @@ export function Signup() {
             password?: string;
             confirmPassword?: string;
             terms?: string;
+            form?: string;
         } = {};
+        const parsed = signUpSchema.safeParse({
+            email: formData.email,
+            fullName: formData.name,
+            password: formData.password,
+        });
 
-        if (!formData.name.trim()) {
-            newErrors.name = "Full name is required";
-        }
-
-        if (!formData.email.trim()) {
-            newErrors.email = "Email is required";
-        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-            newErrors.email = "Please enter a valid email address";
-        }
-
-        if (!formData.password) {
-            newErrors.password = "Password is required";
-        } else if (strength < 2) {
-            newErrors.password = "Please use a stronger password";
+        if (!parsed.success) {
+            for (const issue of parsed.error.issues) {
+                const field = issue.path[0];
+                if (field === "fullName") newErrors.name = issue.message;
+                if (field === "email") newErrors.email = issue.message;
+                if (field === "password") newErrors.password = issue.message;
+            }
         }
 
         if (!formData.confirmPassword) {
@@ -91,16 +94,45 @@ export function Signup() {
         }
 
         setIsLoading(true);
-        setTimeout(() => {
+        setErrors({});
+
+        try {
+            await authApi.signUp({
+                email: formData.email,
+                fullName: formData.name,
+                password: formData.password,
+            });
+            navigate(ROUTES.AUTH.VERIFY_EMAIL, {
+                state: { email: formData.email.trim().toLowerCase() },
+            });
+        } catch (error) {
+            setErrors({
+                form: error instanceof Error ? error.message : "Unable to create account. Please try again.",
+            });
+        } finally {
             setIsLoading(false);
-            navigate("/auth/verify-email");
-        }, 1200);
+        }
     };
 
     const updateField = (field: keyof typeof formData, value: string) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
         if (errors[field]) {
             setErrors((prev) => ({ ...prev, [field]: undefined }));
+        }
+    };
+
+    const handleOAuth = async (provider: "google" | "github") => {
+        setErrors({});
+        setOauthProvider(provider);
+
+        try {
+            const { authUrl } = await authApi.getOAuthUrl(provider);
+            window.location.assign(authUrl);
+        } catch (error) {
+            setOauthProvider(null);
+            setErrors({
+                form: error instanceof Error ? error.message : "OAuth sign-in is unavailable.",
+            });
         }
     };
 
@@ -139,6 +171,8 @@ export function Signup() {
                     <div className="grid grid-cols-2 gap-3 mb-6">
                         <button
                             type="button"
+                            onClick={() => void handleOAuth("google")}
+                            disabled={oauthProvider !== null || isLoading}
                             className="flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-border bg-nirex-surface hover:bg-nirex-elevated transition-colors text-sm font-medium text-nirex-text-primary"
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -147,16 +181,18 @@ export function Signup() {
                                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                             </svg>
-                            Google
+                            {oauthProvider === "google" ? "Connecting..." : "Google"}
                         </button>
                         <button
                             type="button"
+                            onClick={() => void handleOAuth("github")}
+                            disabled={oauthProvider !== null || isLoading}
                             className="flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-border bg-nirex-surface hover:bg-nirex-elevated transition-colors text-sm font-medium text-nirex-text-primary"
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                             </svg>
-                            GitHub
+                            {oauthProvider === "github" ? "Connecting..." : "GitHub"}
                         </button>
                     </div>
 
@@ -170,6 +206,13 @@ export function Signup() {
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {errors.form && (
+                            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-center gap-2 text-sm text-destructive">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                                {errors.form}
+                            </div>
+                        )}
+
                         <div>
                             <label htmlFor="name" className="block text-sm font-medium text-nirex-text-primary mb-1.5">
                                 Full name

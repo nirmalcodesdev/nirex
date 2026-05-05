@@ -74,6 +74,7 @@ export type {
   ChangePasswordRequest,
   ChangePasswordResponse,
   SignOutResponse,
+  SignOutAllResponse,
   GetMeResponse,
   UpdateProfileRequest,
   UpdateProfileResponse,
@@ -85,6 +86,13 @@ export type {
   OAuthErrorResponse,
   OAuthUrlResponse,
   TerminateDevicesRequest,
+  TerminateDevicesResponse,
+  TwoFactorStatusResponse,
+  BeginTwoFactorSetupResponse,
+  VerifyTwoFactorSetupRequest,
+  VerifyTwoFactorSetupResponse,
+  DisableTwoFactorRequest,
+  DisableTwoFactorResponse,
 } from './domain/auth/index.js';
 
 // Validation schemas
@@ -398,5 +406,5 @@ export {
 // ============================================================================
 
 export type { FooterLink, FooterColumn, SocialLink, FooterProps } from './frontend/types/footer.types.js';
-export type { NavLink } from './frontend/types/navlink.types.js';
+export type { NavLink, NavProps } from './frontend/types/navlink.types.js';
 export { cn } from './frontend/lib/utils.js';

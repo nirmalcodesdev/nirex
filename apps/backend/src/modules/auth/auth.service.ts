@@ -4,7 +4,6 @@ import {
   TokenPair,
   type SignUpRequest,
   type SignInRequest,
-  type SignInResponse,
   type OAuthProfile as SharedOAuthProfile,
 } from '../../types/index.js';
 import {
@@ -23,7 +22,10 @@ import { twoFactorService } from './two-factor.service.js';
 // Re-export shared types for convenience
 export type SignupInput = SignUpRequest;
 export type SigninInput = SignInRequest;
-export type SigninResult = SignInResponse;
+export type SigninResult = TokenPair & {
+  userId: string;
+  sessionId: string;
+};
 
 // ── Sign Up ───────────────────────────────────────────────────────────────────
 export async function signup(input: SignupInput): Promise<{ userId: string }> {

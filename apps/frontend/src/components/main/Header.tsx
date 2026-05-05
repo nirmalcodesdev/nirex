@@ -19,6 +19,7 @@ import { UserAvatar } from "../../components/ui/UserAvatar";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { useAppSelector } from "../../store/hooks";
 
 const searchItems = [
     { id: "dashboard", label: "Dashboard", path: "/", icon: Activity },
@@ -133,6 +134,7 @@ export function Header() {
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const { open, toggleCollapse, isCollapsed } = useSidebar();
     const navigate = useNavigate();
+    const user = useAppSelector((state) => state.auth.user);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -174,7 +176,7 @@ export function Header() {
                         <button type="button" onClick={() => setIsSearchOpen(true)} className="p-2 hover:bg-muted rounded-lg text-muted-foreground">
                             <Search size={20} />
                         </button>
-                        <UserAvatar className="w-8 h-8" />
+                        <UserAvatar className="w-8 h-8" name={user?.fullName} />
                     </div>
                 </div>
             </header>

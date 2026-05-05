@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Check, AlertCircle } from "lucide-react";
-import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
+import { APP_NAME, APP_NAME_SUFFIX, resetPasswordSchema } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
+import { authApi } from "../../features/auth/authApi";
 
 export function ResetPassword() {
     const [formData, setFormData] = useState({
@@ -16,8 +17,11 @@ export function ResetPassword() {
     const [errors, setErrors] = useState<{
         password?: string;
         confirmPassword?: string;
+        form?: string;
     }>({});
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const token = searchParams.get("token") ?? "";
 
     const passwordStrength = (password: string) => {
         let strength = 0;
@@ -40,12 +44,18 @@ export function ResetPassword() {
     ];
 
     const validateForm = () => {
-        const newErrors: { password?: string; confirmPassword?: string } = {};
+        const newErrors: { password?: string; confirmPassword?: string; form?: string } = {};
+        const parsed = resetPasswordSchema.safeParse({
+            token,
+            password: formData.password,
+        });
 
-        if (!formData.password) {
-            newErrors.password = "Password is required";
-        } else if (strength < 2) {
-            newErrors.password = "Please use a stronger password";
+        if (!parsed.success) {
+            for (const issue of parsed.error.issues) {
+                const field = issue.path[0];
+                if (field === "password") newErrors.password = issue.message;
+                if (field === "token") newErrors.form = "This password reset link is invalid or incomplete.";
+            }
         }
 
         if (!formData.confirmPassword) {
@@ -66,10 +76,21 @@ export function ResetPassword() {
         }
 
         setIsLoading(true);
-        setTimeout(() => {
-            setIsLoading(false);
+        setErrors({});
+
+        try {
+            await authApi.resetPassword({
+                token,
+                password: formData.password,
+            });
             setIsSuccess(true);
-        }, 1200);
+        } catch (error) {
+            setErrors({
+                form: error instanceof Error ? error.message : "Unable to reset password. Please request a new link.",
+            });
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const updateField = (field: keyof typeof formData, value: string) => {
@@ -171,6 +192,13 @@ export function ResetPassword() {
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {errors.form && (
+                            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-center gap-2 text-sm text-destructive">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                                {errors.form}
+                            </div>
+                        )}
+
                         <div>
                             <label htmlFor="password" className="block text-sm font-medium text-nirex-text-primary mb-1.5">
                                 New password

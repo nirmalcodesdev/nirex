@@ -323,7 +323,7 @@ export interface SignInRequest {
   password: string;
 }
 
-export interface SignInResponse extends TokenPair {
+export interface SignInResponse {
   userId: string;
   sessionId: string;
 }
@@ -331,14 +331,16 @@ export interface SignInResponse extends TokenPair {
 // ------------------ Token Refresh ------------------
 
 export interface RefreshRequest {
-  refreshToken: string;
+  refreshToken?: string;
 }
 
-export interface RefreshResponse extends TokenPair {}
+export type RefreshResponse = void;
 
 // ------------------ Sign Out ------------------
 
 export type SignOutResponse = void;
+
+export type SignOutAllResponse = void;
 
 // ------------------ Password Management ------------------
 
@@ -408,6 +410,49 @@ export interface TerminateDevicesRequest {
   deviceIds: string[];
   reason?: string;
 }
+
+export interface TerminateDevicesResponse {
+  summary: {
+    total: number;
+    terminated: number;
+    skipped: number;
+    errors: number;
+  };
+  details: Array<{
+    deviceId?: string;
+    status: string;
+    reason?: string;
+    error?: string;
+  }>;
+}
+
+// ------------------ Two-Factor Authentication ------------------
+
+export interface TwoFactorStatusResponse {
+  enabled: boolean;
+  enabledAt: Date | null;
+  lastVerifiedAt: Date | null;
+  hasPendingSetup: boolean;
+}
+
+export interface BeginTwoFactorSetupResponse {
+  otpauthUrl: string;
+  expiresAt: Date;
+}
+
+export interface VerifyTwoFactorSetupRequest {
+  code: string;
+}
+
+export interface VerifyTwoFactorSetupResponse {
+  backupCodes: string[];
+}
+
+export interface DisableTwoFactorRequest {
+  code: string;
+}
+
+export type DisableTwoFactorResponse = void;
 
 // ------------------ OAuth ------------------
 
