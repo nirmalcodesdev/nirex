@@ -20,6 +20,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@nirex/assets':
+        specifier: workspace:^
+        version: link:../../packages/assets
       '@nirex/shared':
         specifier: workspace:*
         version: link:../../packages/shared
