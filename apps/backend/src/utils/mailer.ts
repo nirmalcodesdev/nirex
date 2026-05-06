@@ -1,7 +1,12 @@
+import { createRequire } from 'module';
 import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 import { AppError } from '../types/index.js';
+
+const require = createRequire(import.meta.url);
+const nirexLogo = require.resolve('@nirex/assets/images/nirex.svg');
+
 
 interface SendEmailOptions {
   to: string;
@@ -88,6 +93,14 @@ async function sendEmail(options: SendEmailOptions): Promise<void> {
       to: options.to,
       subject: options.subject,
       html: options.html,
+      attachments: [
+        {
+          filename: 'logo.svg',
+          path: nirexLogo,
+          cid: 'nirex-logo',
+          contentDisposition: 'inline'
+        }
+      ]
     });
 
     // Log destination only — never log token values or message body
@@ -137,17 +150,101 @@ function formatDate(date: Date | null | undefined): string {
   }).format(date);
 }
 
-function billingShell(content: string): string {
+function emailShell(content: string, previewText?: string): string {
+  const primaryColor = '#0f172a'; // nirex-accent / slate-900
+  const accentColor = '#3b82f6';  // blue-500
+
   return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <body style="font-family:system-ui,-apple-system,sans-serif;max-width:620px;margin:0 auto;padding:28px 16px;color:#111827;">
-      ${content}
-      <p style="margin-top:22px;font-size:12px;color:#6b7280;">
-        This is an automated billing message from Nirex.
-      </p>
-    </body>
-    </html>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Nirex</title>
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { 
+      margin: 0; 
+      padding: 0; 
+      width: 100% !important; 
+      -webkit-text-size-adjust: 100%; 
+      -ms-text-size-adjust: 100%; 
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f8fafc;
+      color: #1e293b;
+    }
+    img { border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+    table { border-collapse: collapse !important; }
+    .content-table { max-width: 600px; width: 100%; margin: 0 auto; background-color: #ffffff; }
+    .container { padding: 40px 32px; }
+    .header { padding-bottom: 32px; text-align: left; }
+    .footer { padding: 32px; text-align: center; font-size: 13px; color: #64748b; background-color: #f8fafc; }
+    .btn { 
+      display: inline-block; 
+      padding: 12px 24px; 
+      background-color: ${primaryColor}; 
+      color: #ffffff !important; 
+      text-decoration: none; 
+      border-radius: 8px; 
+      font-weight: 600; 
+      font-size: 15px;
+      margin-top: 16px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.025em;
+    }
+    .badge-success { background-color: #dcfce7; color: #15803d; }
+    .badge-warning { background-color: #fef9c3; color: #854d0e; }
+    .badge-error { background-color: #fee2e2; color: #b91c1c; }
+    h1 { font-size: 24px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; }
+    p { font-size: 16px; line-height: 1.6; margin: 0 0 16px 0; color: #475569; }
+    .divider { height: 1px; background-color: #e2e8f0; margin: 24px 0; }
+    .info-box { background-color: #f1f5f9; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    .info-row { display: table; width: 100%; margin-bottom: 8px; }
+    .info-label { display: table-cell; font-size: 13px; font-weight: 600; color: #64748b; width: 40%; }
+    .info-value { display: table-cell; font-size: 14px; font-weight: 500; color: #1e293b; text-align: right; }
+  </style>
+</head>
+<body>
+  <div style="display: none; max-height: 0px; overflow: hidden;">${previewText || ''}</div>
+  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+    <tr>
+      <td align="center" style="padding: 24px 0;">
+        <table border="0" cellpadding="0" cellspacing="0" class="content-table" style="border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
+          <tr>
+            <td class="container">
+              <div class="header">
+                <img src="cid:nirex-logo" alt="Nirex" width="40" height="40" style="display: block;" />
+              </div>
+              ${content}
+              <div class="divider"></div>
+              <p style="font-size: 14px; margin-bottom: 0;">
+                Best regards,<br />
+                <strong>The Nirex Team</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td class="footer">
+              <p style="margin-bottom: 8px;">&copy; ${new Date().getFullYear()} Nirex. All rights reserved.</p>
+              <p style="margin-bottom: 0;">
+                You received this email because it's essential to your account usage.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
   `;
 }
 
@@ -155,11 +252,11 @@ function billingPortalLink(url: string | null | undefined): string {
   if (!url) return '';
   const safeUrl = escapeHtml(url);
   return `
-    <p style="margin-top:18px;">
-      <a href="${safeUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">
-        Open Billing Portal
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${safeUrl}" class="btn">
+        Manage Subscription
       </a>
-    </p>
+    </div>
   `;
 }
 
@@ -171,12 +268,22 @@ export async function sendBillingCheckoutCompletedEmail(
   await sendEmail({
     to: input.to,
     subject: `Subscription activated: ${planName}`,
-    html: billingShell(`
-      <h2 style="margin-top:0;">Subscription confirmed</h2>
+    html: emailShell(`
+      <h1>Subscription confirmed</h1>
       <p>Hi ${name},</p>
-      <p>Your checkout completed successfully and <strong>${planName}</strong> is now active.</p>
+      <p>Your checkout completed successfully and <strong>${planName}</strong> is now active on your account. You now have full access to all features included in this plan.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge badge-success">Active</span></div>
+        </div>
+      </div>
       ${billingPortalLink(input.billingPortalUrl)}
-    `),
+    `, `Your ${planName} subscription is now active.`),
   });
 }
 
@@ -194,19 +301,33 @@ export async function sendBillingPaymentSucceededEmail(
   await sendEmail({
     to: input.to,
     subject: `Payment received: ${amount}`,
-    html: billingShell(`
-      <h2 style="margin-top:0;">Payment received</h2>
+    html: emailShell(`
+      <h1>Payment received</h1>
       <p>Hi ${name},</p>
-      <p>We received your payment for <strong>${planName}</strong>.</p>
-      <table style="border-collapse:collapse;width:100%;font-size:14px;">
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Amount</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${amount}</td></tr>
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Invoice</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${invoiceNumber}</td></tr>
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Paid on</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${paidAt}</td></tr>
-      </table>
-      ${hostedInvoiceUrl ? `<p style="margin-top:14px;"><a href="${hostedInvoiceUrl}">View invoice</a></p>` : ''}
-      ${invoicePdfUrl ? `<p style="margin-top:8px;"><a href="${invoicePdfUrl}">Download PDF receipt</a></p>` : ''}
+      <p>Thank you for your payment. We have successfully processed the charge for your <strong>${planName}</strong> subscription.</p>
+      
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Amount Paid</div>
+          <div class="info-value">${amount}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Invoice Number</div>
+          <div class="info-value">${invoiceNumber}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Date</div>
+          <div class="info-value">${paidAt}</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 24px; font-size: 14px;">
+        ${hostedInvoiceUrl ? `<a href="${hostedInvoiceUrl}" style="color: #3b82f6; text-decoration: none; margin-right: 16px;">View Online Invoice</a>` : ''}
+        ${invoicePdfUrl ? `<a href="${invoicePdfUrl}" style="color: #3b82f6; text-decoration: none;">Download PDF Receipt</a>` : ''}
+      </div>
+
       ${billingPortalLink(input.billingPortalUrl)}
-    `),
+    `, `We received your payment of ${amount} for ${planName}.`),
   });
 }
 
@@ -223,19 +344,32 @@ export async function sendBillingPaymentFailedEmail(
   await sendEmail({
     to: input.to,
     subject: `Payment failed: ${amount}`,
-    html: billingShell(`
-      <h2 style="margin-top:0;">Payment failed</h2>
+    html: emailShell(`
+      <h1>Payment failed</h1>
       <p>Hi ${name},</p>
-      <p>We could not process your payment for <strong>${planName}</strong>.</p>
-      <table style="border-collapse:collapse;width:100%;font-size:14px;">
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Amount due</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${amount}</td></tr>
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Invoice</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${invoiceNumber}</td></tr>
-        <tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Due date</td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${dueDate}</td></tr>
-      </table>
-      ${hostedInvoiceUrl ? `<p style="margin-top:14px;"><a href="${hostedInvoiceUrl}">View invoice</a></p>` : ''}
-      <p style="margin-top:8px;">Please update your payment method to avoid service interruption.</p>
+      <p>We were unable to process your payment for <strong>${planName}</strong>. To ensure your service remains uninterrupted, please update your payment information.</p>
+      
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Amount Due</div>
+          <div class="info-value" style="color: #b91c1c;">${amount}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Invoice</div>
+          <div class="info-value">${invoiceNumber}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Due Date</div>
+          <div class="info-value">${dueDate}</div>
+        </div>
+      </div>
+
+      <p style="font-size: 14px; color: #64748b;">We will attempt to retry the payment automatically over the next few days.</p>
+
+      ${hostedInvoiceUrl ? `<p style="margin-top:14px;"><a href="${hostedInvoiceUrl}" style="color: #3b82f6; text-decoration: none;">View invoice details</a></p>` : ''}
+      
       ${billingPortalLink(input.billingPortalUrl)}
-    `),
+    `, `Action required: Payment of ${amount} for ${planName} failed.`),
   });
 }
 
@@ -250,24 +384,39 @@ export async function sendBillingSubscriptionStateEmail(
   const statusLabel = escapeHtml(input.statusLabel);
   const detail = escapeHtml(input.detail);
 
+  let badgeClass = 'badge-warning';
+  if (statusLabel.toLowerCase() === 'active') badgeClass = 'badge-success';
+  if (statusLabel.toLowerCase() === 'canceled' || statusLabel.toLowerCase() === 'incomplete_expired') badgeClass = 'badge-error';
+
   await sendEmail({
     to: input.to,
     subject: `Subscription update: ${statusLabel}`,
-    html: billingShell(`
-      <h2 style="margin-top:0;">Subscription update</h2>
+    html: emailShell(`
+      <h1>Subscription update</h1>
       <p>Hi ${name},</p>
-      <p><strong>${planName}</strong> status changed to <strong>${statusLabel}</strong>.</p>
+      <p>There has been a change to your <strong>${planName}</strong> subscription status.</p>
+      
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">New Status</div>
+          <div class="info-value"><span class="badge ${badgeClass}">${statusLabel}</span></div>
+        </div>
+      </div>
+
       <p>${detail}</p>
+      
       ${billingPortalLink(input.billingPortalUrl)}
-    `),
+    `, `Your ${planName} subscription status has been updated to ${statusLabel}.`),
   });
 }
 
 export async function sendVerificationEmail(to: string, rawToken: string): Promise<void> {
-  // The raw token is embedded in the URL — it is never logged in production.
   const verifyUrl = `${env.APP_URL}/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
 
-  // Always log token to console for development/testing
   console.log('\n🔐 EMAIL VERIFICATION TOKEN (for testing):');
   console.log(`   Token: ${rawToken}`);
   console.log(`   URL: ${verifyUrl}`);
@@ -277,23 +426,19 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
     await sendEmail({
       to,
       subject: 'Verify your email address',
-      html: `
-      <!DOCTYPE html>
-      <html lang="en">
-      <body style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 16px;color:#111827;">
-        <h2 style="margin-top:0;">Verify your email</h2>
-        <p>Click the button below to verify your email address. This link expires in <strong>15 minutes</strong>.</p>
-        <a href="${verifyUrl}"
-           style="display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;
-                  text-decoration:none;border-radius:6px;font-weight:600;">
-          Verify Email
-        </a>
-        <p style="margin-top:24px;font-size:13px;color:#6b7280;">
-          If you did not create an account, you can safely ignore this email.
+      html: emailShell(`
+        <h1>Verify your email</h1>
+        <p>Welcome to Nirex! To get started, please confirm your email address by clicking the button below.</p>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${verifyUrl}" class="btn">
+            Verify Email Address
+          </a>
+        </div>
+        <p style="font-size: 14px; color: #64748b;">
+          This link will expire in <strong>15 minutes</strong> for security reasons. 
+          If you did not create an account with us, you can safely ignore this email.
         </p>
-      </body>
-      </html>
-    `,
+      `, "Verify your email address to get started with Nirex."),
     });
   } catch (err) {
     const errorMessage = (err as Error).message;
@@ -304,15 +449,12 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
       smtpPort: env.SMTP_PORT,
     });
 
-    // In development without SMTP config, don't throw - just log the error
-    // The token was already logged above for testing
     if (env.NODE_ENV === 'development' && (!env.SMTP_USER || !env.SMTP_PASS)) {
       console.log('⚠️  Email sending failed, but token is available above for testing');
       console.log('   Error:', errorMessage);
       return;
     }
 
-    // Re-throw with context for calling code to handle
     throw new AppError(
       `Failed to send verification email: ${errorMessage}`,
       500,
@@ -324,7 +466,6 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
 export async function sendPasswordResetEmail(to: string, rawToken: string): Promise<void> {
   const resetUrl = `${env.APP_URL}/auth/reset-password?token=${encodeURIComponent(rawToken)}`;
 
-  // Always log token to console for development/testing
   console.log('\n🔐 PASSWORD RESET TOKEN (for testing):');
   console.log(`   Token: ${rawToken}`);
   console.log(`   URL: ${resetUrl}`);
@@ -334,36 +475,28 @@ export async function sendPasswordResetEmail(to: string, rawToken: string): Prom
     await sendEmail({
       to,
       subject: 'Reset your password',
-      html: `
-      <!DOCTYPE html>
-      <html lang="en">
-      <body style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 16px;color:#111827;">
-        <h2 style="margin-top:0;">Reset your password</h2>
-        <p>You requested a password reset. Click the button below to set a new password.
-           This link expires in <strong>15 minutes</strong>.</p>
-        <a href="${resetUrl}"
-           style="display:inline-block;padding:12px 24px;background:#dc2626;color:#ffffff;
-                  text-decoration:none;border-radius:6px;font-weight:600;">
-          Reset Password
-        </a>
-        <p style="margin-top:24px;font-size:13px;color:#6b7280;">
-          If you did not request this, you can safely ignore this email.
-          Your password will not change until you click the link above.
+      html: emailShell(`
+        <h1>Reset your password</h1>
+        <p>We received a request to reset your password. Click the button below to choose a new one.</p>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${resetUrl}" class="btn" style="background-color: #ef4444;">
+            Reset Password
+          </a>
+        </div>
+        <p style="font-size: 14px; color: #64748b;">
+          This link will expire in <strong>15 minutes</strong>. If you did not request a password reset, 
+          your password will remain unchanged and you can safely ignore this email.
         </p>
-      </body>
-      </html>
-    `,
+      `, "Reset your Nirex account password."),
     });
   } catch (err) {
     const errorMessage = (err as Error).message;
-    // In development without SMTP config, don't throw - just log the error
     if (env.NODE_ENV === 'development' && (!env.SMTP_USER || !env.SMTP_PASS)) {
       console.log('⚠️  Email sending failed, but token is available above for testing');
       console.log('   Error:', errorMessage);
       return;
     }
 
-    // Re-throw with context for calling code to handle
     throw new AppError(
       `Failed to send password reset email: ${errorMessage}`,
       500,
@@ -379,27 +512,28 @@ export async function sendSuspiciousSigninAlert(
 ): Promise<void> {
   await sendEmail({
     to,
-    subject: 'New sign-in from an unrecognized device',
-    html: `
-      <!DOCTYPE html>
-      <html lang="en">
-      <body style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 16px;color:#111827;">
-        <h2 style="margin-top:0;">New sign-in detected</h2>
-        <p>A new sign-in to your account was detected from an unrecognized device or location:</p>
-        <table style="border-collapse:collapse;width:100%;font-size:14px;">
-          <tr>
-            <td style="padding:8px 12px;background:#f3f4f6;font-weight:600;border:1px solid #e5e7eb;">IP Address</td>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;">${ip}</td>
-          </tr>
-          <tr>
-            <td style="padding:8px 12px;background:#f3f4f6;font-weight:600;border:1px solid #e5e7eb;">Device</td>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;">${deviceInfo}</td>
-          </tr>
-        </table>
-        <p>If this was you, no action is needed.
-           If you don&apos;t recognize this activity, please reset your password immediately.</p>
-      </body>
-      </html>
-    `,
+    subject: 'New sign-in to your account',
+    html: emailShell(`
+      <h1>New sign-in detected</h1>
+      <p>A new sign-in was detected for your account from an unrecognized device or location.</p>
+      
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">IP Address</div>
+          <div class="info-value">${ip}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Device</div>
+          <div class="info-value">${deviceInfo}</div>
+        </div>
+      </div>
+
+      <p style="font-size: 14px;">If this was you, you can safely ignore this message. However, if you do not recognize this activity, we strongly recommend that you reset your password immediately to secure your account.</p>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${env.APP_URL}/auth/signin" class="btn">
+          Review Account Activity
+        </a>
+      </div>
+    `, "We detected a new sign-in to your account from a new device."),
   });
 }
