@@ -142,8 +142,15 @@ function generateSecret(): string {
   return base32Encode(crypto.randomBytes(20));
 }
 
-function sanitizeCode(raw: string): string {
-  return raw.replace(/\s+/g, '').trim();
+function sanitizeCode(raw: string): string[] {
+  // Split on any whitespace/newlines and filter out empty entries
+  // This handles both:
+   // - Single codes: "45F413FBB3" → ["45F413FBB3"]
+   // - Multiple codes: "45F413FBB3 3B35F7D889..." → ["45F413FBB3", "3B35F7D889"...]
+   return raw
+    .split(/\s+/)
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => c.length > 0);
 }
 
 function generateBackupCodes(): string[] {
@@ -168,15 +175,26 @@ function createOtpAuthUrl(secret: string, email: string): string {
 async function verifyTotpOrBackupCode(
   userId: Types.ObjectId,
   secret: string,
-  codeOrBackupCode: string,
+  codes: string[],
 ): Promise<boolean> {
-  const normalized = sanitizeCode(codeOrBackupCode);
-  if (/^\d{6}$/.test(normalized) && isValidTotp(secret, normalized)) {
-    return true;
-  }
+  // Try each code - return true if ANY code is valid (OR logic for multi-code inputs)
+  const results = await Promise.all(codes.map(async (code) => {
+    // Try TOTP first (6-digit numeric codes)
+    if (/^\d{6}$/.test(code)) {
+      return isValidTotp(secret, code);
+    }
 
-  const backupCodeHash = hashToken(normalized.toUpperCase());
-  return userRepository.consumeTwoFactorBackupCode(userId, backupCodeHash);
+    // Try backup codes (10-char hex format)
+    if (/^[A-F0-9]{10}$/.test(code)) {
+      const backupCodeHash = hashToken(code);
+      return userRepository.consumeTwoFactorBackupCode(userId, backupCodeHash);
+    }
+
+    // Invalid format - reject this code but continue checking others
+    return false;
+  }));
+
+  return results.some(r => r); // true if any input code was valid
 }
 
 export class TwoFactorService {
@@ -250,8 +268,9 @@ export class TwoFactorService {
     }
 
     const secret = decryptSecret(pendingSecret);
-    const normalized = sanitizeCode(code);
-    if (!isValidTotp(secret, normalized)) {
+    const codes = sanitizeCode(code);
+    // During setup, only accept single TOTP codes (first code only)
+    if (codes.length !== 1 || !isValidTotp(secret, codes[0]!)) {
       throw new AppError('Invalid 2FA code', 401, 'TWO_FACTOR_CODE_INVALID');
     }
 
@@ -282,7 +301,8 @@ export class TwoFactorService {
     }
 
     const secret = decryptSecret(user.twoFactor.secret);
-    const valid = await verifyTotpOrBackupCode(userId, secret, codeOrBackupCode);
+    const codes = sanitizeCode(codeOrBackupCode);
+    const valid = await verifyTotpOrBackupCode(userId, secret, codes);
     if (!valid) {
       throw new AppError('Invalid 2FA code', 401, 'TWO_FACTOR_CODE_INVALID');
     }
@@ -312,7 +332,8 @@ export class TwoFactorService {
     }
 
     const secret = decryptSecret(user.twoFactor.secret);
-    const valid = await verifyTotpOrBackupCode(userId, secret, codeOrBackupCode);
+    const codes = sanitizeCode(codeOrBackupCode);
+    const valid = await verifyTotpOrBackupCode(userId, secret, codes);
     if (!valid) {
       throw new AppError('Invalid 2FA code', 401, 'TWO_FACTOR_CODE_INVALID');
     }
