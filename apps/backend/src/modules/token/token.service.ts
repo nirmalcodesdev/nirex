@@ -42,7 +42,10 @@ export class TokenService {
     // Consume the token immediately before any downstream side-effects.
     // If the downstream operation fails, the token is still burned — this
     // forces the user to request a fresh token, which is the safe behaviour.
-    await tokenRepository.markUsed(tokenDoc._id);
+    const markedAsUsed = await tokenRepository.markUsed(tokenDoc._id);
+    if (!markedAsUsed) {
+      throw new AppError('Token is invalid or has expired', 400, 'TOKEN_INVALID');
+    }
 
     return tokenDoc;
   }

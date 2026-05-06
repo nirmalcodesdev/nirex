@@ -26,12 +26,21 @@ export class TokenRepository {
     }).exec();
   }
 
-  // Mark a token as consumed to prevent replay. Even if the downstream
-  // operation fails, the token cannot be resubmitted.
-  async markUsed(tokenId: Types.ObjectId): Promise<void> {
-    await TokenModel.findByIdAndUpdate(tokenId, {
-      usedAt: new Date(),
-    }).exec();
+  // Mark a token as consumed to prevent replay. Performs an atomic
+  // find-and-update that only succeeds if the token hasn't been used yet.
+  async markUsed(tokenId: Types.ObjectId): Promise<boolean> {
+    // Use findOneAndUpdate with a condition that token hasn't been used
+    const result = await TokenModel.findOneAndUpdate(
+      {
+        _id: tokenId,
+        usedAt: { $exists: false },  // Only match if not yet consumed
+      },
+      { $set: { usedAt: new Date() } }
+    ).exec();
+
+    // Return true if we successfully marked it used (result exists)
+    // Return false if it was already used (result is null)
+    return result !== null;
   }
 
   // Invalidate any outstanding tokens of a given type for a user.

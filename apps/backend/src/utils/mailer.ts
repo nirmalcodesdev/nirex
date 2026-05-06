@@ -1,6 +1,7 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
+import { AppError } from '../types/index.js';
 
 interface SendEmailOptions {
   to: string;
@@ -61,8 +62,20 @@ async function getTransporter(): Promise<Transporter> {
       port: env.SMTP_PORT,
       // Port 465 uses implicit TLS; all other ports use STARTTLS (opportunistic).
       secure: env.SMTP_PORT === 465,
+      // Gmail requires TLS for port 587 (STARTTLS)
+      tls: env.SMTP_PORT === 587 ? { rejectUnauthorized: false } : undefined,
       auth,
     });
+
+    // Verify the transporter configuration
+    try {
+      await _transporter.verify();
+      console.log('✅ SMTP configuration verified successfully');
+    } catch (verifyErr) {
+      console.error('❌ SMTP verification failed:', (verifyErr as Error).message);
+      console.error('   Host:', env.SMTP_HOST, 'Port:', env.SMTP_PORT);
+      // Don't throw here - let it fail on actual send so we can see the error
+    }
   }
   return _transporter;
 }
@@ -283,13 +296,28 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
     `,
     });
   } catch (err) {
+    const errorMessage = (err as Error).message;
+    logger.error('Auth email send failed', {
+      to: to,
+      error: errorMessage,
+      smtpHost: env.SMTP_HOST,
+      smtpPort: env.SMTP_PORT,
+    });
+
     // In development without SMTP config, don't throw - just log the error
     // The token was already logged above for testing
     if (env.NODE_ENV === 'development' && (!env.SMTP_USER || !env.SMTP_PASS)) {
       console.log('⚠️  Email sending failed, but token is available above for testing');
+      console.log('   Error:', errorMessage);
       return;
     }
-    throw err;
+
+    // Re-throw with context for calling code to handle
+    throw new AppError(
+      `Failed to send verification email: ${errorMessage}`,
+      500,
+      'EMAIL_SEND_FAILED'
+    );
   }
 }
 
@@ -327,12 +355,20 @@ export async function sendPasswordResetEmail(to: string, rawToken: string): Prom
     `,
     });
   } catch (err) {
+    const errorMessage = (err as Error).message;
     // In development without SMTP config, don't throw - just log the error
     if (env.NODE_ENV === 'development' && (!env.SMTP_USER || !env.SMTP_PASS)) {
       console.log('⚠️  Email sending failed, but token is available above for testing');
+      console.log('   Error:', errorMessage);
       return;
     }
-    throw err;
+
+    // Re-throw with context for calling code to handle
+    throw new AppError(
+      `Failed to send password reset email: ${errorMessage}`,
+      500,
+      'EMAIL_SEND_FAILED'
+    );
   }
 }
 

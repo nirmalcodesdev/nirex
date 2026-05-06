@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { AlertCircle, ArrowRight, CheckCircle2, Mail } from "lucide-react";
@@ -20,6 +20,7 @@ export function VerifyEmail() {
     const token = searchParams.get("token") ?? "";
     const [status, setStatus] = useState<VerificationStatus>(token ? "verifying" : "idle");
     const [message, setMessage] = useState<string>("");
+    const verificationPromiseRef = useRef<Record<string, Promise<string | undefined>>>({});
 
     useEffect(() => {
         if (!token) return;
@@ -31,11 +32,18 @@ export function VerifyEmail() {
             return;
         }
 
+        // Deduplication: prevent duplicate requests for the same token
+        // Use a promise to ensure that even if the effect is cancelled (e.g. in StrictMode),
+        // the next mount's effect can wait for the same promise.
+        if (!verificationPromiseRef.current[token]) {
+            verificationPromiseRef.current[token] = authApi.verifyEmail(token);
+        }
+
         let cancelled = false;
 
         async function verify() {
             try {
-                const responseMessage = await authApi.verifyEmail(token);
+                const responseMessage = await verificationPromiseRef.current[token];
                 if (cancelled) return;
                 setStatus("success");
                 setMessage(responseMessage ?? "Email verified successfully.");
