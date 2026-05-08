@@ -11,7 +11,7 @@ import {
   verifyPassword,
   signAccessToken,
 } from '../../utils/crypto.js';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../../utils/mailer.js';
+import { sendVerificationEmail, sendPasswordResetEmail, sendSuspiciousSigninAlert } from '../../utils/mailer.js';
 import { userRepository } from '../user/user.repository.js';
 import { tokenService } from '../token/token.service.js';
 import { sessionService } from '../session/session.service.js';
@@ -107,6 +107,22 @@ export async function signin(
     ipAddress,
     country,
   );
+
+  // ── Security Alert: Detect suspicious new sign-ins ─────────────────────────────
+  // Compare new session against existing sessions to detect unknown patterns
+  const existingSessions = await sessionService.listActiveSessions(user._id);
+  const isNewPattern = !existingSessions.some(s =>
+    s.ipAddress === ipAddress &&
+    s.deviceInfo === deviceInfo &&
+    s.country === (country || 'Unknown')
+  );
+
+  if (isNewPattern && existingSessions.length > 0) {
+    // Fire security alert (fire-and-forget, don't block sign-in)
+    sendSuspiciousSigninAlert(user.email, ipAddress, deviceInfo).catch(err => {
+      console.error('Security alert failed:', err.message);
+    });
+  }
 
   const accessToken = signAccessToken({
     sub: user._id.toString(),
@@ -260,6 +276,20 @@ export async function oauthSignin(
     ipAddress,
     country,
   );
+
+  // ── Security Alert: Detect suspicious new sign-ins ─────────────────────────────
+  const existingSessions = await sessionService.listActiveSessions(user._id);
+  const isNewPattern = !existingSessions.some(s =>
+    s.ipAddress === ipAddress &&
+    s.deviceInfo === deviceInfo &&
+    s.country === (country || 'Unknown')
+  );
+
+  if (isNewPattern && existingSessions.length > 0) {
+    sendSuspiciousSigninAlert(user.email, ipAddress, deviceInfo).catch(err => {
+      console.error('Security alert failed:', err.message);
+    });
+  }
 
   // Generate access token
   const accessToken = signAccessToken({
