@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { ApiKeyScope } from '@nirex/shared';
 import { Types } from 'mongoose';
 import { AppError } from '../../types/index.js';
 import { env } from '../../config/env.js';
@@ -6,7 +7,6 @@ import { hashApiKey, timingSafeEqualHex } from '../../utils/crypto.js';
 import { logger } from '../../utils/logger.js';
 import { apiKeyRepository } from './api-key.repository.js';
 import { notificationsService } from '../notifications/notifications.service.js';
-import { type ApiKeyScope } from './api-key.model.js';
 
 export interface CreateApiKeyInput {
   name: string;

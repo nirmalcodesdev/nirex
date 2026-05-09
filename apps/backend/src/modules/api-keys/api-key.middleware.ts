@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
+import type { ApiKeyScope } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
 import { apiKeyService } from './api-key.service.js';
-import type { ApiKeyScope } from './api-key.model.js';
 
 function extractApiKey(req: Request): string | null {
   const fromHeader = req.headers['x-api-key'];

@@ -402,6 +402,39 @@ export {
 } from './domain/dashboard/index.js';
 
 // ============================================================================
+// Domain: API Keys
+// ============================================================================
+
+export type {
+  ApiKeyScope,
+  ApiKeyErrorCode,
+  ApiKeyItem,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  ListApiKeysResponse,
+  RotateApiKeyRequest,
+  RotateApiKeyResponse,
+  RevokeApiKeyRequest,
+  ApiKeyIdentityResponse,
+} from './domain/api-keys/index.js';
+
+export {
+  API_KEY_SCOPES,
+  apiKeyScopeSchema,
+  createApiKeySchema,
+  rotateApiKeySchema,
+  revokeApiKeySchema,
+  apiKeyIdParamSchema,
+} from './domain/api-keys/index.js';
+
+export type {
+  CreateApiKeySchema,
+  RotateApiKeySchema,
+  RevokeApiKeySchema,
+  ApiKeyIdParamSchema,
+} from './domain/api-keys/index.js';
+
+// ============================================================================
 // Frontend-specific (kept for backward compatibility, consider moving to UI package)
 // ============================================================================
 

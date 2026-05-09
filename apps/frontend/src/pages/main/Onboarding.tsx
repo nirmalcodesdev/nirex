@@ -11,6 +11,8 @@ import { StepSuccess } from "./onboarding/components/StepSuccess";
 import { useToast } from "@/components/ToastProvider"; // Assuming "@/components" is a valid alias
 import type { OnboardingPreferences, Template } from "../../types/onboarding";
 import { useTerminalSimulation } from "@/hooks/useTerminalSimulation"; // Assuming "@/hooks" is a valid alias
+import { DEFAULT_ONBOARDING_API_KEY_SCOPES } from "../../features/api-keys/apiKeyScopes";
+import { useCreateApiKeyMutation } from "../../features/api-keys/useApiKeys";
 
 const TEMPLATES: Template[] = [
   { id: "next", name: "Next.js", icon: "▲", color: "#fff", description: "React framework" },
@@ -38,6 +40,7 @@ export default function Onboarding() {
 
   const navigate = useNavigate();
   const { toast } = useToast();
+  const createApiKeyMutation = useCreateApiKeyMutation();
   const {
     terminalLines,
     terminalStep,
@@ -85,6 +88,36 @@ export default function Onboarding() {
     if (step === 2 && terminalLines.length === 0 && !isTerminalRunning) runTerminal();
   }, [step, isTerminalRunning, terminalLines.length, runTerminal]); // Added dependencies
 
+  const handleGenerateApiKey = async () => {
+    if (createApiKeyMutation.isPending || apiKey) return;
+
+    const templateName = TEMPLATES.find((template) => template.id === selectedTemplate)?.name;
+
+    try {
+      const response = await createApiKeyMutation.mutateAsync({
+        name: templateName ? `${templateName} CLI key` : "Onboarding CLI key",
+        scopes: DEFAULT_ONBOARDING_API_KEY_SCOPES,
+      });
+
+      setApiKey(response.apiKey);
+      setShowKey(false);
+      setKeySaved(false);
+      toast("API key generated.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Unable to generate API key.", "error");
+    }
+  };
+
+  const handleDownloadApiKey = () => {
+    const blob = new Blob([`# Nirex\nNIREX_API_KEY=${apiKey}`], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = ".env.local";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-nirex-void flex flex-col font-body selection:bg-nirex-accent/30 selection:text-nirex-accent">
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -111,10 +144,23 @@ export default function Onboarding() {
                 onReplay={runTerminal}
               />
             )}
-            {step === 3 && <StepApiKey key="s3" apiKey={apiKey} showKey={showKey} keySaved={keySaved} onGenerate={() => { setApiKey(`nrx_live_${Math.random().toString(36).slice(2, 20)}`); toast("API key generated", "success"); }} onToggleShow={() => setShowKey(!showKey)} onCopy={() => { navigator.clipboard.writeText(apiKey); toast("Copied", "success"); }} onDownload={() => {
-              const blob = new Blob([`# Nirex
-NIREX_API_KEY=${apiKey}`], { type: "text/plain" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = ".env.local"; a.click();
-            }} onToggleSaved={setKeySaved} />}
+            {step === 3 && (
+              <StepApiKey
+                key="s3"
+                apiKey={apiKey}
+                showKey={showKey}
+                keySaved={keySaved}
+                isGenerating={createApiKeyMutation.isPending}
+                onGenerate={() => void handleGenerateApiKey()}
+                onToggleShow={() => setShowKey(!showKey)}
+                onCopy={() => {
+                  void navigator.clipboard.writeText(apiKey);
+                  toast("Copied", "success");
+                }}
+                onDownload={handleDownloadApiKey}
+                onToggleSaved={setKeySaved}
+              />
+            )}
             {step === 4 && <StepPreferences key="s4" preferences={preferences} isLoading={isLoading} onToggle={(id) => setPreferences({ ...preferences, [id]: !preferences[id] })} onComplete={handleNext} />}
             {step === 5 && <StepSuccess key="s5" onNavigate={navigate} />}
           </AnimatePresence>

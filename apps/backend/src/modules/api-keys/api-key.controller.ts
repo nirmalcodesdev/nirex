@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
+import type { CreateApiKeyRequest, ApiKeyScope } from '@nirex/shared';
 import { Types } from 'mongoose';
 import { AppError } from '../../types/index.js';
 import { apiKeyService } from './api-key.service.js';
-import type { ApiKeyScope } from './api-key.model.js';
 
 function getUserId(req: Request): Types.ObjectId {
   if (!req.userId) {
@@ -13,10 +13,8 @@ function getUserId(req: Request): Types.ObjectId {
 
 export async function createApiKey(req: Request, res: Response): Promise<void> {
   const userId = getUserId(req);
-  const { name, scopes, expiresAt } = req.body as {
-    name: string;
+  const { name, scopes, expiresAt } = req.body as CreateApiKeyRequest & {
     scopes: ApiKeyScope[];
-    expiresAt?: string;
   };
 
   const result = await apiKeyService.createApiKey(userId, {
