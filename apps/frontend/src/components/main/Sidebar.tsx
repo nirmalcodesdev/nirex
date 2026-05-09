@@ -74,7 +74,7 @@ function getNavGroups(unreadCount: number): NavGroup[] {
             label: "WORKSPACE",
             items: [
                 { id: "home", label: "Home", path: ROUTES.DASHBOARD.ROOT, icon: Activity },
-                { id: "sessions", label: "Sessions", path: ROUTES.DASHBOARD.SESSIONS, icon: Terminal, badge: 3, badgeVariant: "accent" },
+                { id: "sessions", label: "Sessions", path: ROUTES.DASHBOARD.SESSIONS, icon: Terminal },
                 { id: "usage", label: "Usage", path: ROUTES.DASHBOARD.USAGE, icon: Zap },
             ],
         },
