@@ -8,6 +8,7 @@ export * from './KpiCard.js';
 export * from './Skeleton.js';
 export * from './Dropdown.js';
 export * from './PageHeader.js';
+export * from './Card.js';
 
 
 
