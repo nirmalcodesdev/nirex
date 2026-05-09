@@ -51,7 +51,7 @@ export interface UsageCurrentPlan {
   plan_name: string;
   price_usd_monthly: number;
   included_credits: number;
-  next_billing_date: string; // ISO date
+  next_billing_date: string | null; // ISO date
 }
 
 export interface UsageOverviewResponse {

@@ -44,7 +44,7 @@ interface ResolvedCurrentPlan {
   planName: string;
   priceUsdMonthly: number;
   includedCredits: number;
-  nextBillingDate: string;
+  nextBillingDate: string | null;
   billingCycle: 'month' | 'year' | null;
   subscriptionPeriodStart: Date | null;
   subscriptionPeriodEnd: Date | null;
@@ -254,7 +254,7 @@ export class UsageService {
           planName: 'Custom',
           priceUsdMonthly: round(monthlyPrice, 2),
           includedCredits: DEFAULT_CREDITS_LIMIT,
-          nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? nextBillingDate(new Date()),
+          nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? null,
           billingCycle: subscription?.billingCycle ?? null,
           subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
           subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
@@ -275,7 +275,7 @@ export class UsageService {
         planName: plan?.name ?? defaultPlanName,
         priceUsdMonthly: round(monthlyPriceCents / 100, 2),
         includedCredits: plan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
-        nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? nextBillingDate(new Date()),
+        nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? null,
         billingCycle: subscription?.billingCycle ?? null,
         subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
         subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
@@ -286,7 +286,7 @@ export class UsageService {
         planName: defaultPlanName,
         priceUsdMonthly: round(defaultMonthlyPrice, 2),
         includedCredits: freePlan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
-        nextBillingDate: nextBillingDate(new Date()),
+        nextBillingDate: null,
         billingCycle: null,
         subscriptionPeriodStart: null,
         subscriptionPeriodEnd: null,
