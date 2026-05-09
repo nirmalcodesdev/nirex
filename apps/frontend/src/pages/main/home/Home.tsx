@@ -1,314 +1,388 @@
-// Home Page - Main Dashboard
 import { useState } from "react";
-import { MoreHorizontal, Terminal, Activity, Zap } from "lucide-react";
-import { BarChart, Bar, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from "recharts";
-import { Dropdown, DropdownItem } from "@nirex/ui";
-import { KpiCard } from "@nirex/ui";
-import { PageHeader } from "@nirex/ui";
+import type { NotificationItem, UsageRange } from "@nirex/shared";
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Check,
+  CheckCircle2,
+  CircleAlert,
+  DollarSign,
+  MoreHorizontal,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
+import { Dropdown, DropdownItem, KpiCard, PageHeader, Skeleton, CardSkeleton } from "@nirex/ui";
 import { useToast } from "../../../components/ToastProvider";
-import { useSimulatedLoading } from "../../../hooks/useSimulatedLoading";
-import { Skeleton, CardSkeleton, ChartSkeleton } from "@nirex/ui/Skeleton";
+import { useDashboardOverviewQuery } from "../../../features/dashboard/useDashboardOverview";
 
-// Data - Chart data for CLI executions
-const executionData = [
-  { name: "Jan", value: 65200 },
-  { name: "Feb", value: 54800 },
-  { name: "Mar", value: 48600 },
-  { name: "Apr", value: 38300 },
-  { name: "May", value: 32900 },
-];
+const usageRangeLabels: Record<UsageRange, string> = {
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  month_to_date: "Month to date",
+};
 
-const retentionData = [
-  { name: "Jan", value: 20 },
-  { name: "Feb", value: 25 },
-  { name: "Mar", value: 42 },
-  { name: "Apr", value: 30 },
-  { name: "May", value: 35 },
-  { name: "Jun", value: 22 },
-];
-
-// Generate stable random heights for the chart visualization
-function useStableRandomHeights(count: number) {
-  const [heights] = useState(() =>
-    Array.from({ length: count }, () => Math.random() * 60 + 20)
-  );
-  return heights;
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
-// Loading skeleton using Skeleton component
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatTrend(value: number | null): string {
+  if (value === null) return "No trend";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function usageCostChangeType(value: number | null): "positive" | "negative" | "neutral" {
+  if (value === null || value === 0) return "neutral";
+  return value < 0 ? "positive" : "negative";
+}
+
+function standardChangeType(value: number | null): "positive" | "negative" | "neutral" {
+  if (value === null || value === 0) return "neutral";
+  return value > 0 ? "positive" : "negative";
+}
+
+function healthChangeType(status: "healthy" | "degraded" | "critical"): "positive" | "negative" | "neutral" {
+  if (status === "healthy") return "positive";
+  if (status === "critical") return "negative";
+  return "neutral";
+}
+
+function severityMeta(severity: NotificationItem["severity"]) {
+  switch (severity) {
+    case "success":
+      return { icon: CheckCircle2, iconClass: "text-nirex-success", dotClass: "bg-nirex-success/20" };
+    case "warning":
+      return { icon: AlertTriangle, iconClass: "text-nirex-warning", dotClass: "bg-nirex-warning/20" };
+    case "error":
+      return { icon: XCircle, iconClass: "text-nirex-error", dotClass: "bg-nirex-error/20" };
+    default:
+      return { icon: CircleAlert, iconClass: "text-nirex-accent", dotClass: "bg-nirex-accent/20" };
+  }
+}
+
 function HomeSkeleton() {
   return (
     <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-6 px-3 mx-auto">
-      <Skeleton className="h-8 w-32" variant="text" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[1, 2, 3].map((i) => (
-          <CardSkeleton key={i} />
+      <Skeleton className="h-8 w-40" variant="text" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map((item) => (
+          <CardSkeleton key={item} />
         ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <ChartSkeleton />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 bg-card border border-border rounded-xl p-5 sm:p-6 space-y-3">
+          <Skeleton className="h-6 w-36" variant="text" />
+          <Skeleton className="h-4 w-60" variant="text" />
+          <Skeleton className="h-3 w-full" variant="text" />
+          <Skeleton className="h-3 w-5/6" variant="text" />
+          <Skeleton className="h-3 w-4/6" variant="text" />
         </div>
-        <ChartSkeleton />
+        <CardSkeleton />
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <CardSkeleton />
+        <CardSkeleton />
       </div>
     </div>
   );
 }
 
-export function Home() {
-  const isLoading = useSimulatedLoading();
-  const { toast } = useToast();
-  const barHeights = useStableRandomHeights(24);
+function HomeErrorState({
+  message,
+  onRetry,
+  isRetrying,
+}: {
+  message: string;
+  onRetry: () => void;
+  isRetrying: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-6 px-3 mx-auto">
+      <PageHeader
+        title="Overview"
+        description="Monitor platform health, usage, and billing in one place."
+      />
+      <section className="rounded-xl border border-nirex-error/30 bg-nirex-error/5 p-6">
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={20} className="mt-0.5 text-nirex-error" />
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-medium">Dashboard data is temporarily unavailable</h2>
+              <p className="text-sm text-muted-foreground mt-1">{message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={isRetrying}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={isRetrying ? "animate-spin" : ""} />
+              {isRetrying ? "Retrying..." : "Retry"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
-  if (isLoading) {
+export function Home() {
+  const [usageRange, setUsageRange] = useState<UsageRange>("30d");
+  const { toast } = useToast();
+  const {
+    data: overview,
+    isLoading,
+    isError,
+    error,
+    isFetching,
+    refetch,
+  } = useDashboardOverviewQuery({
+    usageRange,
+    includeRecentNotifications: true,
+    notificationsLimit: 5,
+  });
+
+  if (isLoading && !overview) {
     return <HomeSkeleton />;
   }
+
+  if (isError && !overview) {
+    const message = error instanceof Error ? error.message : "Unable to load dashboard overview.";
+    return (
+      <HomeErrorState
+        message={message}
+        isRetrying={isFetching}
+        onRetry={() => {
+          void refetch();
+        }}
+      />
+    );
+  }
+
+  if (!overview) {
+    return <HomeSkeleton />;
+  }
+
+  const usageSummary = overview.usage.summary;
+  const unreadCount = overview.notifications.unread_count ?? 0;
+  const activeAlerts = overview.kpis.active_alerts ?? 0;
+  const creditsUsedPct = usageSummary?.credits_used_pct ?? null;
+  const requestsTrend = usageSummary?.total_requests_trend_pct ?? null;
+  const usageCostTrend = usageSummary?.total_usage_cost_trend_pct ?? null;
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-6 px-3 mx-auto">
       <PageHeader
         title="Overview"
-        description="Monitor your CLI executions and compute usage"
+        description="Monitor platform health, usage, and billing in one place."
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                toast("Refreshing dashboard...", "info");
+                void refetch();
+              }}
+              disabled={isFetching}
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
+              {isFetching ? "Refreshing" : "Refresh"}
+            </button>
+            <Dropdown
+              align="right"
+              trigger={
+                <button className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">
+                  <span>{usageRangeLabels[usageRange]}</span>
+                  <MoreHorizontal size={14} className="text-muted-foreground" />
+                </button>
+              }
+            >
+              {(Object.keys(usageRangeLabels) as UsageRange[]).map((rangeOption) => (
+                <DropdownItem key={rangeOption} onClick={() => setUsageRange(rangeOption)}>
+                  <span className="flex w-full items-center justify-between">
+                    {usageRangeLabels[rangeOption]}
+                    {usageRange === rangeOption ? <Check size={14} className="text-nirex-accent" /> : null}
+                  </span>
+                </DropdownItem>
+              ))}
+            </Dropdown>
+          </>
+        }
       />
 
-      {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard
-          title="Total Executions"
-          value="2,847"
-          change="+12.5%"
-          changeType="positive"
-          icon={Terminal}
-          changeContext="vs last week"
-        />
-        <KpiCard
-          title="Success Rate"
-          value="94.2%"
-          change="+2.1%"
-          changeType="positive"
+          title="Total Requests"
+          value={usageSummary ? formatNumber(usageSummary.total_requests) : "N/A"}
+          change={formatTrend(requestsTrend)}
+          changeType={standardChangeType(requestsTrend)}
           icon={Activity}
-          changeContext="vs last week"
+          changeContext={usageRangeLabels[usageRange]}
         />
         <KpiCard
-          title="Compute Time"
-          value="142h"
-          change="-8.2%"
-          changeType="negative"
-          icon={Zap}
-          changeContext="vs last week"
+          title="Usage Cost"
+          value={usageSummary ? formatCurrency(usageSummary.total_usage_cost_usd) : "N/A"}
+          change={formatTrend(usageCostTrend)}
+          changeType={usageCostChangeType(usageCostTrend)}
+          icon={DollarSign}
+          changeContext="current range"
+        />
+        <KpiCard
+          title="Active Alerts"
+          value={formatNumber(activeAlerts)}
+          change={overview.health_status.toUpperCase()}
+          changeType={healthChangeType(overview.health_status)}
+          icon={AlertTriangle}
+          changeContext="system health"
+        />
+        <KpiCard
+          title="Unread Notifications"
+          value={formatNumber(unreadCount)}
+          change={unreadCount > 0 ? `${formatNumber(unreadCount)} pending` : "All clear"}
+          changeType={unreadCount > 0 ? "negative" : "positive"}
+          icon={Bell}
+          changeContext="inbox status"
         />
       </div>
 
-      {/* Main Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* CLI Executions Chart */}
-        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold">CLI Executions</h2>
-            <Dropdown
-              align="right"
-              trigger={
-                <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                  <MoreHorizontal size={18} className="text-muted-foreground" />
-                </button>
-              }
-            >
-              <DropdownItem onClick={() => toast("Exporting data...", "info")}>
-                Export Data
-              </DropdownItem>
-              <DropdownItem onClick={() => toast("Refreshing data...", "info")}>
-                Refresh
-              </DropdownItem>
-            </Dropdown>
-          </div>
+      <div className="grid grid-cols-1 gap-6">
+        <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="text-lg font-semibold">Usage Summary</h2>
+          {overview.usage.available && usageSummary ? (
+            <div className="mt-4 space-y-5">
+              <div className="grid grid-cols-1 gap-4">
+                <MetricRow
+                  label="Credits used"
+                  value={`${formatNumber(usageSummary.credits_used)} / ${formatNumber(usageSummary.credits_limit)}`}
+                  detail={`${formatPercent(usageSummary.credits_used_pct)} of quota`}
+                />
+              </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Credits consumption</span>
+                  <span className="font-medium">
+                    {creditsUsedPct === null ? "N/A" : formatPercent(creditsUsedPct)}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-nirex-accent transition-all"
+                    style={{ width: `${Math.max(0, Math.min(100, creditsUsedPct ?? 0))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Usage insights are temporarily unavailable for this account.
+            </p>
+          )}
+        </section>
+      </div>
 
-          {/* Metrics Row */}
-          <div className="flex gap-6 mb-6 overflow-x-auto pb-2">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Initiated</div>
-              <div className="text-xl font-semibold text-muted-foreground/70">
-                65.2k
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Authorized</div>
-              <div className="text-xl font-semibold text-muted-foreground/70">
-                54.8k
-              </div>
-            </div>
-            <div>
-              <div className="text-xs font-medium mb-1">Successful</div>
-              <div className="text-xl font-semibold">48.6k</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Failed</div>
-              <div className="text-xl font-semibold text-muted-foreground/70">
-                38.3k
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Retried</div>
-              <div className="text-xl font-semibold text-muted-foreground/70">
-                32.9k
-              </div>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="text-lg font-semibold">Recent Notifications</h2>
+          {overview.notifications.available && overview.notifications.recent.length > 0 ? (
+            <div className="mt-4 space-y-3">
+              {overview.notifications.recent.map((notification) => {
+                const meta = severityMeta(notification.severity);
+                const Icon = meta.icon;
 
-          {/* Chart */}
-          <div className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={executionData}
-                margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="0%"
-                      stopColor="hsl(var(--nirex-accent))"
-                      stopOpacity={1}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="hsl(var(--nirex-accent))"
-                      stopOpacity={0.2}
-                    />
-                  </linearGradient>
-                  <pattern
-                    id="stripes"
-                    width="8"
-                    height="8"
-                    patternUnits="userSpaceOnUse"
-                    patternTransform="rotate(45)"
+                return (
+                  <article
+                    key={notification.id}
+                    className="rounded-lg border border-border bg-background px-3 py-3"
                   >
-                    <rect
-                      width="4"
-                      height="8"
-                      transform="translate(0,0)"
-                      fill="hsl(var(--nirex-accent))"
-                      fillOpacity="0.15"
-                    />
-                  </pattern>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="var(--border)"
-                  opacity={0.5}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                  tickFormatter={(value: number) => `${value / 1000}k`}
-                />
-                <Tooltip
-                  cursor={{ fill: "var(--muted)", opacity: 0.4 }}
-                  contentStyle={{
-                    backgroundColor: "var(--card)",
-                    borderColor: "var(--border)",
-                    borderRadius: "8px",
-                    boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                  }}
-                />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                  {executionData.map((_, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={index === 2 ? "url(#colorValue)" : "url(#stripes)"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Error Rate Chart */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Error Rate</h2>
-            <Dropdown
-              align="right"
-              trigger={
-                <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                  <MoreHorizontal size={18} className="text-muted-foreground" />
-                </button>
-              }
-            >
-              <DropdownItem onClick={() => toast("Exporting data...", "info")}>
-                Export Data
-              </DropdownItem>
-              <DropdownItem onClick={() => toast("Refreshing data...", "info")}>
-                Refresh
-              </DropdownItem>
-            </Dropdown>
-          </div>
-          <div className="h-[200px] w-full relative">
-            <div className="absolute top-2 left-1/4 text-sm font-semibold bg-background/80 backdrop-blur-sm px-2 py-1 rounded-md border border-border z-10">
-              42%
+                    <div className="flex items-start gap-3">
+                      <div className={`rounded-md p-2 ${meta.dotClass}`}>
+                        <Icon size={14} className={meta.iconClass} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-medium">{notification.title}</p>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {formatDateTime(notification.created_at)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {notification.message}
+                        </p>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={retentionData}
-                margin={{ top: 20, right: 0, left: 0, bottom: 0 }}
-              >
-                <Line
-                  type="stepAfter"
-                  dataKey="value"
-                  stroke="hsl(var(--nirex-accent))"
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  horizontal={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-            <div className="absolute bottom-0 left-0 w-full h-full flex items-end justify-between px-1 pointer-events-none opacity-20">
-              {barHeights.map((height, i) => (
-                <div
-                  key={i}
-                  className="w-1 bg-nirex-accent"
-                  style={{ height: `${height}%` }}
-                />
-              ))}
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">No recent notifications.</p>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="text-lg font-semibold">Billing Snapshot</h2>
+          {overview.billing.available ? (
+            <div className="mt-4 space-y-4">
+              <MetricRow
+                label="Current plan"
+                value={overview.billing.current_plan_name ?? "N/A"}
+                detail={overview.billing.current_plan_id ?? "No active plan"}
+              />
+              <MetricRow
+                label="Subscription status"
+                value={overview.billing.subscription_status ?? "N/A"}
+                detail={overview.billing.next_billing_date ? `Next billing ${formatDateTime(overview.billing.next_billing_date)}` : "No next billing date"}
+              />
+              <MetricRow
+                label="Total paid (YTD)"
+                value={
+                  overview.billing.total_paid_ytd_cents === null
+                    ? "N/A"
+                    : formatCurrency(overview.billing.total_paid_ytd_cents / 100)
+                }
+                detail={overview.billing.currency ?? "USD"}
+              />
             </div>
-          </div>
-          <div className="flex justify-between text-xs font-medium text-muted-foreground mt-4 px-2">
-            <span>Jan</span>
-            <span>Feb</span>
-            <span>Mar</span>
-            <span>Apr</span>
-            <span>May</span>
-            <span>Jun</span>
-          </div>
-        </div>
+          ) : (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Billing overview is temporarily unavailable.
+            </p>
+          )}
+        </section>
       </div>
+    </div>
+  );
+}
 
-      {/* Insights Card */}
-      <div className="bg-gradient-to-br from-nirex-surface via-nirex-elevated to-nirex-base text-nirex-text-primary rounded-xl p-6 border border-nirex-accent/20 flex flex-col relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-nirex-accent/20 to-transparent rounded-full blur-3xl -mr-20 -mt-20" />
-
-        <div className="flex items-center gap-2 bg-nirex-accent/10 backdrop-blur-md w-fit px-3 py-1.5 rounded-full text-xs font-medium mb-6 border border-nirex-accent/20">
-          <Zap size={12} className="text-nirex-accent" /> Insights
-        </div>
-
-        <div className="text-5xl font-light mb-4 tracking-tight">75%</div>
-        <h3 className="text-lg font-medium mb-3 leading-snug">
-          Success rate increased by 4% compared to last week.
-        </h3>
-        <p className="text-sm text-nirex-text-secondary leading-relaxed mb-6">
-          This improvement reduced failed executions by 950 and is projected to
-          save 12,400s of compute time.
-        </p>
-
-        <div className="mt-auto h-1.5 w-full bg-nirex-text-muted/20 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-nirex-accent to-nirex-accent-hi w-[75%] rounded-full shadow-[0_0_10px_hsl(var(--nirex-accent)/0.5)]" />
-        </div>
-      </div>
+function MetricRow({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-background px-3 py-3">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 text-base font-semibold">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
     </div>
   );
 }
