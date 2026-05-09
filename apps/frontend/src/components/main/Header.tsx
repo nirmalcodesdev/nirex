@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
     Search,
     Bell,
+    Check,
     Settings,
     Command,
     Menu,
@@ -22,10 +23,13 @@ import { useToast } from "../../components/ToastProvider";
 import { useSidebar } from "./Sidebar";
 import { UserAvatar } from "../../components/ui/UserAvatar";
 import { useClickOutside } from "../../hooks/useClickOutside";
-import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
+import { APP_NAME, APP_NAME_SUFFIX, type NotificationItem } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
 import { useAppSelector } from "../../store/hooks";
-import { useDashboardOverviewQuery } from "../../features/dashboard/useDashboardOverview";
+import {
+    useMarkAllNotificationsReadMutation,
+    useNotificationsQuery,
+} from "../../features/notifications/useNotifications";
 
 const searchItems = [
     { id: "dashboard", label: "Dashboard", path: "/", icon: Activity },
@@ -104,18 +108,20 @@ function NotificationsDropdown() {
     const { toast } = useToast();
     const navigate = useNavigate();
     const {
-        data: overview,
+        data: notifications,
         isFetching,
         refetch,
-    } = useDashboardOverviewQuery({
-        includeRecentNotifications: true,
-        notificationsLimit: 4,
+    } = useNotificationsQuery({
+        limit: 4,
+        includeRead: true,
+        includeArchived: false,
     });
+    const markAllReadMutation = useMarkAllNotificationsReadMutation();
 
     useClickOutside(ref, () => setIsOpen(false));
 
-    const unreadCount = overview?.notifications.unread_count ?? 0;
-    const recentNotifications = overview?.notifications.recent ?? [];
+    const unreadCount = notifications?.unread_count ?? 0;
+    const recentNotifications = notifications?.items ?? [];
 
     const formatTime = (value: string) =>
         new Intl.DateTimeFormat(undefined, {
@@ -123,7 +129,7 @@ function NotificationsDropdown() {
             timeStyle: "short",
         }).format(new Date(value));
 
-    const getSeverityMeta = (severity: "info" | "success" | "warning" | "error") => {
+    const getSeverityMeta = (severity: NotificationItem["severity"]) => {
         switch (severity) {
             case "success":
                 return { Icon: CheckCircle2, iconClass: "text-nirex-success" };
@@ -162,14 +168,41 @@ function NotificationsDropdown() {
                                 </h3>
                                 <button
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
+                                        if (unreadCount > 0) {
+                                            try {
+                                                const result = await markAllReadMutation.mutateAsync();
+                                                if (result.updated_count > 0) {
+                                                    toast("Marked all as read.", "success");
+                                                } else {
+                                                    toast("All notifications are already read.", "info");
+                                                }
+                                            } catch (error) {
+                                                toast(
+                                                    error instanceof Error
+                                                        ? error.message
+                                                        : "Unable to mark notifications as read.",
+                                                    "error",
+                                                );
+                                            }
+                                            return;
+                                        }
+
                                         toast("Refreshing notifications...", "info");
                                         void refetch();
                                     }}
                                     className="inline-flex items-center gap-1 text-xs text-nirex-accent"
                                 >
-                                    <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
-                                    Refresh
+                                    {unreadCount > 0 ? (
+                                        <Check size={12} />
+                                    ) : (
+                                        <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+                                    )}
+                                    {unreadCount > 0
+                                        ? markAllReadMutation.isPending
+                                            ? "Updating..."
+                                            : "Mark all read"
+                                        : "Refresh"}
                                 </button>
                             </div>
                             <div className="p-2">

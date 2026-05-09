@@ -48,7 +48,10 @@ export function AuthBootstrap() {
           navigate(getPostAuthRoute(), { replace: true });
         })
         .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : "OAuth sign-in failed.";
+          const message =
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : "OAuth sign-in failed.";
           toast(message, "error");
           navigate(ROUTES.AUTH.SIGNIN, { replace: true });
         });

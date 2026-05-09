@@ -68,6 +68,8 @@ export function readCookie(req: Request, name: string): string | null {
   if (!header) return null;
 
   const cookies = header.split(';');
+  let matchedValue: string | null = null;
+
   for (const cookie of cookies) {
     const separatorIndex = cookie.indexOf('=');
     if (separatorIndex === -1) continue;
@@ -77,13 +79,13 @@ export function readCookie(req: Request, name: string): string | null {
 
     const rawValue = cookie.slice(separatorIndex + 1);
     try {
-      return decodeURIComponent(rawValue);
+      matchedValue = decodeURIComponent(rawValue);
     } catch {
-      return rawValue;
+      matchedValue = rawValue;
     }
   }
 
-  return null;
+  return matchedValue;
 }
 
 export function readAccessTokenCookie(req: Request): string | null {
