@@ -12,6 +12,11 @@ import {
     Zap,
     CreditCard,
     BookOpen,
+    AlertTriangle,
+    CheckCircle2,
+    CircleAlert,
+    RefreshCw,
+    XCircle,
 } from "lucide-react";
 import { useToast } from "../../components/ToastProvider";
 import { useSidebar } from "./Sidebar";
@@ -20,6 +25,7 @@ import { useClickOutside } from "../../hooks/useClickOutside";
 import { APP_NAME, APP_NAME_SUFFIX } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
 import { useAppSelector } from "../../store/hooks";
+import { useDashboardOverviewQuery } from "../../features/dashboard/useDashboardOverview";
 
 const searchItems = [
     { id: "dashboard", label: "Dashboard", path: "/", icon: Activity },
@@ -96,14 +102,49 @@ function NotificationsDropdown() {
     const [isOpen, setIsOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
+    const navigate = useNavigate();
+    const {
+        data: overview,
+        isFetching,
+        refetch,
+    } = useDashboardOverviewQuery({
+        includeRecentNotifications: true,
+        notificationsLimit: 4,
+    });
 
     useClickOutside(ref, () => setIsOpen(false));
+
+    const unreadCount = overview?.notifications.unread_count ?? 0;
+    const recentNotifications = overview?.notifications.recent ?? [];
+
+    const formatTime = (value: string) =>
+        new Intl.DateTimeFormat(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+        }).format(new Date(value));
+
+    const getSeverityMeta = (severity: "info" | "success" | "warning" | "error") => {
+        switch (severity) {
+            case "success":
+                return { Icon: CheckCircle2, iconClass: "text-nirex-success" };
+            case "warning":
+                return { Icon: AlertTriangle, iconClass: "text-nirex-warning" };
+            case "error":
+                return { Icon: XCircle, iconClass: "text-nirex-error" };
+            default:
+                return { Icon: CircleAlert, iconClass: "text-nirex-accent" };
+        }
+    };
 
     return (
         <div ref={ref} className="relative">
             <button type="button" onClick={() => setIsOpen((prev) => !prev)} className="relative p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground">
                 <Bell size={20} />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-nirex-accent rounded-full" />
+                {unreadCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-nirex-accent text-[10px] leading-[18px] text-white text-center font-medium">
+                        {Math.min(unreadCount, 99)}
+                    </span>
+                ) : null}
             </button>
             <AnimatePresence>
                 {isOpen && (
@@ -111,16 +152,67 @@ function NotificationsDropdown() {
                         <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute right-0 mt-2 w-80 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
                             <div className="px-4 py-3 border-b border-border flex justify-between items-center">
-                                <h3 className="font-semibold text-sm">Notifications</h3>
-                                <button type="button" onClick={() => toast("Marked all read", "success")} className="text-xs text-nirex-accent">
-                                    Mark all read
+                                <h3 className="font-semibold text-sm">
+                                    Notifications
+                                    {unreadCount > 0 ? (
+                                        <span className="ml-2 text-xs text-muted-foreground">
+                                            {unreadCount} unread
+                                        </span>
+                                    ) : null}
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        toast("Refreshing notifications...", "info");
+                                        void refetch();
+                                    }}
+                                    className="inline-flex items-center gap-1 text-xs text-nirex-accent"
+                                >
+                                    <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+                                    Refresh
                                 </button>
                             </div>
                             <div className="p-2">
-                                <div className="px-3 py-2 hover:bg-muted rounded-lg cursor-pointer">
-                                    <p className="text-sm font-medium">New session started</p>
-                                    <p className="text-xs text-muted-foreground">2 minutes ago</p>
-                                </div>
+                                {recentNotifications.length > 0 ? (
+                                    <>
+                                        {recentNotifications.map((notification) => {
+                                            const { Icon, iconClass } = getSeverityMeta(notification.severity);
+
+                                            return (
+                                                <article key={notification.id} className="px-3 py-2 hover:bg-muted rounded-lg">
+                                                    <div className="flex items-start gap-2.5">
+                                                        <Icon size={14} className={`mt-0.5 ${iconClass}`} />
+                                                        <div className="min-w-0">
+                                                            <p className="truncate text-sm font-medium">
+                                                                {notification.title}
+                                                            </p>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {notification.message}
+                                                            </p>
+                                                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                                                {formatTime(notification.created_at)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </article>
+                                            );
+                                        })}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                navigate("/notifications");
+                                                setIsOpen(false);
+                                            }}
+                                            className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
+                                        >
+                                            View all notifications
+                                        </button>
+                                    </>
+                                ) : (
+                                    <p className="px-3 py-2 text-sm text-muted-foreground">
+                                        No recent notifications.
+                                    </p>
+                                )}
                             </div>
                         </motion.div>
                     </>
