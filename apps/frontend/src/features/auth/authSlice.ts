@@ -120,6 +120,13 @@ export const completeOAuthSignIn = createAsyncThunk<AuthSuccessPayload, void, { 
     try {
       return await hydrateFromCookieSession();
     } catch (error) {
+      if (error instanceof AuthApiError && error.code === "TOKEN_EXPIRED") {
+        try {
+          return await refreshAndHydrate();
+        } catch (refreshError) {
+          return rejectWithValue(rejectFromError(refreshError));
+        }
+      }
       return rejectWithValue(rejectFromError(error));
     }
   },

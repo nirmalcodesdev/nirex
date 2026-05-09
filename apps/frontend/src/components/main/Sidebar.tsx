@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, type ReactNode } from "react";
+import React, { useState, useEffect, useMemo, createContext, useContext, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
@@ -24,6 +24,7 @@ import { UserAvatar } from "../../components/ui/UserAvatar";
 import { usePlansDialog } from "../../hooks/usePlansDialog";
 import { signOutUser } from "../../features/auth/authSlice";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { useNotificationsQuery } from "../../features/notifications/useNotifications";
 
 // ============================================================================
 // Types & Context
@@ -67,24 +68,32 @@ import { ROUTES } from "../../constant/routes";
 // Navigation Data
 // ============================================================================
 
-const navGroups: NavGroup[] = [
-    {
-        label: "WORKSPACE",
-        items: [
-            { id: "home", label: "Home", path: ROUTES.DASHBOARD.ROOT, icon: Activity },
-            { id: "sessions", label: "Sessions", path: ROUTES.DASHBOARD.SESSIONS, icon: Terminal, badge: 3, badgeVariant: "accent" },
-            { id: "usage", label: "Usage", path: ROUTES.DASHBOARD.USAGE, icon: Zap },
-        ],
-    },
-    {
-        label: "ACCOUNT",
-        items: [
-            { id: "billing", label: "Billing", path: ROUTES.DASHBOARD.BILLING, icon: CreditCard },
-            { id: "notifications", label: "Notifications", path: ROUTES.DASHBOARD.NOTIFICATIONS, icon: Bell, badge: 2, badgeVariant: "warning" },
-            { id: "settings", label: "Settings", path: ROUTES.DASHBOARD.SETTINGS, icon: Settings },
-        ],
-    },
-];
+function getNavGroups(unreadCount: number): NavGroup[] {
+    return [
+        {
+            label: "WORKSPACE",
+            items: [
+                { id: "home", label: "Home", path: ROUTES.DASHBOARD.ROOT, icon: Activity },
+                { id: "sessions", label: "Sessions", path: ROUTES.DASHBOARD.SESSIONS, icon: Terminal, badge: 3, badgeVariant: "accent" },
+                { id: "usage", label: "Usage", path: ROUTES.DASHBOARD.USAGE, icon: Zap },
+            ],
+        },
+        {
+            label: "ACCOUNT",
+            items: [
+                { id: "billing", label: "Billing", path: ROUTES.DASHBOARD.BILLING, icon: CreditCard },
+                {
+                    id: "notifications",
+                    label: "Notifications",
+                    path: ROUTES.DASHBOARD.NOTIFICATIONS,
+                    icon: Bell,
+                    ...(unreadCount > 0 ? { badge: unreadCount, badgeVariant: "accent" as const } : {}),
+                },
+                { id: "settings", label: "Settings", path: ROUTES.DASHBOARD.SETTINGS, icon: Settings },
+            ],
+        },
+    ];
+}
 
 // ============================================================================
 // Tooltip Component for Collapsed Sidebar
@@ -133,6 +142,13 @@ export function DesktopSidebar() {
     const location = useLocation();
     const dispatch = useAppDispatch();
     const user = useAppSelector((state) => state.auth.user);
+    const { data: notifications } = useNotificationsQuery({
+        limit: 1,
+        includeRead: true,
+        includeArchived: false,
+    });
+    const unreadCount = notifications?.unread_count ?? 0;
+    const navGroups = useMemo(() => getNavGroups(unreadCount), [unreadCount]);
 
     return (
         <motion.aside
@@ -435,6 +451,13 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     const location = useLocation();
     const dispatch = useAppDispatch();
     const user = useAppSelector((state) => state.auth.user);
+    const { data: notifications } = useNotificationsQuery({
+        limit: 1,
+        includeRead: true,
+        includeArchived: false,
+    });
+    const unreadCount = notifications?.unread_count ?? 0;
+    const navGroups = useMemo(() => getNavGroups(unreadCount), [unreadCount]);
 
     if (!isOpen) return null;
 
