@@ -52,7 +52,7 @@ app.use(
 
 // Stripe webhook route must be mounted before express.json() so signature
 // verification can access the raw request body.
-app.use('/api/billing/webhooks', billingWebhookRouter);
+app.use('/api/v1/billing/webhooks', billingWebhookRouter);
 
 // ── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -72,13 +72,17 @@ app.get('/health', (_req, res) => {
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/sessions', chatSessionRoutes);
-app.use('/api/usage', usageRoutes);
-app.use('/api/billing', billingRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/v1/api-keys', apiKeyRoutes);
+const v1Router = express.Router();
+
+v1Router.use('/auth', authRoutes);
+v1Router.use('/sessions', chatSessionRoutes);
+v1Router.use('/usage', usageRoutes);
+v1Router.use('/billing', billingRoutes);
+v1Router.use('/dashboard', dashboardRoutes);
+v1Router.use('/notifications', notificationsRoutes);
+v1Router.use('/api-keys', apiKeyRoutes);
+
+app.use('/api/v1', v1Router);
 
 // ── Static files (auth test interface) ────────────────────────────────────
 // Serve from project root public folder (works in both src and dist)

@@ -4,7 +4,7 @@ import app from '../src/app.js';
 
 describe('usage routes', () => {
   it('requires authentication for overview endpoint', async () => {
-    const response = await request(app).get('/api/usage/overview');
+    const response = await request(app).get('/api/v1/usage/overview');
 
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({

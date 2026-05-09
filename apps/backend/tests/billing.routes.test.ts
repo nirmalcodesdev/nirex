@@ -4,7 +4,7 @@ import app from '../src/app.js';
 
 describe('billing routes', () => {
   it('requires authentication for billing overview', async () => {
-    const response = await request(app).get('/api/billing/overview');
+    const response = await request(app).get('/api/v1/billing/overview');
 
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({
@@ -15,7 +15,7 @@ describe('billing routes', () => {
 
   it('fails webhook processing when billing is not configured', async () => {
     const response = await request(app)
-      .post('/api/billing/webhooks/stripe')
+      .post('/api/v1/billing/webhooks/stripe')
       .set('Stripe-Signature', 't=1,v1=invalid')
       .set('Content-Type', 'application/json')
       .send(JSON.stringify({ id: 'evt_test', type: 'invoice.paid' }));
@@ -31,7 +31,7 @@ describe('billing routes', () => {
 
   it('requires raw json body for stripe webhook signature verification', async () => {
     const response = await request(app)
-      .post('/api/billing/webhooks/stripe')
+      .post('/api/v1/billing/webhooks/stripe')
       .set('Stripe-Signature', 't=1,v1=invalid')
       .set('Content-Type', 'text/plain')
       .send('hello');

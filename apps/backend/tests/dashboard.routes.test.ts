@@ -4,7 +4,7 @@ import app from '../src/app.js';
 
 describe('dashboard routes', () => {
   it('requires authentication for overview endpoint', async () => {
-    const response = await request(app).get('/api/dashboard/overview');
+    const response = await request(app).get('/api/v1/dashboard/overview');
 
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({

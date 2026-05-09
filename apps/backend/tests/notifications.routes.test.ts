@@ -4,7 +4,7 @@ import app from '../src/app.js';
 
 describe('notifications routes', () => {
   it('requires authentication for list endpoint', async () => {
-    const response = await request(app).get('/api/notifications');
+    const response = await request(app).get('/api/v1/notifications');
 
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({
