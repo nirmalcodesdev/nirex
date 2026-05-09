@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
+import type { ApiKeyScope } from '@nirex/shared';
 import { env } from '../config/env.js';
 import { authenticate } from './authenticate.js';
 import { authenticateApiKey } from '../modules/api-keys/api-key.middleware.js';
-import type { ApiKeyScope } from '../modules/api-keys/api-key.model.js';
 import { AppError } from '../types/index.js';
 
 function isApiKeyRequest(req: Request): boolean {

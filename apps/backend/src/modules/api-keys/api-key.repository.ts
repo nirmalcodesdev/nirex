@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
-import { ApiKeyModel, type ApiKeyScope, type IApiKeyDocument } from './api-key.model.js';
+import type { ApiKeyScope } from '@nirex/shared';
+import { ApiKeyModel, type IApiKeyDocument } from './api-key.model.js';
 
 export class ApiKeyRepository {
   async create(data: {

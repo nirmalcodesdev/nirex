@@ -1,25 +1,7 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { API_KEY_SCOPES, type ApiKeyScope } from '@nirex/shared';
 
-export type ApiKeyScope =
-  | 'sessions:read'
-  | 'sessions:write'
-  | 'usage:read'
-  | 'billing:read'
-  | 'billing:write'
-  | 'dashboard:read'
-  | 'notifications:read'
-  | 'notifications:write';
-
-export const API_KEY_SCOPES: ApiKeyScope[] = [
-  'sessions:read',
-  'sessions:write',
-  'usage:read',
-  'billing:read',
-  'billing:write',
-  'dashboard:read',
-  'notifications:read',
-  'notifications:write',
-];
+export type { ApiKeyScope } from '@nirex/shared';
 
 export interface IApiKeyDocument extends Document<Types.ObjectId> {
   _id: Types.ObjectId;

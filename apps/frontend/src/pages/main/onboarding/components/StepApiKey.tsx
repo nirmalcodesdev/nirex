@@ -5,6 +5,7 @@ interface StepApiKeyProps {
   apiKey: string;
   showKey: boolean;
   keySaved: boolean;
+  isGenerating: boolean;
   onGenerate: () => void;
   onToggleShow: () => void;
   onCopy: () => void;
@@ -16,6 +17,7 @@ export function StepApiKey({
   apiKey,
   showKey,
   keySaved,
+  isGenerating,
   onGenerate,
   onToggleShow,
   onCopy,
@@ -37,13 +39,18 @@ export function StepApiKey({
           whileHover={{ scale: 1.01, y: -2 }}
           whileTap={{ scale: 0.99 }}
           onClick={onGenerate}
+          disabled={isGenerating}
           className="w-full bg-nirex-surface/40 backdrop-blur-sm border border-nirex-accent/10 rounded-2xl p-8 text-center group hover:border-nirex-accent/30 transition-all shadow-lg hover:shadow-xl hover:shadow-nirex-accent/5"
         >
           <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-nirex-accent/20 to-nirex-accent/5 flex items-center justify-center group-hover:scale-110 transition-transform shadow-inner border border-nirex-accent/10">
             <Key size={32} className="text-nirex-accent" />
           </div>
-          <h3 className="font-bold text-lg mb-1.5 text-nirex-text-primary">Generate API Key</h3>
-          <p className="text-sm text-nirex-text-secondary max-w-xs mx-auto">Create your first key to start deploying and managing your services</p>
+          <h3 className="font-bold text-lg mb-1.5 text-nirex-text-primary">
+            {isGenerating ? "Generating API Key..." : "Generate API Key"}
+          </h3>
+          <p className="text-sm text-nirex-text-secondary max-w-xs mx-auto">
+            Create your first key to authenticate the CLI and automate Nirex safely
+          </p>
         </motion.button>
       ) : (
         <motion.div

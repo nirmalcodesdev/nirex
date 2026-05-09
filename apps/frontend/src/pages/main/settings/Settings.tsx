@@ -16,7 +16,6 @@ import {
   User,
   X,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
 import { PageHeader } from "@nirex/ui";
 import {
@@ -34,6 +33,7 @@ import { authUserUpdated, signedOutLocally } from "../../../features/auth/authSl
 import { useAppDispatch, useAppSelector } from "../../../store/hooks";
 import { ROUTES } from "../../../constant/routes";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
+import { ApiKeysSettings } from "./ApiKeysSettings";
 
 interface NavItem {
   id: string;
@@ -65,9 +65,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 export function Settings() {
   const [activeTab, setActiveTab] = useState("profile");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isCreateApiKeyModalOpen, setIsCreateApiKeyModalOpen] = useState(false);
-  const [newKeyName, setNewKeyName] = useState("");
-  const { toast } = useToast();
   const { theme, setTheme } = useTheme();
 
   const handleTabChange = (id: string) => {
@@ -135,26 +132,9 @@ export function Settings() {
           {activeTab === "profile" && <ProfileSettings />}
           {activeTab === "appearance" && <AppearanceSettings theme={theme} setTheme={setTheme} />}
           {activeTab === "security" && <SecuritySettings />}
-          {activeTab === "api-keys" && (
-            <ApiKeysSettings onCreateKey={() => setIsCreateApiKeyModalOpen(true)} />
-          )}
+          {activeTab === "api-keys" && <ApiKeysSettings />}
         </div>
       </div>
-
-      <AnimatePresence>
-        {isCreateApiKeyModalOpen && (
-          <CreateApiKeyModal
-            keyName={newKeyName}
-            setKeyName={setNewKeyName}
-            onClose={() => setIsCreateApiKeyModalOpen(false)}
-            onCreate={() => {
-              toast(`API Key "${newKeyName || "New Key"}" created successfully.`, "success");
-              setIsCreateApiKeyModalOpen(false);
-              setNewKeyName("");
-            }}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -748,101 +728,6 @@ function DeviceSettings() {
           {workingId === "all" ? "Terminating..." : "Sign Out Everywhere"}
         </button>
       </div>
-    </div>
-  );
-}
-
-interface ApiKeysSettingsProps {
-  onCreateKey: () => void;
-}
-
-function ApiKeysSettings({ onCreateKey }: ApiKeysSettingsProps) {
-  const { toast } = useToast();
-  const apiKeys = [
-    { name: "Production Key", key: "nrx_live_********************", created: "Oct 12, 2025" },
-    { name: "Development Key", key: "nrx_test_********************", created: "Jan 05, 2026" },
-  ];
-
-  return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg sm:text-xl font-medium mb-1">API Keys</h2>
-          <p className="text-sm text-muted-foreground">Manage your secret keys for API access.</p>
-        </div>
-        <button type="button" onClick={onCreateKey} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap">
-          Create New Key
-        </button>
-      </div>
-
-      <div className="p-5 sm:p-6">
-        <div className="border border-border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm text-left whitespace-nowrap">
-            <thead className="text-xs text-muted-foreground uppercase bg-muted/30 border-b border-border">
-              <tr>
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Key</th>
-                <th className="px-4 py-3 font-medium">Created</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {apiKeys.map((key) => (
-                <tr key={key.name} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-medium">{key.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{key.key}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{key.created}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button type="button" onClick={() => toast("API key revoked.", "success")} className="text-sm font-medium text-nirex-error hover:underline">
-                      Revoke
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface CreateApiKeyModalProps {
-  keyName: string;
-  setKeyName: (name: string) => void;
-  onClose: () => void;
-  onCreate: () => void;
-}
-
-function CreateApiKeyModal({ keyName, setKeyName, onClose, onCreate }: CreateApiKeyModalProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        className="relative w-full max-w-md bg-card border border-border rounded-xl overflow-hidden"
-      >
-        <div className="p-6 border-b border-border flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Create New API Key</h2>
-          <button type="button" onClick={onClose} className="p-1.5 text-muted-foreground hover:bg-muted rounded-md transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="p-6 flex flex-col gap-4">
-          <InputField label="Key Name" value={keyName} onChange={setKeyName} placeholder="e.g. Production Server" />
-          <p className="text-xs text-muted-foreground">A memorable name to identify this key.</p>
-        </div>
-        <div className="p-6 border-t border-border bg-muted/20 flex items-center justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-            Cancel
-          </button>
-          <button type="button" onClick={onCreate} className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium transition-colors">
-            Create Key
-          </button>
-        </div>
-      </motion.div>
     </div>
   );
 }
