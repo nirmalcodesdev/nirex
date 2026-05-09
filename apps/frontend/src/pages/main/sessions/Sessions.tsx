@@ -1,13 +1,12 @@
 // Sessions Page - CLI execution sessions listing
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   Search,
   Filter,
   MoreHorizontal,
   Terminal,
-  CheckCircle2,
-  XCircle,
   Clock,
   ChevronDown,
   Calendar,
@@ -17,77 +16,11 @@ import { Dropdown, DropdownItem } from "@nirex/ui";
 import { KpiCard } from "@nirex/ui";
 import { PageHeader } from "@nirex/ui";
 import { useToast } from "../../../components/ToastProvider";
-import { useSimulatedLoading } from "../../../hooks/useSimulatedLoading";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { Skeleton, CardSkeleton, TableRowSkeleton } from "@nirex/ui/Skeleton";
-
-interface SessionData {
-  id: string;
-  command: string;
-  project: string;
-  duration: string;
-  status: "success" | "failed" | "running" | "pending";
-  date: string;
-}
-
-const sessionsData: SessionData[] = [
-  {
-    id: "sess_8x2k9m",
-    command: "npm run build",
-    project: "api-service",
-    duration: "45s",
-    status: "success",
-    date: "2 mins ago",
-  },
-  {
-    id: "sess_3p7q4n",
-    command: "deploy --staging",
-    project: "web-dashboard",
-    duration: "1m 12s",
-    status: "success",
-    date: "15 mins ago",
-  },
-  {
-    id: "sess_9v5w2r",
-    command: "docker-compose up",
-    project: "worker-queue",
-    duration: "3s",
-    status: "failed",
-    date: "1 hour ago",
-  },
-  {
-    id: "sess_4j8h3b",
-    command: "pytest tests/",
-    project: "api-service",
-    duration: "2m 34s",
-    status: "success",
-    date: "2 hours ago",
-  },
-  {
-    id: "sess_2k5m9p",
-    command: "npm run migrate",
-    project: "database",
-    duration: "12s",
-    status: "running",
-    date: "Just now",
-  },
-  {
-    id: "sess_7c4x8v",
-    command: "npm ci",
-    project: "web-dashboard",
-    duration: "4m 05s",
-    status: "success",
-    date: "3 hours ago",
-  },
-  {
-    id: "sess_1n6b3z",
-    command: "tsc --noEmit",
-    project: "shared-lib",
-    duration: "8s",
-    status: "failed",
-    date: "4 hours ago",
-  },
-];
+import { sessionApi } from "../../../features/sessions/sessionApi";
+import { formatRelativeTime } from "@nirex/shared";
+import type { ChatSessionDTO } from "@nirex/shared";
 
 // Loading skeleton using Skeleton component
 function SessionsSkeleton() {
@@ -113,20 +46,71 @@ function SessionsSkeleton() {
   );
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 export function Sessions() {
   const [dateRange, setDateRange] = useState("Last 24h");
   const [statusFilter, setStatusFilter] = useState("All");
-  const isLoading = useSimulatedLoading();
+  const [searchQuery, setSearchQuery] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const totalSessions = sessionsData.length;
-  const successCount = sessionsData.filter((s) => s.status === "success").length;
-  const failedCount = sessionsData.filter((s) => s.status === "failed").length;
-  const runningCount = sessionsData.filter((s) => s.status === "running").length;
+  const { data: sessionsResponse, isLoading: sessionsLoading, error: sessionsError } = useQuery({
+    queryKey: ["sessions", statusFilter],
+    queryFn: () => sessionApi.listSessions({ 
+      include_archived: statusFilter === "Archived" || statusFilter === "All" 
+    }),
+  });
 
-  if (isLoading) {
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ["session-stats"],
+    queryFn: () => sessionApi.getStats(),
+  });
+
+  const sessions = useMemo(() => {
+    if (!sessionsResponse?.sessions) return [];
+    
+    let filtered = [...sessionsResponse.sessions];
+    
+    if (statusFilter === "Active") {
+      filtered = filtered.filter(s => !s.is_archived);
+    } else if (statusFilter === "Archived") {
+      filtered = filtered.filter(s => s.is_archived);
+    }
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(s => 
+        s.id.toLowerCase().includes(q) || 
+        s.name.toLowerCase().includes(q) || 
+        s.working_directory.toLowerCase().includes(q)
+      );
+    }
+
+    return filtered;
+  }, [sessionsResponse, statusFilter, searchQuery]);
+
+  if (sessionsLoading || statsLoading) {
     return <SessionsSkeleton />;
+  }
+
+  if (sessionsError) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-destructive font-medium">
+          {getErrorMessage(sessionsError, "Failed to load sessions")}
+        </p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 text-sm text-muted-foreground hover:text-foreground underline"
+        >
+          Try again
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -140,32 +124,32 @@ export function Sessions() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Total Sessions"
-          value={totalSessions.toString()}
-          change="+12%"
-          changeType="positive"
+          value={stats?.total_sessions.toString() || "0"}
+          change=""
+          changeType="neutral"
           icon={Activity}
           variant="compact"
         />
         <KpiCard
-          title="Successful"
-          value={successCount.toString()}
-          change="+8%"
-          changeType="positive"
-          icon={CheckCircle2}
+          title="Total Messages"
+          value={stats?.total_messages.toString() || "0"}
+          change=""
+          changeType="neutral"
+          icon={Terminal}
           variant="compact"
         />
         <KpiCard
-          title="Failed"
-          value={failedCount.toString()}
-          change="-2%"
-          changeType="positive"
-          icon={XCircle}
+          title="Tokens Used"
+          value={stats?.total_tokens.total_tokens.toLocaleString() || "0"}
+          change=""
+          changeType="neutral"
+          icon={Activity}
           variant="compact"
         />
         <KpiCard
-          title="Running"
-          value={runningCount.toString()}
-          change="Active"
+          title="Estimated Cost"
+          value={`$${stats?.estimated_cost_usd.toFixed(2) || "0.00"}`}
+          change=""
           changeType="neutral"
           icon={Clock}
           variant="compact"
@@ -183,7 +167,9 @@ export function Sessions() {
             />
             <input
               type="text"
-              placeholder="Search by ID, command, or user..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by ID, name, or directory..."
               className="w-full bg-background border border-border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             />
           </div>
@@ -198,14 +184,11 @@ export function Sessions() {
               }
             >
               <DropdownItem onClick={() => setStatusFilter("All")}>All</DropdownItem>
-              <DropdownItem onClick={() => setStatusFilter("Success")}>
-                Success
+              <DropdownItem onClick={() => setStatusFilter("Active")}>
+                Active
               </DropdownItem>
-              <DropdownItem onClick={() => setStatusFilter("Failed")}>
-                Failed
-              </DropdownItem>
-              <DropdownItem onClick={() => setStatusFilter("Running")}>
-                Running
+              <DropdownItem onClick={() => setStatusFilter("Archived")}>
+                Archived
               </DropdownItem>
             </Dropdown>
 
@@ -243,16 +226,16 @@ export function Sessions() {
                   Session
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Command
+                  Name
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Status
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Duration
+                  Messages
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Project
+                  Model
                 </th>
                 <th className="text-left py-3 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Time
@@ -261,7 +244,7 @@ export function Sessions() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {sessionsData.map((session) => (
+              {sessions.map((session: ChatSessionDTO) => (
                 <tr
                   key={session.id}
                   onClick={() => navigate(`/sessions/${session.id}`)}
@@ -269,7 +252,7 @@ export function Sessions() {
                 >
                   <td className="py-3 px-4">
                     <code className="text-xs font-mono text-muted-foreground">
-                      {session.id}
+                      {session.id.substring(0, 8)}...
                     </code>
                   </td>
                   <td className="py-3 px-4">
@@ -278,24 +261,24 @@ export function Sessions() {
                         size={14}
                         className="text-muted-foreground shrink-0"
                       />
-                      <span className="font-mono text-xs truncate max-w-[150px]">
-                        {session.command}
+                      <span className="font-mono text-xs truncate max-w-[200px]">
+                        {session.name}
                       </span>
                     </div>
                   </td>
                   <td className="py-3 px-4">
-                    <StatusBadge status={session.status} />
+                    <StatusBadge status={session.is_archived ? "archived" : "active"} className={session.is_archived ? "opacity-60" : ""} />
                   </td>
                   <td className="py-3 px-4 text-muted-foreground">
-                    {session.duration}
+                    {session.message_count}
                   </td>
                   <td className="py-3 px-4">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      {session.project}
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {session.model}
                     </span>
                   </td>
                   <td className="py-3 px-4 text-muted-foreground text-sm">
-                    {session.date}
+                    {formatRelativeTime(new Date(session.updated_at))}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div onClick={(e) => e.stopPropagation()}>
@@ -313,43 +296,65 @@ export function Sessions() {
                           View Details
                         </DropdownItem>
                         <DropdownItem
-                          onClick={() => toast("Command copied", "success")}
+                          onClick={() => {
+                            navigator.clipboard.writeText(session.id);
+                            toast("ID copied", "success");
+                          }}
                         >
-                          Copy Command
+                          Copy ID
                         </DropdownItem>
                         <DropdownItem
-                          onClick={() =>
-                            toast("Session re-run initiated", "success")
-                          }
+                          onClick={async () => {
+                            try {
+                              await sessionApi.updateSession(session.id, { is_archived: !session.is_archived });
+                              toast(session.is_archived ? "Session unarchived" : "Session archived", "success");
+                              // Refetch
+                              window.location.reload();
+                            } catch (err) {
+                              toast(getErrorMessage(err, "Action failed"), "error");
+                            }
+                          }}
                         >
-                          Re-run
+                          {session.is_archived ? "Unarchive" : "Archive"}
                         </DropdownItem>
                       </Dropdown>
                     </div>
                   </td>
                 </tr>
               ))}
+              {sessions.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                    No sessions found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
 
         {/* Pagination */}
-        <div className="p-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground bg-muted/20">
-          <div>
-            Showing 1 to {sessionsData.length} of 1,234 sessions
+        {sessionsResponse?.pagination && (
+          <div className="p-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground bg-muted/20">
+            <div>
+              Showing {sessions.length} of {sessionsResponse.pagination.total} sessions
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors disabled:opacity-50"
+                disabled={sessionsResponse.pagination.page === 1}
+              >
+                Previous
+              </button>
+              <button 
+                className="px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors bg-background"
+                disabled={sessionsResponse.pagination.page === sessionsResponse.pagination.total_pages}
+              >
+                Next
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors disabled:opacity-50"
-              disabled
-            >
-              Previous
-            </button>
-            <button className="px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors bg-background">
-              Next
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

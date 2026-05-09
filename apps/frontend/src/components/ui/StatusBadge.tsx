@@ -1,7 +1,7 @@
-import { CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Loader2, Archive } from "lucide-react";
 import { cn } from "@nirex/shared";
 
-type Status = "success" | "failed" | "running" | "pending";
+type Status = "success" | "failed" | "running" | "pending" | "active" | "archived";
 
 interface StatusBadgeProps {
     status: Status;
@@ -29,6 +29,16 @@ const statusConfig: Record<Status, { label: string; icon: typeof CheckCircle2; c
         label: "Pending",
         icon: Clock,
         colors: "bg-nirex-warning/10 text-nirex-warning border-nirex-warning/20",
+    },
+    active: {
+        label: "Active",
+        icon: Clock,
+        colors: "bg-nirex-success/10 text-nirex-success border-nirex-success/20",
+    },
+    archived: {
+        label: "Archived",
+        icon: Archive,
+        colors: "bg-muted text-muted-foreground border-border",
     },
 };
 
