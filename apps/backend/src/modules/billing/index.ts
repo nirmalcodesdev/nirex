@@ -1,13 +1,18 @@
 export {
   BillingCustomerModel,
+  BillingEntitlementModel,
+  BillingEventLogModel,
   BillingSubscriptionModel,
   BillingInvoiceModel,
   BillingWebhookEventModel,
   type IBillingCustomerDocument,
+  type IBillingEntitlementDocument,
+  type IBillingEventLogDocument,
   type IBillingSubscriptionDocument,
   type IBillingInvoiceDocument,
   type IBillingWebhookEventDocument,
   type BillingSubscriptionStatus,
+  type BillingEntitlementStatus,
   type PaymentMethodSnapshot,
 } from './billing.model.js';
 
@@ -29,4 +34,5 @@ export type {
   BillingInvoiceItem,
   BillingOverviewSubscription,
   BillingOverviewPaymentMethod,
+  BillingOverviewEntitlement,
 } from './billing.types.js';

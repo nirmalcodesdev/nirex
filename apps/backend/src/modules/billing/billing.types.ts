@@ -2,6 +2,15 @@ export type BillingCycle = 'month' | 'year';
 
 export type BillingPlanId = 'free' | 'pro' | 'enterprise' | 'custom';
 
+export type BillingEntitlementStatus =
+  | 'active'
+  | 'trialing'
+  | 'past_due_grace'
+  | 'payment_action_required'
+  | 'suspended'
+  | 'canceled'
+  | 'none';
+
 export interface BillingPlanPrice {
   billingCycle: BillingCycle;
   amountCents: number;
@@ -22,15 +31,15 @@ export interface BillingPlan {
 export interface BillingOverviewSubscription {
   subscriptionId: string | null;
   status:
-    | 'trialing'
-    | 'active'
-    | 'incomplete'
-    | 'incomplete_expired'
-    | 'past_due'
-    | 'canceled'
-    | 'unpaid'
-    | 'paused'
-    | 'none';
+  | 'trialing'
+  | 'active'
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'past_due'
+  | 'canceled'
+  | 'unpaid'
+  | 'paused'
+  | 'none';
   cancelAtPeriodEnd: boolean;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
@@ -42,6 +51,17 @@ export interface BillingOverviewPaymentMethod {
   expMonth: number;
   expYear: number;
   funding: string | null;
+}
+
+export interface BillingOverviewEntitlement {
+  status: BillingEntitlementStatus;
+  planId: BillingPlanId;
+  canAccessPaidFeatures: boolean;
+  isBillingIssue: boolean;
+  issueCode: string | null;
+  issueMessage: string | null;
+  accessEndsAt: string | null;
+  lastSyncedAt: string | null;
 }
 
 export interface BillingInvoiceItem {
@@ -68,6 +88,7 @@ export interface BillingOverviewKpis {
   currentPlanAmountCents: number;
   currency: string;
   totalPaidYtdCents: number;
+  periodEndDate: string | null;
   nextBillingDate: string | null;
   yearlySavingsCents: number;
 }
@@ -77,6 +98,7 @@ export interface BillingOverviewResponse {
   customerId: string | null;
   currentPlan: BillingPlan;
   subscription: BillingOverviewSubscription;
+  entitlement: BillingOverviewEntitlement;
   paymentMethod: BillingOverviewPaymentMethod | null;
   usage: {
     creditsUsed: number | null;
@@ -106,4 +128,8 @@ export interface CreatePortalSessionInput {
 
 export interface CreatePortalSessionResult {
   portalUrl: string;
+}
+
+export interface CancelSubscriptionInput {
+  atPeriodEnd?: boolean;
 }

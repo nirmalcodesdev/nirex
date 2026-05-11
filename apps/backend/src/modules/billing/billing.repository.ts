@@ -1,11 +1,15 @@
 import { Types } from 'mongoose';
 import {
   BillingCustomerModel,
+  BillingEntitlementModel,
+  BillingEventLogModel,
   BillingInvoiceModel,
   BillingSubscriptionModel,
   BillingWebhookEventModel,
+  type BillingEntitlementStatus,
   type BillingSubscriptionStatus,
   type IBillingCustomerDocument,
+  type IBillingEntitlementDocument,
   type IBillingInvoiceDocument,
   type IBillingSubscriptionDocument,
   type PaymentMethodSnapshot,
@@ -60,6 +64,34 @@ interface UpsertInvoiceInput {
   periodStart?: Date;
   periodEnd?: Date;
   stripeCreatedAt: Date;
+}
+
+interface UpsertEntitlementInput {
+  userId: Types.ObjectId;
+  planId: string;
+  status: BillingEntitlementStatus;
+  canAccessPaidFeatures: boolean;
+  creditsIncluded?: number | null;
+  features: string[];
+  stripeSubscriptionId?: string;
+  currentPeriodStart?: Date;
+  currentPeriodEnd?: Date;
+  accessEndsAt?: Date;
+  issueCode?: string | null;
+  issueMessage?: string | null;
+  lastSyncedAt?: Date;
+}
+
+interface RecordBillingEventInput {
+  userId?: Types.ObjectId;
+  stripeEventId?: string;
+  eventType?: string;
+  objectId?: string;
+  action: string;
+  status: 'success' | 'failed' | 'ignored';
+  message?: string;
+  metadata?: Record<string, unknown>;
+  occurredAt?: Date;
 }
 
 interface WebhookEventClaimResult {
@@ -218,6 +250,57 @@ export class BillingRepository {
     }
 
     return doc;
+  }
+
+  async findEntitlementByUserId(
+    userId: Types.ObjectId,
+  ): Promise<IBillingEntitlementDocument | null> {
+    return BillingEntitlementModel.findOne({ userId }).exec();
+  }
+
+  async upsertEntitlement(
+    input: UpsertEntitlementInput,
+  ): Promise<IBillingEntitlementDocument> {
+    const update: Record<string, unknown> = {
+      planId: input.planId,
+      status: input.status,
+      canAccessPaidFeatures: input.canAccessPaidFeatures,
+      creditsIncluded: input.creditsIncluded,
+      features: input.features,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+      currentPeriodStart: input.currentPeriodStart,
+      currentPeriodEnd: input.currentPeriodEnd,
+      accessEndsAt: input.accessEndsAt,
+      issueCode: input.issueCode,
+      issueMessage: input.issueMessage,
+      lastSyncedAt: input.lastSyncedAt ?? new Date(),
+    };
+
+    const doc = await BillingEntitlementModel.findOneAndUpdate(
+      { userId: input.userId },
+      { $set: update },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    ).exec();
+
+    if (!doc) {
+      throw new Error('Failed to upsert billing entitlement.');
+    }
+
+    return doc;
+  }
+
+  async recordBillingEvent(input: RecordBillingEventInput): Promise<void> {
+    await BillingEventLogModel.create({
+      userId: input.userId,
+      stripeEventId: input.stripeEventId,
+      eventType: input.eventType,
+      objectId: input.objectId,
+      action: input.action,
+      status: input.status,
+      message: input.message,
+      metadata: input.metadata,
+      occurredAt: input.occurredAt ?? new Date(),
+    });
   }
 
   async listInvoicesByUserId(

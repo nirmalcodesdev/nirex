@@ -5,13 +5,15 @@ interface MagneticButtonProps {
     strength?: number;
     className?: string;
     onClick?: () => void;
+    disabled?: boolean;
 }
 
-export default function MagneticButton({ children, strength = 0.35, className = '', onClick }: MagneticButtonProps) {
+export function MagneticButton({ children, strength = 0.35, className = '', onClick, disabled }: MagneticButtonProps) {
     const ref = useRef<HTMLButtonElement>(null);
 
     const onMouseMove = useCallback((e: React.MouseEvent) => {
         if (window.matchMedia('(hover: none)').matches) return;
+        if (disabled) return;
         const btn = ref.current;
         if (!btn) return;
         const rect = btn.getBoundingClientRect();
@@ -19,7 +21,7 @@ export default function MagneticButton({ children, strength = 0.35, className = 
         const y = (e.clientY - rect.top - rect.height / 2) * strength;
         btn.style.transition = 'transform 100ms ease';
         btn.style.transform = `translate(${x}px, ${y}px)`;
-    }, [strength]);
+    }, [strength, disabled]);
 
     const onMouseLeave = useCallback(() => {
         const btn = ref.current;
@@ -35,6 +37,7 @@ export default function MagneticButton({ children, strength = 0.35, className = 
             onMouseMove={onMouseMove}
             onMouseLeave={onMouseLeave}
             onClick={onClick}
+            disabled={disabled}
         >
             {children}
         </button>

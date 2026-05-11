@@ -3,7 +3,6 @@ import { Types } from 'mongoose';
 import type {
   BillingInvoicesQuery,
   CreateCheckoutSessionRequest,
-  CreatePortalSessionRequest,
 } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
 import { billingService } from './billing.service.js';
@@ -21,7 +20,8 @@ function getUserId(req: Request): Types.ObjectId {
 
 export async function getOverview(req: Request, res: Response): Promise<void> {
   const userId = getUserId(req);
-  const overview = await billingService.getBillingOverview(userId);
+  const force = req.query.force === 'true';
+  const overview = await billingService.getBillingOverview(userId, { force });
 
   res.json({
     status: 'success',
@@ -59,36 +59,6 @@ export async function createCheckoutSession(
   res.status(201).json({
     status: 'success',
     data: session,
-  });
-}
-
-export async function createPortalSession(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const userId = getUserId(req);
-  const body = req.body as CreatePortalSessionRequest;
-  const input: CreatePortalSessionInput = {
-    returnUrl: body.returnUrl,
-  };
-
-  const session = await billingService.createPortalSession(userId, input);
-  res.status(201).json({
-    status: 'success',
-    data: session,
-  });
-}
-
-export async function deleteSubscription(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const userId = getUserId(req);
-  const subscription = await billingService.deleteSubscription(userId);
-
-  res.json({
-    status: 'success',
-    data: subscription,
   });
 }
 

@@ -1,62 +1,86 @@
-import { useEffect, useState } from "react";
-import { X, CheckCircle2 } from "lucide-react";
-import { usePlansDialog } from "@/hooks/usePlansDialog";
-import { useToast } from "@/components/ToastProvider";
-import MagneticButton from "@nirex/ui/MagneticButton";
+import { useEffect, useMemo, useState } from "react";
+import type { BillingPlan, BillingPlanId } from "@nirex/shared";
+import {
+  BILLING_PLAN_CATALOG,
+  DEFAULT_BILLING_CURRENCY,
+  PRO_MONTHLY_DEFAULT_CENTS,
+  PRO_YEARLY_DEFAULT_CENTS,
+} from "@nirex/shared";
+import { CheckCircle2, X } from "lucide-react";
+import { MagneticButton } from "@nirex/ui";
+import { usePlansDialog } from "../../hooks/usePlansDialog";
+import { useBillingOverviewQuery, useCreateCheckoutSessionMutation } from "../../features/billing";
+import { ROUTES } from "../../constant/routes";
+import { useToast } from "../ToastProvider";
 
-const plans = [
-  {
-    name: "Free",
-    description: "Perfect for side projects and learning.",
-    price: { monthly: "$0", yearly: "$0" },
-    features: [
-      "Up to 3 projects",
-      "1,000 compute hours/mo",
-      "Community support",
-      "Basic analytics",
-    ],
-    notIncluded: ["Custom domains", "Team collaboration", "Priority support"],
-    cta: "Current Plan",
-    popular: false,
-  },
-  {
-    name: "Pro",
-    description: "For professional developers and small teams.",
-    price: { monthly: "$29", yearly: "$24" },
-    features: [
-      "Unlimited projects",
-      "10,000 compute hours/mo",
-      "Custom domains",
-      "Team collaboration (up to 5)",
-      "Advanced analytics",
-      "Priority email support",
-    ],
-    notIncluded: ["Dedicated account manager", "SSO & SAML"],
-    cta: "Upgrade to Pro",
-    popular: true,
-  },
-  {
-    name: "Enterprise",
-    description: "For large organizations with custom needs.",
-    price: { monthly: "Custom", yearly: "Custom" },
-    features: [
-      "Unlimited everything",
-      "Dedicated account manager",
-      "SSO & SAML",
-      "Custom SLAs",
-      "24/7 phone support",
-      "On-premise deployment options",
-    ],
-    notIncluded: [],
-    cta: "Contact Sales",
-    popular: false,
-  },
-];
+type CheckoutPlanId = Exclude<BillingPlanId, "custom">;
+
+interface PlanCard {
+  id: CheckoutPlanId;
+  name: string;
+  description: string;
+  features: string[];
+  monthlyPrice: string;
+  yearlyPrice: string;
+  fullYearlyPrice: string;
+  cta: "Buy Now" | "Extend" | "Contact Sales" | "Current Plan" | "Included";
+  popular: boolean;
+  checkoutEnabled: boolean;
+  isCurrent: boolean;
+}
+
+const PLAN_ORDER: CheckoutPlanId[] = ["free", "pro", "enterprise"];
+
+function formatCurrencyFromCents(amountCents: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      maximumFractionDigits: 2,
+    }).format(amountCents / 100);
+  } catch {
+    return `$${(amountCents / 100).toFixed(2)}`;
+  }
+}
+
+function getDefaultPlanPriceCents(planId: CheckoutPlanId, cycle: "month" | "year"): number | null {
+  if (planId === "free") return 0;
+  if (planId === "pro") return cycle === "month" ? PRO_MONTHLY_DEFAULT_CENTS : PRO_YEARLY_DEFAULT_CENTS;
+  return null;
+}
+
+function getDisplayPlanPrices(
+  plan: BillingPlan | undefined,
+  planId: CheckoutPlanId,
+): { monthlyPrice: string; yearlyPrice: string; fullYearlyPrice: string } {
+  const currency =
+    plan?.prices.month?.currency ??
+    plan?.prices.year?.currency ??
+    DEFAULT_BILLING_CURRENCY;
+
+  const monthAmount = plan?.prices.month?.amountCents ?? getDefaultPlanPriceCents(planId, "month");
+  const yearAmount = plan?.prices.year?.amountCents ?? getDefaultPlanPriceCents(planId, "year");
+  const yearMonthlyAmount = yearAmount === null ? null : Math.round(yearAmount / 12);
+
+  return {
+    monthlyPrice:
+      monthAmount === null ? "Custom" : formatCurrencyFromCents(monthAmount, currency),
+    yearlyPrice:
+      yearMonthlyAmount === null
+        ? "Custom"
+        : formatCurrencyFromCents(yearMonthlyAmount, currency),
+    fullYearlyPrice:
+      yearAmount === null ? "Custom" : formatCurrencyFromCents(yearAmount, currency),
+  };
+}
 
 export function Plans() {
   const [isYearly, setIsYearly] = useState(true);
+  const [pendingPlanId, setPendingPlanId] = useState<CheckoutPlanId | null>(null);
   const { toast } = useToast();
   const { isPlansDialogOpen, closePlansDialog } = usePlansDialog();
+  const overviewQuery = useBillingOverviewQuery();
+  const checkoutSessionMutation = useCreateCheckoutSessionMutation();
 
   useEffect(() => {
     if (!isPlansDialogOpen) {
@@ -78,6 +102,81 @@ export function Plans() {
     };
   }, [closePlansDialog, isPlansDialogOpen]);
 
+  const plans = useMemo<PlanCard[]>(() => {
+    const apiPlans = new Map<CheckoutPlanId, BillingPlan>();
+
+    overviewQuery.data?.plans.forEach((plan) => {
+      if (plan.id === "free" || plan.id === "pro" || plan.id === "enterprise") {
+        apiPlans.set(plan.id, plan);
+      }
+    });
+
+    const currentPlanId = overviewQuery.data?.currentPlan.id;
+
+    return PLAN_ORDER.map((planId) => {
+      const apiPlan = apiPlans.get(planId);
+      const catalogPlan = BILLING_PLAN_CATALOG[planId];
+      const isCurrent = currentPlanId === planId;
+      const checkoutEnabled = apiPlan?.checkoutEnabled ?? planId === "pro";
+      const price = getDisplayPlanPrices(apiPlan, planId);
+
+      let cta: PlanCard["cta"] = "Buy Now";
+      if (planId === "enterprise") {
+        cta = "Contact Sales";
+      } else if (isCurrent) {
+        cta = "Current Plan";
+      } else if (planId === "free") {
+        cta = "Included";
+      }
+
+      return {
+        id: planId,
+        name: apiPlan?.name ?? catalogPlan.name,
+        description: apiPlan?.description ?? catalogPlan.description,
+        features: apiPlan?.features.length
+          ? apiPlan.features
+          : catalogPlan.features,
+        monthlyPrice: price.monthlyPrice,
+        yearlyPrice: price.yearlyPrice,
+        fullYearlyPrice: price.fullYearlyPrice,
+        cta,
+        popular: planId === "pro",
+        checkoutEnabled,
+        isCurrent,
+      };
+    });
+  }, [overviewQuery.data]);
+
+  const handleCheckout = async (plan: PlanCard): Promise<void> => {
+    if (pendingPlanId || plan.isCurrent || plan.id === "free") return;
+
+    if (plan.id !== "pro" || !plan.checkoutEnabled) {
+      toast("Please contact sales for this plan.", "info");
+      return;
+    }
+
+    setPendingPlanId(plan.id);
+
+    try {
+      const billingUrl = `${window.location.origin}${ROUTES.DASHBOARD.BILLING}`;
+      const session = await checkoutSessionMutation.mutateAsync({
+        planId: plan.id,
+        billingCycle: isYearly ? "year" : "month",
+        successUrl: `${billingUrl}?checkout=success`,
+        cancelUrl: `${billingUrl}?checkout=cancelled`,
+      });
+
+      window.location.assign(session.checkoutUrl);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to start checkout right now.";
+      toast(message, "error");
+      setPendingPlanId(null);
+    }
+  };
+
   if (!isPlansDialogOpen) {
     return null;
   }
@@ -96,14 +195,14 @@ export function Plans() {
 
         <div className="min-h-screen flex flex-col gap-4 sm:gap-6 lg:gap-8 container px-4 sm:px-6 py-6 sm:py-8 lg:py-10 mx-auto items-center">
           <div className="text-center max-w-2xl mx-auto mb-2 sm:mb-4 pt-6 sm:pt-10">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight mb-3 sm:mb-4">Simple, transparent pricing</h1>
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight mb-3 sm:mb-4">Simple, one-time pricing</h1>
             <p className="text-base sm:text-lg text-muted-foreground px-2 sm:px-0">
-              Choose the perfect plan for your needs. Always know what you&apos;ll pay.
+              Buy access for a month or a year. No recurring charges, ever.
             </p>
           </div>
 
           <div className="flex items-center justify-center gap-2 sm:gap-3 mb-4 sm:mb-8">
-            <span className={`text-sm font-medium ${!isYearly ? "text-foreground" : "text-muted-foreground"}`}>Monthly</span>
+            <span className={`text-sm font-medium ${!isYearly ? "text-foreground" : "text-muted-foreground"}`}>1 Month</span>
             <button
               type="button"
               onClick={() => setIsYearly((prev) => !prev)}
@@ -112,14 +211,14 @@ export function Plans() {
               <span className={`inline-block h-3 w-3 sm:h-4 sm:w-4 transform rounded-full bg-white transition-transform ${isYearly ? "translate-x-5 sm:translate-x-6" : "translate-x-1"}`} />
             </button>
             <span className={`text-sm font-medium ${isYearly ? "text-foreground" : "text-muted-foreground"}`}>
-              Yearly <span className="text-nirex-success text-xs ml-1 bg-nirex-success/10 px-1.5 sm:px-2 py-0.5 rounded-full hidden sm:inline">Save 20%</span>
+              1 Year <span className="text-nirex-success text-xs ml-1 bg-nirex-success/10 px-1.5 sm:px-2 py-0.5 rounded-full hidden sm:inline">Save 17%</span>
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full max-w-7xl pb-6 sm:pb-10">
             {plans.map((plan) => (
               <div
-                key={plan.name}
+                key={plan.id}
                 className={`relative flex flex-col glass-panel rounded-xl sm:rounded-2xl p-4 sm:p-6 lg:p-8 transition-all ${plan.popular ? "border-primary/50 bg-primary/5 scale-[1.02] md:scale-105 z-10 order-first md:order-none" : "border-border/50 hover:border-border"}`}
               >
                 {plan.popular && (
@@ -135,25 +234,35 @@ export function Plans() {
 
                 <div className="mb-4 sm:mb-6">
                   <div className="flex items-baseline gap-1">
-                    <span className="text-3xl sm:text-4xl font-bold tracking-tight">{isYearly ? plan.price.yearly : plan.price.monthly}</span>
-                    {plan.price.monthly !== "Custom" && <span className="text-muted-foreground font-medium text-sm sm:text-base">/mo</span>}
+                    <span className="text-3xl sm:text-4xl font-bold tracking-tight">{isYearly ? plan.yearlyPrice : plan.monthlyPrice}</span>
+                    {(isYearly ? plan.yearlyPrice : plan.monthlyPrice) !== "Custom" && (
+                      <span className="text-muted-foreground font-medium text-sm sm:text-base">
+                        / month
+                      </span>
+                    )}
                   </div>
-                  {isYearly && plan.price.monthly !== "Custom" && (
-                    <p className="text-xs text-muted-foreground mt-1">Billed annually</p>
+                  {isYearly && plan.id === "pro" && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Billed as {plan.fullYearlyPrice} once
+                    </p>
                   )}
                 </div>
 
                 <MagneticButton
                   strength={0.3}
-                  onClick={() =>
-                    toast(
-                      plan.cta === "Current Plan" ? "You are already on this plan." : `Redirecting to ${plan.name} checkout...`,
-                      "info",
-                    )
-                  }
-                  className={`w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg text-sm font-medium transition-colors mb-6 sm:mb-8 ${plan.popular ? "bg-primary text-primary-foreground hover:bg-primary/90" : plan.cta === "Current Plan" ? "bg-muted text-muted-foreground cursor-default" : "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"}`}
+                  onClick={() => {
+                    void handleCheckout(plan);
+                  }}
+                  disabled={plan.isCurrent || plan.cta === "Included"}
+                  className={`w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg text-sm font-medium transition-colors mb-6 sm:mb-8 ${
+                    plan.isCurrent || plan.cta === "Included"
+                      ? "bg-muted text-muted-foreground cursor-not-allowed opacity-80"
+                      : plan.popular
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                  } ${pendingPlanId ? "pointer-events-none opacity-70" : ""}`}
                 >
-                  {plan.cta}
+                  {pendingPlanId === plan.id ? "Redirecting..." : plan.cta}
                 </MagneticButton>
 
                 <div className="flex-1 flex flex-col gap-3 sm:gap-4">
@@ -165,17 +274,16 @@ export function Plans() {
                         <span>{feature}</span>
                       </li>
                     ))}
-                    {plan.notIncluded.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2 sm:gap-3 text-xs sm:text-sm text-muted-foreground opacity-60">
-                        <X size={16} className="shrink-0 mt-0.5 sm:mt-0" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
                   </ul>
                 </div>
               </div>
             ))}
           </div>
+
+          <p className="text-xs text-muted-foreground text-center max-w-lg pb-10">
+            * One-time purchase access. No automatic renewals or recurring charges.
+            Credits are allocated monthly during your active period and do not roll over.
+          </p>
         </div>
       </div>
     </div>
