@@ -15,15 +15,5 @@ export const createCheckoutSessionSchema = z.object({
   cancelUrl: z.string().url().optional(),
 });
 
-export const createPortalSessionSchema = z.object({
-  returnUrl: z.string().url().optional(),
-});
-
-export const cancelSubscriptionSchema = z.object({
-  atPeriodEnd: z.boolean().optional().default(true),
-});
-
 export type BillingInvoicesQuerySchema = z.infer<typeof billingInvoicesQuerySchema>;
 export type CreateCheckoutSessionSchema = z.infer<typeof createCheckoutSessionSchema>;
-export type CreatePortalSessionSchema = z.infer<typeof createPortalSessionSchema>;
-export type CancelSubscriptionSchema = z.infer<typeof cancelSubscriptionSchema>;

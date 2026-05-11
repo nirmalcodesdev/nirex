@@ -25,6 +25,15 @@ export type BillingInvoiceStatus =
   | 'void'
   | 'unknown';
 
+export type BillingEntitlementStatus =
+  | 'active'
+  | 'trialing'
+  | 'past_due_grace'
+  | 'payment_action_required'
+  | 'suspended'
+  | 'canceled'
+  | 'none';
+
 export interface BillingPlanPrice {
   billingCycle: BillingCycle;
   amountCents: number;
@@ -84,10 +93,22 @@ export interface BillingOverviewUsage {
   creditsUsagePct: number | null;
 }
 
+export interface BillingOverviewEntitlement {
+  status: BillingEntitlementStatus;
+  planId: BillingPlanId;
+  canAccessPaidFeatures: boolean;
+  isBillingIssue: boolean;
+  issueCode: string | null;
+  issueMessage: string | null;
+  accessEndsAt: string | null;
+  lastSyncedAt: string | null;
+}
+
 export interface BillingOverviewKpis {
   currentPlanAmountCents: number;
   currency: string;
   totalPaidYtdCents: number;
+  periodEndDate: string | null;
   nextBillingDate: string | null;
   yearlySavingsCents: number;
 }
@@ -97,6 +118,7 @@ export interface BillingOverviewResponse {
   customerId: string | null;
   currentPlan: BillingPlan;
   subscription: BillingOverviewSubscription;
+  entitlement: BillingOverviewEntitlement;
   paymentMethod: BillingOverviewPaymentMethod | null;
   usage: BillingOverviewUsage;
   kpis: BillingOverviewKpis;
@@ -119,21 +141,6 @@ export interface CreateCheckoutSessionResponse {
   sessionId: string;
   checkoutUrl: string;
 }
-
-export interface CreatePortalSessionRequest {
-  returnUrl?: string;
-}
-
-export interface CreatePortalSessionResponse {
-  portalUrl: string;
-}
-
-export interface CancelSubscriptionRequest {
-  atPeriodEnd?: boolean;
-}
-
-export type CancelSubscriptionResponse = BillingOverviewSubscription;
-export type ResumeSubscriptionResponse = BillingOverviewSubscription;
 
 export interface StripeWebhookResponse {
   received: true;

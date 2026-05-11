@@ -235,15 +235,55 @@ export class UsageService {
     const defaultMonthlyPrice = (getPlanPrice('free', 'month')?.amountCents ?? 0) / 100;
 
     try {
-      const subscription = await billingRepository.findLatestSubscriptionByUserId(
-        userId,
-        ACTIVE_SUBSCRIPTION_STATUSES,
-      );
-      const rawPlanId = subscription?.planId;
+      const [subscription, entitlement] = await Promise.all([
+        billingRepository.findLatestSubscriptionByUserId(
+          userId,
+          ACTIVE_SUBSCRIPTION_STATUSES,
+        ),
+        billingRepository.findEntitlementByUserId(userId),
+      ]);
+
+      const now = new Date();
+      const entitlementAccessEndsAt =
+        entitlement?.accessEndsAt ?? entitlement?.currentPeriodEnd ?? null;
+      const subscriptionWindowActive =
+        subscription !== null &&
+        ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status) &&
+        (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > now);
+
+      const entitlementAllowsPaidAccess =
+        entitlement?.canAccessPaidFeatures === true &&
+        ((!entitlementAccessEndsAt || entitlementAccessEndsAt > now) ||
+          subscriptionWindowActive);
+
+      const entitlementCreditsIncluded = entitlementAllowsPaidAccess
+        ? entitlement?.creditsIncluded
+        : undefined;
+
+      const entitlementPeriodStart = entitlementAllowsPaidAccess
+        ? entitlement?.currentPeriodStart ?? null
+        : null;
+      const entitlementPeriodEnd = entitlementAllowsPaidAccess
+        ? entitlement?.currentPeriodEnd ?? entitlement?.accessEndsAt ?? null
+        : null;
+      const subscriptionPeriodStart = subscriptionWindowActive
+        ? subscription?.currentPeriodStart ?? null
+        : null;
+      const subscriptionPeriodEnd = subscriptionWindowActive
+        ? subscription?.currentPeriodEnd ?? null
+        : null;
+      const effectivePeriodStart = entitlementPeriodStart ?? subscriptionPeriodStart;
+      const effectivePeriodEnd = entitlementPeriodEnd ?? subscriptionPeriodEnd;
+
+      const rawPlanId = entitlementAllowsPaidAccess
+        ? entitlement?.planId
+        : subscriptionWindowActive
+          ? subscription?.planId
+          : 'free';
       const planId = normalizePlanId(rawPlanId);
 
       if (planId === 'custom') {
-        const monthlyPrice = subscription
+        const monthlyPrice = subscriptionWindowActive && subscription
           ? subscription.billingCycle === 'year'
             ? subscription.amountCents / 1200
             : subscription.amountCents / 100
@@ -253,18 +293,21 @@ export class UsageService {
           planId: 'custom',
           planName: 'Custom',
           priceUsdMonthly: round(monthlyPrice, 2),
-          includedCredits: DEFAULT_CREDITS_LIMIT,
-          nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? null,
-          billingCycle: subscription?.billingCycle ?? null,
-          subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
-          subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
+          includedCredits: entitlementCreditsIncluded ?? DEFAULT_CREDITS_LIMIT,
+          nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
+          billingCycle:
+            subscriptionWindowActive && subscription
+              ? subscription.billingCycle
+              : null,
+          subscriptionPeriodStart: effectivePeriodStart,
+          subscriptionPeriodEnd: effectivePeriodEnd,
         };
       }
 
       const plan = getBillingPlan(planId) ?? freePlan;
       const monthlyPriceCents =
         getPlanPrice(planId, 'month')?.amountCents ??
-        (subscription
+        (subscriptionWindowActive && subscription
           ? subscription.billingCycle === 'year'
             ? Math.round(subscription.amountCents / 12)
             : subscription.amountCents
@@ -274,11 +317,17 @@ export class UsageService {
         planId: plan?.id ?? 'free',
         planName: plan?.name ?? defaultPlanName,
         priceUsdMonthly: round(monthlyPriceCents / 100, 2),
-        includedCredits: plan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
-        nextBillingDate: subscription?.currentPeriodEnd?.toISOString() ?? null,
-        billingCycle: subscription?.billingCycle ?? null,
-        subscriptionPeriodStart: subscription?.currentPeriodStart ?? null,
-        subscriptionPeriodEnd: subscription?.currentPeriodEnd ?? null,
+        includedCredits:
+          entitlementCreditsIncluded ??
+          plan?.includedCredits ??
+          DEFAULT_CREDITS_LIMIT,
+        nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
+        billingCycle:
+          subscriptionWindowActive && subscription
+            ? subscription.billingCycle
+            : null,
+        subscriptionPeriodStart: effectivePeriodStart,
+        subscriptionPeriodEnd: effectivePeriodEnd,
       };
     } catch {
       return {
@@ -513,12 +562,12 @@ export class UsageService {
         avg_response_time_ms: currentSnapshot.avg_response_time_ms,
         avg_response_time_trend_pct:
           currentSnapshot.avg_response_time_ms === null ||
-          previousSnapshot.avg_response_time_ms === null
+            previousSnapshot.avg_response_time_ms === null
             ? null
             : percentageChange(
-                currentSnapshot.avg_response_time_ms,
-                previousSnapshot.avg_response_time_ms
-              ),
+              currentSnapshot.avg_response_time_ms,
+              previousSnapshot.avg_response_time_ms
+            ),
       },
       chart,
       cost_breakdown: {

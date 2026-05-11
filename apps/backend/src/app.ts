@@ -64,7 +64,7 @@ configurePassport();
 app.use(passport.initialize());
 
 // ── Global rate limiter ───────────────────────────────────────────────────
-app.use('/api', apiLimiter);
+// app.use('/api', apiLimiter);
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {

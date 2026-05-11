@@ -10,6 +10,15 @@ export type BillingSubscriptionStatus =
   | 'unpaid'
   | 'paused';
 
+export type BillingEntitlementStatus =
+  | 'active'
+  | 'trialing'
+  | 'past_due_grace'
+  | 'payment_action_required'
+  | 'suspended'
+  | 'canceled'
+  | 'none';
+
 export interface PaymentMethodSnapshot {
   id: string;
   brand: string;
@@ -54,6 +63,25 @@ export interface IBillingSubscriptionDocument extends Document {
   updatedAt: Date;
 }
 
+export interface IBillingEntitlementDocument extends Document {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  planId: string;
+  status: BillingEntitlementStatus;
+  canAccessPaidFeatures: boolean;
+  creditsIncluded?: number | null;
+  features: string[];
+  stripeSubscriptionId?: string;
+  currentPeriodStart?: Date;
+  currentPeriodEnd?: Date;
+  accessEndsAt?: Date;
+  issueCode?: string | null;
+  issueMessage?: string | null;
+  lastSyncedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface IBillingInvoiceDocument extends Document {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
@@ -76,6 +104,21 @@ export interface IBillingInvoiceDocument extends Document {
   periodStart?: Date;
   periodEnd?: Date;
   stripeCreatedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface IBillingEventLogDocument extends Document {
+  _id: Types.ObjectId;
+  userId?: Types.ObjectId;
+  stripeEventId?: string;
+  eventType?: string;
+  objectId?: string;
+  action: string;
+  status: 'success' | 'failed' | 'ignored';
+  message?: string;
+  metadata?: Record<string, unknown>;
+  occurredAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -167,6 +210,41 @@ const BillingSubscriptionSchema = new Schema<IBillingSubscriptionDocument>(
 BillingSubscriptionSchema.index({ stripeSubscriptionId: 1 }, { unique: true });
 BillingSubscriptionSchema.index({ userId: 1, createdAt: -1 });
 
+const BillingEntitlementSchema = new Schema<IBillingEntitlementDocument>(
+  {
+    userId: { type: Schema.Types.ObjectId, required: true, ref: 'User' },
+    planId: { type: String, required: true, default: 'free' },
+    status: {
+      type: String,
+      enum: [
+        'active',
+        'trialing',
+        'past_due_grace',
+        'payment_action_required',
+        'suspended',
+        'canceled',
+        'none',
+      ],
+      required: true,
+      default: 'none',
+    },
+    canAccessPaidFeatures: { type: Boolean, required: true, default: false },
+    creditsIncluded: { type: Number, required: false },
+    features: { type: [String], required: true, default: [] },
+    stripeSubscriptionId: { type: String, required: false },
+    currentPeriodStart: { type: Date, required: false },
+    currentPeriodEnd: { type: Date, required: false },
+    accessEndsAt: { type: Date, required: false },
+    issueCode: { type: String, required: false },
+    issueMessage: { type: String, required: false },
+    lastSyncedAt: { type: Date, required: true, default: Date.now },
+  },
+  { timestamps: true },
+);
+
+BillingEntitlementSchema.index({ userId: 1 }, { unique: true });
+BillingEntitlementSchema.index({ status: 1, updatedAt: -1 });
+
 const BillingInvoiceSchema = new Schema<IBillingInvoiceDocument>(
   {
     userId: { type: Schema.Types.ObjectId, required: true, ref: 'User' },
@@ -223,6 +301,28 @@ const BillingWebhookEventSchema = new Schema<IBillingWebhookEventDocument>(
 BillingWebhookEventSchema.index({ stripeEventId: 1 }, { unique: true });
 BillingWebhookEventSchema.index({ status: 1, receivedAt: -1 });
 
+const BillingEventLogSchema = new Schema<IBillingEventLogDocument>(
+  {
+    userId: { type: Schema.Types.ObjectId, required: false, ref: 'User' },
+    stripeEventId: { type: String, required: false },
+    eventType: { type: String, required: false },
+    objectId: { type: String, required: false },
+    action: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ['success', 'failed', 'ignored'],
+      required: true,
+    },
+    message: { type: String, required: false },
+    metadata: { type: Schema.Types.Mixed, required: false },
+    occurredAt: { type: Date, required: true, default: Date.now },
+  },
+  { timestamps: true },
+);
+
+BillingEventLogSchema.index({ userId: 1, occurredAt: -1 });
+BillingEventLogSchema.index({ stripeEventId: 1, action: 1 });
+
 export const BillingCustomerModel = (mongoose.models.BillingCustomer ||
   mongoose.model<IBillingCustomerDocument>(
     'BillingCustomer',
@@ -235,6 +335,12 @@ export const BillingSubscriptionModel = (mongoose.models.BillingSubscription ||
     BillingSubscriptionSchema,
   )) as mongoose.Model<IBillingSubscriptionDocument>;
 
+export const BillingEntitlementModel = (mongoose.models.BillingEntitlement ||
+  mongoose.model<IBillingEntitlementDocument>(
+    'BillingEntitlement',
+    BillingEntitlementSchema,
+  )) as mongoose.Model<IBillingEntitlementDocument>;
+
 export const BillingInvoiceModel = (mongoose.models.BillingInvoice ||
   mongoose.model<IBillingInvoiceDocument>(
     'BillingInvoice',
@@ -246,3 +352,9 @@ export const BillingWebhookEventModel = (mongoose.models.BillingWebhookEvent ||
     'BillingWebhookEvent',
     BillingWebhookEventSchema,
   )) as mongoose.Model<IBillingWebhookEventDocument>;
+
+export const BillingEventLogModel = (mongoose.models.BillingEventLog ||
+  mongoose.model<IBillingEventLogDocument>(
+    'BillingEventLog',
+    BillingEventLogSchema,
+  )) as mongoose.Model<IBillingEventLogDocument>;

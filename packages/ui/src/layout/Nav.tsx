@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import type { NavProps } from '@nirex/shared';
-import MagneticButton from '../MagneticButton.js';
+import { MagneticButton } from '../MagneticButton.js';
 
 export default function Nav({
     brandName = 'Nirex',

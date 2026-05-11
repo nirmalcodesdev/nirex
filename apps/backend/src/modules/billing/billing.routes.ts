@@ -2,7 +2,6 @@ import express, { Router } from 'express';
 import {
   billingInvoicesQuerySchema,
   createCheckoutSessionSchema,
-  createPortalSessionSchema,
 } from '@nirex/shared';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
 import { authenticateUser, requireApiKeyScopes } from '../../middleware/authenticateUser.js';
@@ -26,19 +25,6 @@ protectedRouter.post(
   requireApiKeyScopes(['billing:write']),
   validate(createCheckoutSessionSchema),
   asyncWrapper(billingController.createCheckoutSession),
-);
-protectedRouter.post(
-  '/portal-session',
-  apiLimiter,
-  requireApiKeyScopes(['billing:write']),
-  validate(createPortalSessionSchema),
-  asyncWrapper(billingController.createPortalSession),
-);
-protectedRouter.delete(
-  '/subscription',
-  apiLimiter,
-  requireApiKeyScopes(['billing:write']),
-  asyncWrapper(billingController.deleteSubscription),
 );
 
 export const billingWebhookRouter: Router = Router();

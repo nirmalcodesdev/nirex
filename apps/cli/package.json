@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
+    "check-plan-expiry": "tsx src/index.ts check-plan-expiry",
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint .",

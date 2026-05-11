@@ -324,11 +324,6 @@ export type {
   BillingInvoicesQuery,
   CreateCheckoutSessionRequest,
   CreateCheckoutSessionResponse,
-  CreatePortalSessionRequest,
-  CreatePortalSessionResponse,
-  CancelSubscriptionRequest,
-  CancelSubscriptionResponse,
-  ResumeSubscriptionResponse,
   StripeWebhookResponse,
 } from './domain/billing/index.js';
 
@@ -342,12 +337,8 @@ export {
   checkoutPlanIdSchema,
   billingInvoicesQuerySchema,
   createCheckoutSessionSchema,
-  createPortalSessionSchema,
-  cancelSubscriptionSchema,
   type BillingInvoicesQuerySchema,
   type CreateCheckoutSessionSchema,
-  type CreatePortalSessionSchema,
-  type CancelSubscriptionSchema,
   type BillingCatalogPlanId,
   type BillingPlanCatalogEntry,
 } from './domain/billing/index.js';

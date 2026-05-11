@@ -1,8 +1,8 @@
 import type { BillingPlan, BillingPlanId } from './types.js';
 
 export const DEFAULT_BILLING_CURRENCY = 'usd';
-export const PRO_MONTHLY_DEFAULT_CENTS = 4900;
-export const PRO_YEARLY_DEFAULT_CENTS = 47040;
+export const PRO_MONTHLY_DEFAULT_CENTS = 2000;
+export const PRO_YEARLY_DEFAULT_CENTS = 20000;
 
 export type BillingCatalogPlanId = Exclude<BillingPlanId, 'custom'>;
 
@@ -20,6 +20,7 @@ export const BILLING_PLAN_CATALOG: Record<
     name: 'Free',
     description: 'Perfect for side projects and learning.',
     features: [
+      '10,000 monthly credits',
       'Limited Chat Sessions',
       'Access to free ai models',
       'Limited to Agentic Team AI',
@@ -31,6 +32,7 @@ export const BILLING_PLAN_CATALOG: Record<
     name: 'Pro',
     description: 'For professional developers and growing teams.',
     features: [
+      '50,000 monthly credits',
       'Unlimited Chat Sessions',
       'Access to pro + free ai models',
       'Access to Agentic Team AI',
@@ -42,6 +44,7 @@ export const BILLING_PLAN_CATALOG: Record<
     name: 'Enterprise',
     description: 'Custom billing, support, and compliance options.',
     features: [
+      'Custom monthly credits',
       'Unlimited everything',
       'Dedicated support',
       'SSO and advanced security controls',

@@ -13,6 +13,28 @@ describe('billing routes', () => {
     });
   });
 
+  it('requires authentication for subscription cancellation', async () => {
+    const response = await request(app)
+      .post('/api/v1/billing/subscription/cancel')
+      .send({ atPeriodEnd: true });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      status: 'fail',
+      code: 'UNAUTHENTICATED',
+    });
+  });
+
+  it('requires authentication for subscription resume', async () => {
+    const response = await request(app).post('/api/v1/billing/subscription/resume');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      status: 'fail',
+      code: 'UNAUTHENTICATED',
+    });
+  });
+
   it('fails webhook processing when billing is not configured', async () => {
     const response = await request(app)
       .post('/api/v1/billing/webhooks/stripe')

@@ -22,18 +22,21 @@ import { billingRepository } from './billing.repository.js';
 import { getStripeClient, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import type {
   IBillingCustomerDocument,
+  IBillingEntitlementDocument,
   IBillingInvoiceDocument,
   IBillingSubscriptionDocument,
   PaymentMethodSnapshot,
 } from './billing.model.js';
 import type {
   BillingCycle,
+  BillingOverviewEntitlement,
   BillingInvoiceItem,
   BillingOverviewPaymentMethod,
   BillingOverviewResponse,
   BillingOverviewSubscription,
   BillingPlan,
   BillingPlanId,
+  CancelSubscriptionInput,
   CreateCheckoutSessionInput,
   CreateCheckoutSessionResult,
   CreatePortalSessionInput,
@@ -41,6 +44,15 @@ import type {
 } from './billing.types.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<IBillingSubscriptionDocument['status']> = [
+  'trialing',
+  'active',
+  'incomplete',
+  'past_due',
+  'unpaid',
+  'paused',
+];
+
+const CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES: Array<IBillingSubscriptionDocument['status']> = [
   'trialing',
   'active',
   'incomplete',
@@ -292,6 +304,192 @@ export class BillingService {
     });
   }
 
+  private subscriptionEntitlementState(subscription: IBillingSubscriptionDocument): {
+    status: BillingOverviewEntitlement['status'];
+    canAccessPaidFeatures: boolean;
+    issueCode: string | null;
+    issueMessage: string | null;
+  } {
+    if (subscription.status === 'trialing') {
+      return {
+        status: 'trialing',
+        canAccessPaidFeatures: true,
+        issueCode: null,
+        issueMessage: null,
+      };
+    }
+
+    if (subscription.status === 'active') {
+      return {
+        status: 'active',
+        canAccessPaidFeatures: true,
+        issueCode: null,
+        issueMessage: null,
+      };
+    }
+
+    if (subscription.status === 'past_due') {
+      return {
+        status: 'past_due_grace',
+        canAccessPaidFeatures: true,
+        issueCode: 'PAYMENT_PAST_DUE',
+        issueMessage: 'Payment is past due. Update the payment method to avoid losing access.',
+      };
+    }
+
+    if (subscription.status === 'incomplete') {
+      return {
+        status: 'payment_action_required',
+        canAccessPaidFeatures: false,
+        issueCode: 'PAYMENT_ACTION_REQUIRED',
+        issueMessage: 'Payment requires confirmation before this subscription becomes active.',
+      };
+    }
+
+    if (subscription.status === 'canceled' || subscription.status === 'incomplete_expired') {
+      return {
+        status: 'canceled',
+        canAccessPaidFeatures: false,
+        issueCode: null,
+        issueMessage: null,
+      };
+    }
+
+    return {
+      status: 'suspended',
+      canAccessPaidFeatures: false,
+      issueCode: `SUBSCRIPTION_${subscription.status.toUpperCase()}`,
+      issueMessage: 'Subscription access is suspended until the billing issue is resolved.',
+    };
+  }
+
+  private async upsertFreeEntitlement(userId: Types.ObjectId): Promise<IBillingEntitlementDocument> {
+    const freePlan = getBillingPlan('free') as BillingPlan;
+    return billingRepository.upsertEntitlement({
+      userId,
+      planId: freePlan.id,
+      status: 'none',
+      canAccessPaidFeatures: false,
+      creditsIncluded: freePlan.includedCredits,
+      features: freePlan.features,
+      issueCode: null,
+      issueMessage: null,
+      lastSyncedAt: new Date(),
+    });
+  }
+
+  private entitlementAccessEndsAt(entitlement: IBillingEntitlementDocument): Date | null {
+    return entitlement.accessEndsAt ?? entitlement.currentPeriodEnd ?? null;
+  }
+
+  private isEntitlementExpired(
+    entitlement: IBillingEntitlementDocument,
+    now: Date,
+  ): boolean {
+    const accessEndsAt = this.entitlementAccessEndsAt(entitlement);
+    if (!entitlement.canAccessPaidFeatures || !accessEndsAt) return false;
+    return accessEndsAt.getTime() <= now.getTime();
+  }
+
+  private isSubscriptionWindowActive(
+    subscription: IBillingSubscriptionDocument | null,
+    now: Date,
+  ): boolean {
+    if (!subscription) return false;
+    if (!CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+      return false;
+    }
+    if (!subscription.currentPeriodEnd) return true;
+    return subscription.currentPeriodEnd.getTime() > now.getTime();
+  }
+
+  private async reconcileExpiredEntitlement(
+    userId: Types.ObjectId,
+    entitlement: IBillingEntitlementDocument,
+    activeSubscription: IBillingSubscriptionDocument | null,
+    now: Date,
+  ): Promise<IBillingEntitlementDocument> {
+    if (!this.isEntitlementExpired(entitlement, now)) {
+      return entitlement;
+    }
+
+    if (activeSubscription && this.isSubscriptionWindowActive(activeSubscription, now)) {
+      return this.syncEntitlementFromSubscription(
+        activeSubscription,
+        'entitlement_resynced_before_expiry',
+      );
+    }
+
+    const previousPlanId = normalizePlanId(entitlement.planId);
+    const expiredAt = this.entitlementAccessEndsAt(entitlement);
+    const freeEntitlement = await this.upsertFreeEntitlement(userId);
+
+    await billingRepository.recordBillingEvent({
+      userId,
+      action: 'entitlement_expired_to_free',
+      status: 'success',
+      metadata: {
+        previousPlanId,
+        previousStatus: entitlement.status,
+        expiredAt: expiredAt?.toISOString() ?? null,
+      },
+    });
+
+    await this.createInAppBillingNotification({
+      userId,
+      eventId: `entitlement-expired:${userId.toHexString()}:${expiredAt?.getTime() ?? now.getTime()}`,
+      severity: 'info',
+      title: 'Plan expired',
+      message: 'Your paid plan expired. Your account has moved to the Free plan.',
+      metadata: {
+        previousPlanId,
+        expiredAt: expiredAt?.toISOString() ?? null,
+      },
+    });
+
+    return freeEntitlement;
+  }
+
+  private async syncEntitlementFromSubscription(
+    subscription: IBillingSubscriptionDocument,
+    action: string,
+  ): Promise<IBillingEntitlementDocument> {
+    const planId = normalizePlanId(subscription.planId);
+    const plan = getBillingPlan(planId) ?? (getBillingPlan('free') as BillingPlan);
+    const state = this.subscriptionEntitlementState(subscription);
+
+    const entitlement = await billingRepository.upsertEntitlement({
+      userId: subscription.userId,
+      planId,
+      status: state.status,
+      canAccessPaidFeatures: state.canAccessPaidFeatures,
+      creditsIncluded: plan.includedCredits,
+      features: plan.features,
+      stripeSubscriptionId: subscription.stripeSubscriptionId,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      accessEndsAt: subscription.currentPeriodEnd,
+      issueCode: state.issueCode,
+      issueMessage: state.issueMessage,
+      lastSyncedAt: new Date(),
+    });
+
+    await billingRepository.recordBillingEvent({
+      userId: subscription.userId,
+      objectId: subscription.stripeSubscriptionId,
+      action,
+      status: 'success',
+      metadata: {
+        planId,
+        subscriptionStatus: subscription.status,
+        entitlementStatus: state.status,
+        canAccessPaidFeatures: state.canAccessPaidFeatures,
+      },
+    });
+
+    return entitlement;
+  }
+
   private async getOrCreateCustomer(
     userId: Types.ObjectId,
   ): Promise<IBillingCustomerDocument> {
@@ -305,13 +503,19 @@ export class BillingService {
       throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
     }
 
-    const customer = await stripe.customers.create({
-      email: user.email,
-      name: user.fullName,
-      metadata: {
-        userId: userId.toHexString(),
+    const userIdString = userId.toHexString();
+    const customer = await stripe.customers.create(
+      {
+        email: user.email,
+        name: user.fullName,
+        metadata: {
+          userId: userIdString,
+        },
       },
-    });
+      {
+        idempotencyKey: `billing:customer:create:${userIdString}`,
+      },
+    );
 
     return billingRepository.upsertCustomer({
       userId,
@@ -404,7 +608,7 @@ export class BillingService {
     const latestInvoiceId = getStripeResourceId(subscription.latest_invoice);
     const period = resolveSubscriptionPeriod(subscription);
 
-    return billingRepository.upsertSubscription({
+    const synced = await billingRepository.upsertSubscription({
       userId: customerDoc.userId,
       stripeCustomerId,
       stripeSubscriptionId: subscription.id,
@@ -423,6 +627,9 @@ export class BillingService {
       trialEnd: toDateFromUnix(subscription.trial_end),
       latestInvoiceId: latestInvoiceId ?? undefined,
     });
+
+    await this.syncEntitlementFromSubscription(synced, 'subscription_synced');
+    return synced;
   }
 
   private async syncInvoiceFromStripe(
@@ -715,14 +922,51 @@ export class BillingService {
     };
   }
 
+  private mapEntitlementOverview(
+    entitlement: IBillingEntitlementDocument | null,
+  ): BillingOverviewEntitlement {
+    if (!entitlement) {
+      return {
+        status: 'none',
+        planId: 'free',
+        canAccessPaidFeatures: false,
+        isBillingIssue: false,
+        issueCode: null,
+        issueMessage: null,
+        accessEndsAt: null,
+        lastSyncedAt: null,
+      };
+    }
+
+    return {
+      status: entitlement.status,
+      planId: normalizePlanId(entitlement.planId),
+      canAccessPaidFeatures: entitlement.canAccessPaidFeatures,
+      isBillingIssue: Boolean(entitlement.issueCode),
+      issueCode: entitlement.issueCode ?? null,
+      issueMessage: entitlement.issueMessage ?? null,
+      accessEndsAt: toIsoString(entitlement.accessEndsAt),
+      lastSyncedAt: entitlement.lastSyncedAt.toISOString(),
+    };
+  }
+
   private calculateYearlySavings(
     plan: BillingPlan,
-    billingCycle: BillingCycle | null,
+    subscription: IBillingSubscriptionDocument | null,
   ): number {
-    if (billingCycle !== 'year') return 0;
+    if (!subscription || subscription.billingCycle !== 'year') return 0;
     const monthly = plan.prices.month?.amountCents;
+    if (!monthly || monthly <= 0) return 0;
+
     const yearly = plan.prices.year?.amountCents;
-    if (!monthly || !yearly) return 0;
+    if (!yearly || yearly <= 0) return 0;
+
+    const planMonthlyCurrency = plan.prices.month?.currency?.toLowerCase();
+    const planYearlyCurrency = plan.prices.year?.currency?.toLowerCase();
+    const subscriptionCurrency = subscription.currency.toLowerCase();
+    if (planMonthlyCurrency && planMonthlyCurrency !== subscriptionCurrency) return 0;
+    if (planYearlyCurrency && planYearlyCurrency !== subscriptionCurrency) return 0;
+
     const savings = monthly * 12 - yearly;
     return savings > 0 ? savings : 0;
   }
@@ -757,7 +1001,10 @@ export class BillingService {
     }
   }
 
-  async getBillingOverview(userId: Types.ObjectId): Promise<BillingOverviewResponse> {
+  async getBillingOverview(
+    userId: Types.ObjectId,
+    options?: { force?: boolean },
+  ): Promise<BillingOverviewResponse> {
     const plans = getBillingPlans();
     const now = new Date();
 
@@ -768,6 +1015,16 @@ export class BillingService {
         customerId: null,
         currentPlan: freePlan,
         subscription: this.mapSubscriptionOverview(null),
+        entitlement: {
+          status: 'none',
+          planId: 'free',
+          canAccessPaidFeatures: false,
+          isBillingIssue: false,
+          issueCode: null,
+          issueMessage: null,
+          accessEndsAt: null,
+          lastSyncedAt: null,
+        },
         paymentMethod: null,
         usage: {
           creditsUsed: null,
@@ -778,6 +1035,7 @@ export class BillingService {
           currentPlanAmountCents: 0,
           currency: 'usd',
           totalPaidYtdCents: 0,
+          periodEndDate: null,
           nextBillingDate: null,
           yearlySavingsCents: 0,
         },
@@ -787,7 +1045,7 @@ export class BillingService {
     }
 
     try {
-      await this.refreshBillingState(userId);
+      await this.refreshBillingState(userId, options);
     } catch (error) {
       logger.warn('Failed to refresh billing state. Using cached DB snapshot.', {
         userId: userId.toHexString(),
@@ -803,7 +1061,23 @@ export class BillingService {
       ),
     ]);
 
-    const currentPlanId = normalizePlanId(activeSubscription?.planId);
+    let entitlement = await billingRepository.findEntitlementByUserId(userId);
+    if (!entitlement) {
+      entitlement = activeSubscription
+        ? await this.syncEntitlementFromSubscription(activeSubscription, 'entitlement_backfilled')
+        : await this.upsertFreeEntitlement(userId);
+    }
+
+    entitlement = await this.reconcileExpiredEntitlement(
+      userId,
+      entitlement,
+      activeSubscription,
+      now,
+    );
+
+    const currentPlanId = entitlement.canAccessPaidFeatures
+      ? normalizePlanId(entitlement.planId)
+      : normalizePlanId(activeSubscription?.planId);
     const currentPlan = getBillingPlan(currentPlanId) ?? (getBillingPlan('free') as BillingPlan);
     const usage = await this.resolveUsageData(userId, currentPlan);
     const [invoices, totalPaidYtdCents] = await Promise.all([
@@ -811,28 +1085,49 @@ export class BillingService {
       billingRepository.getPaidInvoicesYtdTotalCents(userId, now.getUTCFullYear()),
     ]);
 
-    const subscriptionCycle: BillingCycle | null = activeSubscription
-      ? activeSubscription.billingCycle
-      : null;
+    let inferredEntitlementCycle: BillingCycle | null = null;
+    if (
+      entitlement.canAccessPaidFeatures &&
+      entitlement.currentPeriodStart &&
+      entitlement.currentPeriodEnd
+    ) {
+      inferredEntitlementCycle =
+        entitlement.currentPeriodEnd.getTime() -
+          entitlement.currentPeriodStart.getTime() >
+          32 * 24 * 60 * 60 * 1000
+          ? 'year'
+          : 'month';
+    }
+
+    const resolvedBillingCycle = activeSubscription?.billingCycle ?? inferredEntitlementCycle;
 
     const currentPlanAmountCents =
       activeSubscription?.amountCents ??
-      currentPlan.prices.month?.amountCents ??
+      (resolvedBillingCycle === 'year' ? currentPlan.prices.year?.amountCents : currentPlan.prices.month?.amountCents) ??
       0;
+
+    const periodEndDate = toIsoString(
+      activeSubscription?.currentPeriodEnd ??
+      (entitlement.canAccessPaidFeatures
+        ? entitlement.accessEndsAt ?? entitlement.currentPeriodEnd
+        : undefined),
+    );
 
     return {
       billingEnabled: true,
       customerId: customer?.stripeCustomerId ?? null,
       currentPlan,
       subscription: this.mapSubscriptionOverview(activeSubscription),
+      entitlement: this.mapEntitlementOverview(entitlement),
       paymentMethod: this.mapPaymentMethod(customer?.defaultPaymentMethod),
       usage,
       kpis: {
         currentPlanAmountCents,
         currency: activeSubscription?.currency ?? currentPlan.prices.month?.currency ?? 'usd',
         totalPaidYtdCents,
-        nextBillingDate: toIsoString(activeSubscription?.currentPeriodEnd),
-        yearlySavingsCents: this.calculateYearlySavings(currentPlan, subscriptionCycle),
+        periodEndDate,
+        nextBillingDate: activeSubscription ? toIsoString(activeSubscription.currentPeriodEnd) : null,
+        yearlySavingsCents: this.calculateYearlySavings(currentPlan, activeSubscription),
       },
       invoices: invoices.map((invoice) => this.mapInvoice(invoice)),
       plans,
@@ -878,15 +1173,50 @@ export class BillingService {
       );
     }
 
-    const existingSubscription = await billingRepository.findLatestSubscriptionByUserId(
-      userId,
-      ACTIVE_SUBSCRIPTION_STATUSES,
+    try {
+      await this.refreshBillingState(userId, { force: true });
+    } catch (error) {
+      logger.warn('Failed to force-refresh billing state before checkout.', {
+        userId: userId.toHexString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const now = new Date();
+    const [existingEntitlementDoc, activeSubscription] = await Promise.all([
+      billingRepository.findEntitlementByUserId(userId),
+      billingRepository.findLatestSubscriptionByUserId(
+        userId,
+        CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES,
+      ),
+    ]);
+    let existingEntitlement = existingEntitlementDoc;
+
+    if (existingEntitlement) {
+      existingEntitlement = await this.reconcileExpiredEntitlement(
+        userId,
+        existingEntitlement,
+        activeSubscription,
+        now,
+      );
+    }
+
+    const entitlementAccessEndsAt =
+      existingEntitlement?.accessEndsAt ?? existingEntitlement?.currentPeriodEnd;
+    const hasActiveEntitlement =
+      existingEntitlement?.canAccessPaidFeatures === true &&
+      (!entitlementAccessEndsAt || entitlementAccessEndsAt > now);
+
+    const hasBlockingSubscription = this.isSubscriptionWindowActive(
+      activeSubscription,
+      now,
     );
-    if (existingSubscription) {
+
+    if (hasActiveEntitlement || hasBlockingSubscription) {
       throw new AppError(
-        'An active subscription already exists. Use the billing portal to change plans.',
+        'You already have an active plan. Wait for it to expire before purchasing again.',
         409,
-        'ACTIVE_SUBSCRIPTION_EXISTS',
+        'ACTIVE_PLAN_EXISTS',
       );
     }
 
@@ -896,8 +1226,11 @@ export class BillingService {
     const cancelUrl = this.resolveSafeUrl(input.cancelUrl, this.defaultCancelUrl());
     const userIdString = userId.toHexString();
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+    const priceObject = await stripe.prices.retrieve(price.stripePriceId);
+    const isRecurring = !!priceObject.recurring;
+
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      mode: isRecurring ? 'subscription' : 'payment',
       customer: customer.stripeCustomerId,
       line_items: [{ price: price.stripePriceId, quantity: 1 }],
       success_url: successUrl,
@@ -917,13 +1250,28 @@ export class BillingService {
         planId: input.planId,
         billingCycle: input.billingCycle,
       },
-      subscription_data: {
+    };
+
+    if (isRecurring) {
+      sessionParams.subscription_data = {
         metadata: {
           userId: userIdString,
           planId: input.planId,
           billingCycle: input.billingCycle,
         },
-      },
+      };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams, {
+      idempotencyKey: [
+        'billing',
+        'checkout',
+        'v3', // Incremented version to avoid collision with previous failed params
+        userIdString,
+        input.planId,
+        input.billingCycle,
+        Buffer.from(successUrl).toString('base64url').slice(0, 48),
+      ].join(':'),
     });
 
     if (!session.url) {
@@ -936,57 +1284,9 @@ export class BillingService {
     };
   }
 
-  async createPortalSession(
-    userId: Types.ObjectId,
-    input: CreatePortalSessionInput,
-  ): Promise<CreatePortalSessionResult> {
-    this.assertStripeEnabled();
-    const customer = await this.getOrCreateCustomer(userId);
-    const stripe = getStripeClient();
-    const returnUrl = this.resolveSafeUrl(
-      input.returnUrl,
-      this.defaultPortalReturnUrl(),
-    );
-
-    const params: Stripe.BillingPortal.SessionCreateParams = {
-      customer: customer.stripeCustomerId,
-      return_url: returnUrl,
-    };
-    if (env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID) {
-      params.configuration = env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID;
-    }
-
-    const session = await stripe.billingPortal.sessions.create(params);
-
-    return { portalUrl: session.url };
-  }
-
-  async deleteSubscription(userId: Types.ObjectId): Promise<BillingOverviewSubscription> {
-    this.assertStripeEnabled();
-    const stripe = getStripeClient();
-    const current = await billingRepository.findLatestSubscriptionByUserId(
-      userId,
-      ACTIVE_SUBSCRIPTION_STATUSES,
-    );
-
-    if (!current) {
-      throw new AppError('No active subscription found.', 404, 'SUBSCRIPTION_NOT_FOUND');
-    }
-
-    const updated = await stripe.subscriptions.cancel(current.stripeSubscriptionId);
-    const synced = await this.syncSubscriptionFromStripe(updated);
-    return this.mapSubscriptionOverview(synced);
-  }
-
   private async handleCheckoutSessionCompleted(
     session: Stripe.Checkout.Session,
   ): Promise<void> {
-    if (session.mode !== 'subscription') return;
-
-    const subscriptionId = getStripeResourceId(session.subscription);
-    if (!subscriptionId) return;
-
-    const stripe = getStripeClient();
     const stripeCustomerId = getStripeCustomerId(session.customer);
     const metadataUserId = session.client_reference_id ?? session.metadata?.['userId'];
 
@@ -998,14 +1298,67 @@ export class BillingService {
       const userId = new Types.ObjectId(metadataUserId);
       const user = await userRepository.findById(userId);
       await this.syncCustomerFromStripe(userId, stripeCustomerId, user?.email, user?.fullName);
+
+      // If this was a subscription-mode checkout, immediately set it to cancel at period end
+      // to ensure it remains a one-time purchase.
+      if (session.mode === 'subscription' && session.subscription) {
+        const stripe = getStripeClient();
+        const subscriptionId = getStripeResourceId(session.subscription);
+        if (subscriptionId) {
+          try {
+            await stripe.subscriptions.update(subscriptionId, {
+              cancel_at_period_end: true,
+            });
+          } catch (error) {
+            logger.error('Failed to set subscription to cancel at period end after checkout.', {
+              subscriptionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
+      const planId = session.metadata?.['planId'] as BillingPlanId | undefined;
+      const billingCycle = session.metadata?.['billingCycle'] as BillingCycle | undefined;
+
+      if (planId && billingCycle) {
+        const plan = getBillingPlan(planId);
+        if (plan) {
+          const now = new Date();
+          const endDate = new Date(now);
+          if (billingCycle === 'year') {
+            endDate.setUTCFullYear(endDate.getUTCFullYear() + 1);
+          } else {
+            endDate.setUTCMonth(endDate.getUTCMonth() + 1);
+          }
+
+          await billingRepository.upsertEntitlement({
+            userId,
+            planId,
+            status: 'active',
+            canAccessPaidFeatures: true,
+            creditsIncluded: plan.includedCredits,
+            features: plan.features,
+            currentPeriodStart: now,
+            currentPeriodEnd: endDate,
+            accessEndsAt: endDate,
+            lastSyncedAt: now,
+          });
+
+          await billingRepository.recordBillingEvent({
+            userId,
+            objectId: session.id,
+            action: 'checkout_fulfilled',
+            status: 'success',
+            metadata: {
+              planId,
+              billingCycle,
+              mode: session.mode,
+            },
+          });
+        }
+      }
     }
-
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    await this.syncSubscriptionFromStripe(subscription);
-  }
-
-  private async handleSubscriptionEvent(subscription: Stripe.Subscription): Promise<void> {
-    await this.syncSubscriptionFromStripe(subscription);
   }
 
   private async handleInvoiceEvent(invoice: Stripe.Invoice): Promise<void> {
@@ -1016,7 +1369,6 @@ export class BillingService {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        if (session.mode !== 'subscription') return;
         const stripeCustomerId = getStripeCustomerId(session.customer);
         const [recipient, userId] = await Promise.all([
           this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
@@ -1028,10 +1380,10 @@ export class BillingService {
           userId,
           eventId: event.id,
           severity: 'success',
-          title: 'Checkout completed',
+          title: 'Purchase completed',
           message: planName
-            ? `Your ${planName} subscription checkout is complete.`
-            : 'Your subscription checkout is complete.',
+            ? `Your ${planName} plan purchase is complete.`
+            : 'Your purchase is complete.',
           metadata: {
             stripeEventType: event.type,
             planId: planId ?? null,
@@ -1108,8 +1460,8 @@ export class BillingService {
           severity: 'warning',
           title: 'Payment failed',
           message: planName
-            ? `Payment failed for your ${planName} subscription invoice.`
-            : 'Payment failed for your subscription invoice.',
+            ? `Payment failed for your ${planName} plan invoice.`
+            : 'Payment failed for your plan invoice.',
           metadata: {
             stripeEventType: event.type,
             invoiceId: invoice.id,
@@ -1135,62 +1487,6 @@ export class BillingService {
         return;
       }
 
-      case 'customer.subscription.deleted':
-      case 'customer.subscription.paused':
-      case 'customer.subscription.resumed': {
-        const subscription = event.data.object as Stripe.Subscription;
-        const stripeCustomerId = getStripeCustomerId(subscription.customer);
-        const [recipient, userId] = await Promise.all([
-          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
-          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
-        ]);
-
-        const planName = resolvePlanNameFromPriceId(subscription.items.data[0]?.price?.id);
-        const detailsByEvent: Record<string, { label: string; detail: string }> = {
-          'customer.subscription.deleted': {
-            label: 'Canceled',
-            detail: 'Your subscription has been canceled.',
-          },
-          'customer.subscription.paused': {
-            label: 'Paused',
-            detail: 'Your subscription is paused. Access may be limited until it is resumed.',
-          },
-          'customer.subscription.resumed': {
-            label: 'Resumed',
-            detail: 'Your subscription is active again.',
-          },
-        };
-
-        const details = detailsByEvent[event.type];
-        if (!details) return;
-        await this.createInAppBillingNotification({
-          userId,
-          eventId: event.id,
-          severity: event.type === 'customer.subscription.paused' ? 'warning' : 'info',
-          title: `Subscription ${details.label.toLowerCase()}`,
-          message: planName
-            ? `${details.detail} Plan: ${planName}.`
-            : details.detail,
-          metadata: {
-            stripeEventType: event.type,
-            subscriptionId: subscription.id,
-            planName,
-            statusLabel: details.label,
-          },
-        });
-        if (this.shouldSendBillingEmails() && recipient) {
-          await sendBillingSubscriptionStateEmail({
-            to: recipient.email,
-            customerName: recipient.name,
-            planName,
-            statusLabel: details.label,
-            detail: details.detail,
-            billingPortalUrl: this.billingPortalUrl(),
-          });
-        }
-        return;
-      }
-
       default:
         return;
     }
@@ -1201,17 +1497,13 @@ export class BillingService {
       case 'checkout.session.completed':
         await this.handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
         return true;
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-      case 'customer.subscription.deleted':
-      case 'customer.subscription.paused':
-      case 'customer.subscription.resumed':
-        await this.handleSubscriptionEvent(event.data.object as Stripe.Subscription);
-        return true;
       case 'invoice.finalized':
+      case 'invoice.created':
+      case 'invoice.finalization_failed':
       case 'invoice.paid':
       case 'invoice.payment_succeeded':
       case 'invoice.payment_failed':
+      case 'invoice.payment_action_required':
       case 'invoice.updated':
         await this.handleInvoiceEvent(event.data.object as Stripe.Invoice);
         return true;
