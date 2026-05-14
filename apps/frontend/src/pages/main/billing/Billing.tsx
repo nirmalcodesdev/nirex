@@ -25,6 +25,7 @@ import { CardSkeleton, Skeleton } from "@nirex/ui/Skeleton";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { billingApi } from "../../../features/billing/billingApi";
+import { notificationsBaseQueryKey } from "../../../features/notifications/useNotifications";
 import {
   billingQueryKeys,
   checkoutPlanId,
@@ -238,6 +239,7 @@ export function Billing() {
 
       queryClient.setQueryData(billingQueryKeys.overview(), overviewData);
       queryClient.setQueryData(billingQueryKeys.invoices(50), invoicesData);
+      await queryClient.invalidateQueries({ queryKey: notificationsBaseQueryKey });
       clearPortalSyncPending();
       setPortalSyncPending(false);
     } catch (error) {

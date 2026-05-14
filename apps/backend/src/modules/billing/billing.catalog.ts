@@ -10,6 +10,7 @@ import type { BillingCycle, BillingPlan, BillingPlanId } from './billing.types.j
 interface PriceMapping {
   planId: BillingPlanId;
   billingCycle: BillingCycle;
+  name: string;
 }
 
 function getProPrices(): BillingPlan['prices'] {
@@ -86,6 +87,7 @@ export function getPriceMappingByStripePriceId(): Map<string, PriceMapping> {
       mapping.set(price.stripePriceId, {
         planId: plan.id,
         billingCycle: cycle,
+        name: plan.name,
       });
     }
   }
