@@ -1,185 +1,1073 @@
+import crypto from 'crypto';
 import { Types } from 'mongoose';
-import type Stripe from 'stripe';
+import {
+  DEFAULT_BILLING_CURRENCY,
+  type BillingAdminCustomerSummary,
+  type BillingAdminReconciliationReport,
+  type BillingAuditLogItem,
+  type BillingCycle,
+  type BillingInvoiceItem,
+  type BillingInvoicesResponse,
+  type BillingOverviewEntitlement,
+  type BillingOverviewPaymentMethod,
+  type BillingOverviewResponse,
+  type BillingOverviewSubscription,
+  type BillingPayment,
+  type BillingPaymentMethod,
+  type BillingPlan,
+  type BillingPlanId,
+  type BillingReconciliationAlertItem,
+  type BillingSubscription,
+  type BillingSubscriptionStatus,
+  type JsonObject,
+  type MoneyAmount,
+} from '@nirex/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
-import {
-  sendBillingCheckoutCompletedEmail,
-  sendBillingPaymentFailedEmail,
-  sendBillingPaymentSucceededEmail,
-  sendBillingSubscriptionStateEmail,
-} from '../../utils/mailer.js';
 import { notificationsService } from '../notifications/notifications.service.js';
-import { usageService } from '../usage/usage.service.js';
 import { userRepository } from '../user/user.repository.js';
+import { getBillingPlan, getBillingPlans, getPlanPrice, resolvePlanFromStripePriceId } from './billing.catalog.js';
 import {
-  getBillingPlan,
-  getBillingPlans,
-  getPlanPrice,
-  resolvePlanFromStripePriceId,
-} from './billing.catalog.js';
+  BillingAuthorizationError,
+  BillingError,
+  GatewayUnavailableError,
+  IdempotencyConflictError,
+} from './billing.errors.js';
+import { billingMetrics } from './billing.metrics.js';
+import type {
+  BillingSession,
+  IdempotencyStartResult,
+} from './billing.repository.js';
 import { billingRepository } from './billing.repository.js';
-import { getStripeClient, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
-import type {
-  IBillingCustomerDocument,
-  IBillingEntitlementDocument,
-  IBillingInvoiceDocument,
-  IBillingSubscriptionDocument,
-  PaymentMethodSnapshot,
+import {
+  type IBillingAuditLogDocument,
+  type IBillingCustomerDocument,
+  type IBillingInvoiceDocument,
+  type IBillingPaymentDocument,
+  type IBillingPaymentMethodDocument,
+  type IBillingReconciliationAlertDocument,
+  type IBillingSubscriptionDocument,
+  type IBillingWebhookEventDocument,
 } from './billing.model.js';
+import {
+  assertSubscriptionTransition,
+  canTransitionSubscription,
+} from './domain/subscription-state-machine.js';
+import { Money } from './domain/money.js';
+import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import type {
-  BillingCycle,
-  BillingOverviewEntitlement,
-  BillingInvoiceItem,
-  BillingOverviewPaymentMethod,
-  BillingOverviewResponse,
-  BillingOverviewSubscription,
-  BillingPlan,
-  BillingPlanId,
+  GatewayEvent,
+  GatewayInvoice,
+  GatewayPaymentIntent,
+  GatewayPaymentMethod,
+  GatewaySubscription,
+  PaymentGatewayPort,
+} from './payment-gateway.port.js';
+import type {
+  AdminManualChargeRequest,
+  AdminRefundRequest,
+  ApplyDiscountRequest,
   CancelSubscriptionInput,
+  ChangePlanRequest,
   CreateCheckoutSessionInput,
   CreateCheckoutSessionResult,
   CreatePortalSessionInput,
   CreatePortalSessionResult,
+  DownloadInvoicePdfResponse,
+  PauseSubscriptionRequest,
+  ProrationPreviewQuery,
+  ProrationPreviewResponse,
+  ResumeSubscriptionRequest,
+  ResumeSubscriptionResponse,
+  RetryPaymentRequest,
+  StripeWebhookResponse,
 } from './billing.types.js';
 
-const ACTIVE_SUBSCRIPTION_STATUSES: Array<IBillingSubscriptionDocument['status']> = [
-  'trialing',
-  'active',
-  'incomplete',
-  'past_due',
-  'unpaid',
-  'paused',
+type ActiveSubscriptionStatus = Exclude<BillingSubscriptionStatus, 'NONE'>;
+type ActorContext = {
+  actorType: 'USER' | 'ADMIN' | 'SYSTEM' | 'WEBHOOK' | 'JOB' | 'API_KEY';
+  actorId?: string;
+  ip?: string;
+  userAgent?: string;
+};
+type OperationOutcome<T> = { value: T; response: JsonObject };
+
+const ACTIVE_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
 ];
 
-const CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES: Array<IBillingSubscriptionDocument['status']> = [
-  'trialing',
-  'active',
-  'incomplete',
-  'past_due',
-  'unpaid',
-  'paused',
+const CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
 ];
 
-function toDateFromUnix(unixTimestamp: number | null | undefined): Date | undefined {
+const OVERVIEW_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
+  ...ACTIVE_SUBSCRIPTION_STATUSES,
+  'CANCELED',
+];
+
+const EXPLICIT_WEBHOOK_HANDLERS = new Set([
+  'checkout.session.completed',
+  'customer.subscription.created',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+  'invoice.paid',
+  'invoice.payment_failed',
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
+  'payment_method.attached',
+]);
+
+function iso(date: Date | null | undefined): string | null {
+  return date ? date.toISOString() : null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+}
+
+function readString(record: Record<string, unknown> | null, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readNumber(record: Record<string, unknown> | null, key: string): number | undefined {
+  const value = record?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function readBoolean(record: Record<string, unknown> | null, key: string): boolean | undefined {
+  const value = record?.[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readNestedRecord(record: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  return readRecord(record?.[key]);
+}
+
+function toJsonObject(value: Record<string, unknown> | null | undefined): JsonObject | null {
+  if (!value) return null;
+  return JSON.parse(JSON.stringify(value)) as JsonObject;
+}
+
+function objectIdFromString(value: string, code: string): Types.ObjectId {
+  if (!Types.ObjectId.isValid(value)) {
+    throw new AppError('Billing resource not found.', 404, code);
+  }
+  return new Types.ObjectId(value);
+}
+
+function hashPayload(value: unknown): string {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(value))
+    .digest('hex');
+}
+
+function deterministicKey(parts: Array<string | number | boolean | null | undefined>): string {
+  return crypto
+    .createHash('sha256')
+    .update(parts.map((part) => String(part ?? '')).join(':'))
+    .digest('hex');
+}
+
+function normalizeCurrency(currency: string | undefined): string {
+  return (currency ?? DEFAULT_BILLING_CURRENCY).toLowerCase();
+}
+
+function mapProviderSubscriptionStatus(status: string): ActiveSubscriptionStatus {
+  if (status === 'trialing') return 'TRIALING';
+  if (status === 'active') return 'ACTIVE';
+  if (status === 'past_due') return 'PAST_DUE';
+  if (status === 'unpaid') return 'UNPAID';
+  if (status === 'paused') return 'PAUSED';
+  if (status === 'canceled' || status === 'incomplete_expired') return 'CANCELED';
+  if (status === 'incomplete') return 'PAST_DUE';
+  return 'ACTIVE';
+}
+
+function mapPlan(plan: BillingPlan): BillingPlan {
+  return plan;
+}
+
+function mapPaymentMethod(doc: IBillingPaymentMethodDocument): BillingPaymentMethod {
+  return {
+    id: doc._id.toString(),
+    customerId: doc.customerId.toString(),
+    provider: doc.provider,
+    providerPaymentMethodId: doc.providerPaymentMethodId,
+    type: doc.type,
+    brand: doc.brand ?? null,
+    last4: doc.last4 ?? null,
+    expMonth: doc.expMonth ?? null,
+    expYear: doc.expYear ?? null,
+    funding: doc.funding ?? null,
+    isDefault: doc.isDefault,
+    status: doc.status,
+    createdAt: doc.createdAt.toISOString(),
+  };
+}
+
+function mapOverviewPaymentMethod(doc: IBillingPaymentMethodDocument): BillingOverviewPaymentMethod {
+  return {
+    id: doc._id.toString(),
+    brand: doc.brand ?? null,
+    last4: doc.last4 ?? null,
+    expMonth: doc.expMonth ?? null,
+    expYear: doc.expYear ?? null,
+    funding: doc.funding ?? null,
+  };
+}
+
+function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): BillingOverviewSubscription {
+  if (!doc) {
+    return {
+      subscriptionId: null,
+      status: 'NONE',
+      planId: 'free',
+      billingCycle: null,
+      cancelAtPeriodEnd: false,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      trialEnd: null,
+    };
+  }
+
+  return {
+    subscriptionId: doc._id.toString(),
+    status: doc.status,
+    planId: doc.planCode,
+    billingCycle: doc.billingCycle,
+    cancelAtPeriodEnd: doc.cancelAtPeriodEnd,
+    currentPeriodStart: iso(doc.currentPeriodStart),
+    currentPeriodEnd: iso(doc.currentPeriodEnd),
+    trialEnd: iso(doc.trialEnd),
+  };
+}
+
+function mapSubscription(doc: IBillingSubscriptionDocument): BillingSubscription {
+  return {
+    id: doc._id.toString(),
+    customerId: doc.customerId.toString(),
+    planId: doc.planCode,
+    status: doc.status,
+    billingCycle: doc.billingCycle,
+    currentPeriodStart: iso(doc.currentPeriodStart),
+    currentPeriodEnd: iso(doc.currentPeriodEnd),
+    trialStart: iso(doc.trialStart),
+    trialEnd: iso(doc.trialEnd),
+    cancelAtPeriodEnd: doc.cancelAtPeriodEnd,
+    canceledAt: iso(doc.canceledAt),
+    pausedAt: iso(doc.pausedAt),
+    providerSubscriptionId: doc.providerSubscriptionId ?? null,
+  };
+}
+
+function mapInvoice(
+  doc: IBillingInvoiceDocument,
+  lines: Array<{
+    _id: Types.ObjectId;
+    invoiceId: Types.ObjectId;
+    description: string;
+    quantity: number;
+    unitAmountMinor: number;
+    amountMinor: number;
+    currency: string;
+    planCode?: BillingPlanId;
+    usageRecordId?: Types.ObjectId;
+  }> = [],
+): BillingInvoiceItem {
+  return {
+    invoiceId: doc._id.toString(),
+    invoiceNumber: doc.invoiceNumber ?? null,
+    number: doc.invoiceNumber ?? null,
+    description: doc.description ?? null,
+    status: doc.status,
+    currency: doc.currency,
+    subtotalMinor: doc.subtotalMinor,
+    subtotalCents: doc.subtotalMinor,
+    taxMinor: doc.taxMinor,
+    taxCents: doc.taxMinor,
+    discountMinor: doc.discountMinor,
+    totalMinor: doc.totalMinor,
+    totalCents: doc.totalMinor,
+    amountDueMinor: doc.amountDueMinor,
+    amountDueCents: doc.amountDueMinor,
+    amountPaidMinor: doc.amountPaidMinor,
+    amountPaidCents: doc.amountPaidMinor,
+    amountRemainingMinor: doc.amountRemainingMinor,
+    amountRemainingCents: doc.amountRemainingMinor,
+    hostedInvoiceUrl: doc.hostedInvoiceUrl ?? null,
+    invoicePdfUrl: doc.invoicePdfUrl ?? null,
+    dueDate: iso(doc.dueAt),
+    paidAt: iso(doc.paidAt),
+    periodStart: iso(doc.periodStart),
+    periodEnd: iso(doc.periodEnd),
+    lineItems: lines.map((line) => ({
+      id: line._id.toString(),
+      invoiceId: line.invoiceId.toString(),
+      description: line.description,
+      quantity: line.quantity,
+      unitAmount: { amountMinor: line.unitAmountMinor, currency: line.currency },
+      amount: { amountMinor: line.amountMinor, currency: line.currency },
+      planId: line.planCode ?? null,
+      usageRecordId: line.usageRecordId?.toString() ?? null,
+    })),
+    createdAt: doc.createdAt.toISOString(),
+  };
+}
+
+function mapPayment(doc: IBillingPaymentDocument): BillingPayment {
+  return {
+    id: doc._id.toString(),
+    invoiceId: doc.invoiceId?.toString() ?? '',
+    paymentMethodId: doc.paymentMethodId?.toString() ?? null,
+    status: doc.status,
+    amount: { amountMinor: doc.amountMinor, currency: doc.currency },
+    failureCode: doc.failureCode ?? null,
+    failureMessage: doc.failureMessage ?? null,
+    attemptedAt: doc.attemptedAt.toISOString(),
+  };
+}
+
+function mapAuditLog(doc: IBillingAuditLogDocument): BillingAuditLogItem {
+  return {
+    id: doc._id.toString(),
+    action: doc.action,
+    actorType: doc.actorType,
+    actorId: doc.actorId ?? null,
+    outcome: doc.outcome,
+    errorCode: doc.errorCode ?? null,
+    occurredAt: doc.occurredAt.toISOString(),
+    metadata: toJsonObject(doc.metadata),
+  };
+}
+
+function mapReconciliationAlert(doc: IBillingReconciliationAlertDocument): BillingReconciliationAlertItem {
+  return {
+    id: doc._id.toString(),
+    customerId: doc.customerId?.toString() ?? null,
+    subscriptionId: doc.subscriptionId?.toString() ?? null,
+    paymentId: doc.paymentId?.toString() ?? null,
+    severity: doc.severity,
+    status: doc.status,
+    diff: toJsonObject(doc.diff) ?? {},
+    createdAt: doc.createdAt.toISOString(),
+  };
+}
+
+function deriveEntitlement(subscription: IBillingSubscriptionDocument | null, planId: BillingPlanId): BillingOverviewEntitlement {
+  const status = subscription?.status ?? 'NONE';
+  const canAccessPaidFeatures =
+    planId !== 'free' && (status === 'TRIALING' || status === 'ACTIVE' || status === 'PAST_DUE');
+
+  return {
+    status:
+      status === 'TRIALING'
+        ? 'trialing'
+        : status === 'ACTIVE'
+          ? 'active'
+          : status === 'PAST_DUE'
+            ? 'past_due_grace'
+            : status === 'CANCELED'
+              ? 'canceled'
+              : status === 'UNPAID'
+                ? 'suspended'
+                : 'none',
+    planId,
+    canAccessPaidFeatures,
+    isBillingIssue: status === 'PAST_DUE' || status === 'UNPAID',
+    issueCode: status === 'PAST_DUE' || status === 'UNPAID' ? status : null,
+    issueMessage:
+      status === 'PAST_DUE'
+        ? 'Payment is past due. Update your payment method to keep paid features active.'
+        : status === 'UNPAID'
+          ? 'Payment retries were exhausted. Paid features are suspended.'
+          : null,
+    accessEndsAt: iso(subscription?.currentPeriodEnd),
+    lastSyncedAt: iso(subscription?.updatedAt),
+  };
+}
+
+function createBillingLogBase(operation: string, startedAt: number, error?: unknown): JsonObject {
+  return {
+    service: 'billing',
+    operation,
+    durationMs: Date.now() - startedAt,
+    outcome: error ? 'failure' : 'success',
+    errorCode: error instanceof AppError ? error.code : error instanceof Error ? error.name : null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export class BillingAuditService {
+  async record(
+    input: {
+      userId?: Types.ObjectId;
+      customerId?: Types.ObjectId;
+      subscriptionId?: Types.ObjectId;
+      invoiceId?: Types.ObjectId;
+      paymentId?: Types.ObjectId;
+      action: string;
+      outcome: 'SUCCESS' | 'FAILURE' | 'IGNORED';
+      before?: JsonObject;
+      after?: JsonObject;
+      metadata?: JsonObject;
+      errorCode?: string;
+    },
+    actor: ActorContext,
+    session?: BillingSession,
+  ): Promise<void> {
+    await billingRepository.recordAuditLog(
+      {
+        ...input,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+        occurredAt: new Date(),
+      },
+      session,
+    );
+  }
+}
+
+export class SubscriptionService {
+  constructor(private readonly auditService = new BillingAuditService()) { }
+
+  async transition(
+    subscription: IBillingSubscriptionDocument,
+    to: ActiveSubscriptionStatus,
+    actor: ActorContext,
+    fields: Partial<Pick<IBillingSubscriptionDocument, 'cancelAtPeriodEnd' | 'canceledAt' | 'pausedAt' | 'endedAt' | 'currentPeriodStart' | 'currentPeriodEnd'>> = {},
+    session?: BillingSession,
+  ): Promise<IBillingSubscriptionDocument> {
+    assertSubscriptionTransition(subscription.status, to);
+    const before: JsonObject = {
+      status: subscription.status,
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+    };
+
+    const updated = await billingRepository.updateSubscriptionState(
+      subscription._id,
+      to,
+      fields,
+      session,
+    );
+    if (!updated) {
+      throw new AppError('Subscription not found.', 404, 'SUBSCRIPTION_NOT_FOUND');
+    }
+
+    await this.auditService.record(
+      {
+        userId: subscription.userId,
+        customerId: subscription.customerId,
+        subscriptionId: subscription._id,
+        action: 'subscription.state_transition',
+        outcome: 'SUCCESS',
+        before,
+        after: {
+          status: updated.status,
+          cancelAtPeriodEnd: updated.cancelAtPeriodEnd,
+        },
+      },
+      actor,
+      session,
+    );
+
+    billingMetrics.increment('billing.subscription.state_change', 1, {
+      from_state: subscription.status,
+      to_state: to,
+    });
+
+    return updated;
+  }
+}
+
+export class InvoiceService {
+  async listForUser(userId: Types.ObjectId, limit: number, cursor?: string): Promise<BillingInvoicesResponse> {
+    const result = await billingRepository.listInvoicesByUserId({ userId, limit, cursor });
+    const lineItems = await billingRepository.listInvoiceLineItems(result.items.map((invoice) => invoice._id));
+    const linesByInvoice = new Map<string, typeof lineItems>();
+    for (const line of lineItems) {
+      const key = line.invoiceId.toString();
+      linesByInvoice.set(key, [...(linesByInvoice.get(key) ?? []), line]);
+    }
+    return {
+      items: result.items.map((invoice) => mapInvoice(invoice, linesByInvoice.get(invoice._id.toString()) ?? [])),
+      nextCursor: result.nextCursor,
+    };
+  }
+
+  async downloadPdf(userId: Types.ObjectId, invoiceId: string): Promise<DownloadInvoicePdfResponse> {
+    const invoice = await billingRepository.findInvoiceById(objectIdFromString(invoiceId, 'INVOICE_NOT_FOUND'));
+    if (!invoice || invoice.userId.toString() !== userId.toString()) {
+      throw new BillingAuthorizationError('Invoice access denied.', {
+        userId: userId.toString(),
+        invoiceId,
+      });
+    }
+    if (!invoice.invoicePdfUrl) {
+      throw new AppError('Invoice PDF is not available yet.', 409, 'INVOICE_PDF_PENDING');
+    }
+    return { downloadUrl: invoice.invoicePdfUrl };
+  }
+}
+
+export class WebhookService {
+  constructor(
+    private readonly gateway: PaymentGatewayPort,
+    private readonly auditService = new BillingAuditService(),
+    private readonly subscriptionService = new SubscriptionService(auditService),
+  ) { }
+
+  async ingestStripeWebhook(payload: Buffer, signatureHeader: string | string[] | undefined): Promise<StripeWebhookResponse> {
+    if (!isStripeConfigured()) {
+      throw new AppError('Billing is not configured on the server.', 503, 'BILLING_NOT_CONFIGURED');
+    }
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    if (!signature) {
+      throw new AppError('Missing Stripe signature.', 401, 'INVALID_STRIPE_SIGNATURE');
+    }
+
+    const event = this.gateway.constructWebhookEvent(payload, signature, getStripeWebhookSecret());
+    billingMetrics.increment('billing.webhook.received', 1, {
+      event_type: event.type,
+      outcome: 'accepted',
+    });
+
+    const persisted = await billingRepository.createWebhookEvent({
+      providerEventId: event.id,
+      eventType: event.type,
+      rawPayload: payload.toString('utf8'),
+      signature,
+      status: 'PENDING',
+    });
+
+    if (persisted.duplicate) {
+      const existing = await billingRepository.findWebhookEventByProviderId(event.id);
+      if (
+        existing &&
+        (existing.status === 'PENDING' || existing.status === 'FAILED' || existing.status === 'DEAD')
+      ) {
+        await this.processWebhookEvent(existing._id);
+      }
+      return { received: true, duplicate: true };
+    }
+
+    const webhookId = persisted.doc?._id;
+    if (webhookId) {
+      await this.processWebhookEvent(webhookId);
+    }
+
+    return { received: true, duplicate: false };
+  }
+
+  async processWebhookEvent(webhookEventId: Types.ObjectId): Promise<void> {
+    const workerId = `webhook:${process.pid}:${Date.now()}`;
+    const staleBefore = new Date(
+      Date.now() - Math.max(60, env.BILLING_WEBHOOK_STALE_RETRY_SECONDS || 900) * 1000,
+    );
+    const eventDoc = await billingRepository.claimWebhookEvent(webhookEventId, workerId, staleBefore);
+    if (!eventDoc) return;
+
+    try {
+      const event = this.gateway.constructWebhookEvent(
+        Buffer.from(eventDoc.rawPayload, 'utf8'),
+        eventDoc.signature ?? '',
+        getStripeWebhookSecret(),
+      );
+
+      await billingRepository.withTransaction(async (session) => {
+        if (!EXPLICIT_WEBHOOK_HANDLERS.has(event.type)) {
+          await this.auditService.record(
+            {
+              action: `webhook.${event.type}`,
+              outcome: 'IGNORED',
+              metadata: { providerEventId: event.id },
+            },
+            { actorType: 'WEBHOOK', actorId: event.id },
+            session,
+          );
+          await billingRepository.markWebhookEventStatus(eventDoc._id, 'IGNORED', undefined, session);
+          return { ignored: true };
+        }
+
+        await this.routeEvent(event, session);
+        await billingRepository.markWebhookEventStatus(eventDoc._id, 'PROCESSED', undefined, session);
+        return { processed: true };
+      });
+
+      billingMetrics.increment('billing.webhook.received', 1, {
+        event_type: eventDoc.eventType,
+        outcome: 'processed',
+      });
+    } catch (error) {
+      const maxAttempts = Math.max(3, env.BILLING_GATEWAY_MAX_RETRIES || 3);
+      const status = eventDoc.attempts >= maxAttempts ? 'DEAD' : 'FAILED';
+      await billingRepository.markWebhookEventStatus(
+        eventDoc._id,
+        status,
+        error instanceof Error ? error.message : String(error),
+      );
+      billingMetrics.increment('billing.webhook.received', 1, {
+        event_type: eventDoc.eventType,
+        outcome: 'failed',
+      });
+      throw error;
+    }
+  }
+
+  private async routeEvent(event: GatewayEvent, session: BillingSession): Promise<void> {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        await this.handleCheckoutCompleted(event, session);
+        return;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        await this.handleSubscriptionUpsert(event, false, session);
+        return;
+      case 'customer.subscription.deleted':
+        await this.handleSubscriptionUpsert(event, true, session);
+        return;
+      case 'invoice.paid':
+        await this.handleInvoiceEvent(event, 'PAID', session);
+        return;
+      case 'invoice.payment_failed':
+        await this.handleInvoiceEvent(event, 'OPEN', session);
+        return;
+      case 'payment_intent.succeeded':
+        await this.handlePaymentIntent(event, 'SUCCEEDED', session);
+        return;
+      case 'payment_intent.payment_failed':
+        await this.handlePaymentIntent(event, 'FAILED', session);
+        return;
+      case 'payment_method.attached':
+        await this.handlePaymentMethodAttached(event, session);
+        return;
+      default:
+        await this.auditService.record(
+          {
+            action: `webhook.${event.type}`,
+            outcome: 'IGNORED',
+            metadata: { providerEventId: event.id },
+          },
+          { actorType: 'WEBHOOK', actorId: event.id },
+          session,
+        );
+    }
+  }
+
+  private async handleCheckoutCompleted(event: GatewayEvent, session: BillingSession): Promise<void> {
+    await this.auditService.record(
+      {
+        action: 'webhook.checkout.completed',
+        outcome: 'SUCCESS',
+        metadata: { providerEventId: event.id },
+      },
+      { actorType: 'WEBHOOK', actorId: event.id },
+      session,
+    );
+  }
+
+  private async handleSubscriptionUpsert(
+    event: GatewayEvent,
+    deleted: boolean,
+    session: BillingSession,
+  ): Promise<void> {
+    const data = readRecord(event.data);
+    const providerSubscriptionId = readString(data, 'id');
+    const providerCustomerId = readString(data, 'customer');
+    if (!providerSubscriptionId || !providerCustomerId) return;
+
+    const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
+    if (!customer) return;
+
+    const items = readNestedRecord(data, 'items');
+    const itemData = Array.isArray(items?.data) ? items.data : [];
+    const firstItem = readRecord(itemData[0]);
+    const price = readNestedRecord(firstItem, 'price');
+    const providerPriceId = readString(price, 'id');
+    const mappedPlan = resolvePlanFromStripePriceId(providerPriceId);
+    const status = deleted ? 'CANCELED' : mapProviderSubscriptionStatus(readString(data, 'status') ?? 'active');
+    const existing = await billingRepository.findSubscriptionByProviderId(providerSubscriptionId, session);
+
+    const subscription = await billingRepository.upsertSubscription(
+      {
+        customerId: customer._id,
+        userId: customer.userId,
+        planCode: mappedPlan?.planId ?? existing?.planCode ?? 'custom',
+        billingCycle: mappedPlan?.billingCycle ?? existing?.billingCycle ?? 'month',
+        status,
+        providerSubscriptionId,
+        providerPriceId,
+        currency: normalizeCurrency(readString(price, 'currency') ?? existing?.currency),
+        amountMinor: readNumber(price, 'unit_amount') ?? existing?.amountMinor ?? 0,
+        cancelAtPeriodEnd: readBoolean(data, 'cancel_at_period_end') ?? false,
+        currentPeriodStart: toDate(readNumber(firstItem, 'current_period_start')),
+        currentPeriodEnd: toDate(readNumber(firstItem, 'current_period_end')),
+        trialStart: toDate(readNumber(data, 'trial_start')),
+        trialEnd: toDate(readNumber(data, 'trial_end')),
+        metadata: { providerEventId: event.id },
+      },
+      session,
+    );
+
+    if (existing && existing.status !== status && canTransitionSubscription(existing.status, status)) {
+      await this.auditService.record(
+        {
+          userId: customer.userId,
+          customerId: customer._id,
+          subscriptionId: subscription._id,
+          action: 'webhook.subscription.state_changed',
+          outcome: 'SUCCESS',
+          before: { status: existing.status },
+          after: { status },
+          metadata: { providerEventId: event.id },
+        },
+        { actorType: 'WEBHOOK', actorId: event.id },
+        session,
+      );
+    }
+  }
+
+  private async handleInvoiceEvent(
+    event: GatewayEvent,
+    status: 'PAID' | 'OPEN',
+    session: BillingSession,
+  ): Promise<void> {
+    const data = readRecord(event.data);
+    const providerCustomerId = readString(data, 'customer');
+    if (!providerCustomerId) return;
+    const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
+    if (!customer) return;
+
+    const providerSubscriptionId = readString(data, 'subscription');
+    const subscription = providerSubscriptionId
+      ? await billingRepository.findSubscriptionByProviderId(providerSubscriptionId, session)
+      : null;
+    const totalMinor = readNumber(data, 'total') ?? 0;
+    const paid = status === 'PAID';
+    const invoice = await billingRepository.upsertInvoice(
+      {
+        customerId: customer._id,
+        userId: customer.userId,
+        subscriptionId: subscription?._id,
+        providerInvoiceId: readString(data, 'id'),
+        invoiceNumber: readString(data, 'number'),
+        description: readString(data, 'description'),
+        status,
+        currency: normalizeCurrency(readString(data, 'currency')),
+        subtotalMinor: readNumber(data, 'subtotal') ?? totalMinor,
+        taxMinor: readNumber(data, 'tax') ?? 0,
+        discountMinor: 0,
+        totalMinor,
+        amountDueMinor: readNumber(data, 'amount_due') ?? totalMinor,
+        amountPaidMinor: paid ? readNumber(data, 'amount_paid') ?? totalMinor : 0,
+        amountRemainingMinor: paid ? 0 : readNumber(data, 'amount_remaining') ?? totalMinor,
+        hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+        invoicePdfUrl: readString(data, 'invoice_pdf'),
+        paidAt: paid ? new Date() : undefined,
+        providerCreatedAt: toDate(readNumber(data, 'created')),
+      },
+      session,
+    );
+
+    if (subscription && !paid && canTransitionSubscription(subscription.status, 'PAST_DUE')) {
+      await this.subscriptionService.transition(
+        subscription,
+        'PAST_DUE',
+        { actorType: 'WEBHOOK', actorId: event.id },
+        {},
+        session,
+      );
+    }
+
+    await this.auditService.record(
+      {
+        userId: customer.userId,
+        customerId: customer._id,
+        subscriptionId: subscription?._id,
+        invoiceId: invoice._id,
+        action: paid ? 'webhook.invoice.paid' : 'webhook.invoice.payment_failed',
+        outcome: 'SUCCESS',
+        metadata: { providerEventId: event.id },
+      },
+      { actorType: 'WEBHOOK', actorId: event.id },
+      session,
+    );
+  }
+
+  private async handlePaymentIntent(
+    event: GatewayEvent,
+    status: 'SUCCEEDED' | 'FAILED',
+    session: BillingSession,
+  ): Promise<void> {
+    const data = readRecord(event.data);
+    const providerCustomerId = readString(data, 'customer');
+    if (!providerCustomerId) return;
+    const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
+    if (!customer) return;
+
+    const amountMinor = readNumber(data, 'amount') ?? 0;
+    await billingRepository.createPayment(
+      {
+        customerId: customer._id,
+        userId: customer.userId,
+        providerPaymentId: readString(data, 'id'),
+        idempotencyKey: `webhook:${event.id}`,
+        status,
+        amountMinor,
+        currency: normalizeCurrency(readString(data, 'currency')),
+        failureCode: readNestedRecord(data, 'last_payment_error') ? readString(readNestedRecord(data, 'last_payment_error'), 'code') : undefined,
+        failureMessage: readNestedRecord(data, 'last_payment_error') ? readString(readNestedRecord(data, 'last_payment_error'), 'message') : undefined,
+      },
+      session,
+    );
+  }
+
+  private async handlePaymentMethodAttached(event: GatewayEvent, session: BillingSession): Promise<void> {
+    const data = readRecord(event.data);
+    const providerCustomerId = readString(data, 'customer');
+    const paymentMethodId = readString(data, 'id');
+    if (!providerCustomerId || !paymentMethodId) return;
+    const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
+    if (!customer) return;
+
+    const card = readNestedRecord(data, 'card');
+    await billingRepository.upsertPaymentMethod(
+      {
+        customerId: customer._id,
+        userId: customer.userId,
+        providerPaymentMethodId: paymentMethodId,
+        type: readString(data, 'type') === 'card' ? 'card' : 'unknown',
+        brand: readString(card, 'brand'),
+        last4: readString(card, 'last4'),
+        expMonth: readNumber(card, 'exp_month'),
+        expYear: readNumber(card, 'exp_year'),
+        funding: readString(card, 'funding'),
+      },
+      session,
+    );
+  }
+}
+
+function toDate(unixTimestamp: number | undefined): Date | undefined {
   if (typeof unixTimestamp !== 'number' || Number.isNaN(unixTimestamp)) return undefined;
   return new Date(unixTimestamp * 1000);
 }
 
-function toIsoString(date: Date | undefined): string | null {
-  return date ? date.toISOString() : null;
-}
+export class DunningService {
+  constructor(
+    private readonly gateway: PaymentGatewayPort,
+    private readonly auditService = new BillingAuditService(),
+    private readonly subscriptionService = new SubscriptionService(auditService),
+  ) { }
 
-function statusFromStripeInvoice(
-  status: Stripe.Invoice.Status | null,
-): 'draft' | 'open' | 'paid' | 'uncollectible' | 'void' | 'unknown' {
-  if (status === 'draft') return 'draft';
-  if (status === 'open') return 'open';
-  if (status === 'paid') return 'paid';
-  if (status === 'uncollectible') return 'uncollectible';
-  if (status === 'void') return 'void';
-  return 'unknown';
-}
-
-function getStripeCustomerId(
-  customer: string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined,
-): string | null {
-  if (!customer) return null;
-  if (typeof customer === 'string') return customer;
-  return customer.id;
-}
-
-function getStripeResourceId(
-  resource:
-    | string
-    | { id?: string | null }
-    | null
-    | undefined,
-): string | null {
-  if (!resource) return null;
-  if (typeof resource === 'string') return resource;
-  return resource.id ?? null;
-}
-
-function resolveSubscriptionPeriod(
-  subscription: Stripe.Subscription,
-): { start?: Date; end?: Date } {
-  const starts = subscription.items.data
-    .map((item) => item.current_period_start)
-    .filter((value): value is number => typeof value === 'number');
-  const ends = subscription.items.data
-    .map((item) => item.current_period_end)
-    .filter((value): value is number => typeof value === 'number');
-
-  return {
-    start:
-      starts.length > 0
-        ? toDateFromUnix(Math.min(...starts))
-        : undefined,
-    end:
-      ends.length > 0
-        ? toDateFromUnix(Math.max(...ends))
-        : undefined,
-  };
-}
-
-function mapCardPaymentMethod(
-  paymentMethod: Stripe.PaymentMethod | string | null | undefined,
-): PaymentMethodSnapshot | undefined {
-  if (!paymentMethod || typeof paymentMethod === 'string') return undefined;
-  if (paymentMethod.type !== 'card' || !paymentMethod.card) return undefined;
-
-  return {
-    id: paymentMethod.id,
-    brand: paymentMethod.card.brand,
-    last4: paymentMethod.card.last4,
-    expMonth: paymentMethod.card.exp_month,
-    expYear: paymentMethod.card.exp_year,
-    funding: paymentMethod.card.funding ?? null,
-  };
-}
-
-function resolvePlanNameFromPriceId(
-  stripePriceId: string | null | undefined,
-): string | null {
-  const resolved = resolvePlanFromStripePriceId(stripePriceId);
-  if (!resolved) return null;
-  const plan = getBillingPlan(resolved.planId);
-  return plan?.name ?? null;
-}
-
-function getInvoicePrimaryPriceId(invoice: Stripe.Invoice): string | null {
-  const firstLine = invoice.lines.data[0] as
-    | {
-      price?: { id?: string | null } | null;
-      pricing?: { price_details?: { price?: string | null } | null } | null;
-    }
-    | undefined;
-
-  const directPriceId = firstLine?.price?.id;
-  if (directPriceId) return directPriceId;
-
-  const priceDetailsId = firstLine?.pricing?.price_details?.price;
-  if (priceDetailsId) return priceDetailsId;
-
-  return null;
-}
-
-function normalizePlanId(rawPlanId: string | undefined): BillingPlanId {
-  if (rawPlanId === 'hobby' || rawPlanId === 'free') return 'free';
-  if (rawPlanId === 'pro' || rawPlanId === 'enterprise' || rawPlanId === 'custom') {
-    return rawPlanId;
+  scheduleDays(): number[] {
+    return Array.isArray(env.BILLING_DUNNING_SCHEDULE_DAYS) && env.BILLING_DUNNING_SCHEDULE_DAYS.length > 0
+      ? env.BILLING_DUNNING_SCHEDULE_DAYS
+      : [0, 3, 7, 14, 21];
   }
-  return 'free';
+
+  async schedule(subscription: IBillingSubscriptionDocument, invoiceId?: Types.ObjectId, session?: BillingSession): Promise<void> {
+    const startedAt = subscription.currentPeriodEnd ?? new Date();
+    for (const day of this.scheduleDays()) {
+      const scheduledAt = new Date(startedAt.getTime() + day * 24 * 60 * 60 * 1000);
+      await billingRepository.createDunningAttempt(
+        {
+          subscriptionId: subscription._id,
+          invoiceId,
+          customerId: subscription.customerId,
+          userId: subscription.userId,
+          day,
+          scheduledAt,
+        },
+        session,
+      );
+    }
+  }
+
+  async runDue(now: Date = new Date()): Promise<number> {
+    const attempts = await billingRepository.listDueDunningAttempts(now);
+    let processed = 0;
+    for (const attempt of attempts) {
+      const subscription = await billingRepository.findSubscriptionById(attempt.subscriptionId);
+      if (!subscription || subscription.status !== 'PAST_DUE') {
+        await billingRepository.updateDunningAttempt(attempt._id, 'CANCELED');
+        continue;
+      }
+
+      try {
+        await notificationsService.createNotification(subscription.userId, {
+          kind: 'billing',
+          severity: attempt.day >= 14 ? 'error' : 'warning',
+          title: attempt.day >= 21 ? 'Subscription canceled' : 'Payment retry required',
+          message:
+            attempt.day >= 21
+              ? 'Your subscription was canceled after repeated failed payment attempts.'
+              : 'We could not collect payment. Please update your billing details.',
+          dedupe_key: `billing:dunning:${attempt._id.toString()}`,
+        });
+
+        if (attempt.day === 14 && canTransitionSubscription(subscription.status, 'UNPAID')) {
+          await billingRepository.withTransaction(async (session) => {
+            await this.subscriptionService.transition(
+              subscription,
+              'UNPAID',
+              { actorType: 'JOB', actorId: 'DunningJob' },
+              {},
+              session,
+            );
+            await billingRepository.updateDunningAttempt(attempt._id, 'SUCCEEDED', undefined, session);
+            return { status: 'UNPAID' };
+          });
+        } else if (attempt.day >= 21 && canTransitionSubscription(subscription.status, 'CANCELED')) {
+          await this.gateway.cancelSubscription(subscription.providerSubscriptionId ?? '', {
+            atPeriodEnd: false,
+            idempotencyKey: `billing:dunning:cancel:${subscription._id.toString()}:${attempt.day}`,
+          });
+          await billingRepository.withTransaction(async (session) => {
+            await this.subscriptionService.transition(
+              subscription,
+              'CANCELED',
+              { actorType: 'JOB', actorId: 'DunningJob' },
+              { canceledAt: new Date(), endedAt: new Date() },
+              session,
+            );
+            await billingRepository.updateDunningAttempt(attempt._id, 'SUCCEEDED', undefined, session);
+            return { status: 'CANCELED' };
+          });
+        } else {
+          await billingRepository.updateDunningAttempt(attempt._id, 'SUCCEEDED');
+        }
+
+        billingMetrics.increment('billing.dunning.attempt', 1, {
+          day: String(attempt.day),
+          outcome: 'success',
+        });
+        processed += 1;
+      } catch (error) {
+        await billingRepository.updateDunningAttempt(
+          attempt._id,
+          'FAILED',
+          error instanceof AppError ? error.code : 'DUNNING_ERROR',
+        );
+        billingMetrics.increment('billing.dunning.attempt', 1, {
+          day: String(attempt.day),
+          outcome: 'failure',
+        });
+      }
+    }
+    return processed;
+  }
+}
+
+export class ReconciliationService {
+  constructor(private readonly gateway: PaymentGatewayPort) { }
+
+  async run(): Promise<BillingAdminReconciliationReport> {
+    const [subscriptions, payments] = await Promise.all([
+      billingRepository.listActiveSubscriptions(),
+      billingRepository.listRecentPayments(),
+    ]);
+
+    for (const subscription of subscriptions) {
+      if (!subscription.providerSubscriptionId) continue;
+      try {
+        const remote = await this.gateway.retrieveSubscription(subscription.providerSubscriptionId);
+        const diff: JsonObject = {};
+        const remoteStatus = mapProviderSubscriptionStatus(remote.status);
+        if (remoteStatus !== subscription.status) {
+          diff.status = { local: subscription.status, remote: remoteStatus };
+        }
+        if (remote.amountMinor !== subscription.amountMinor) {
+          diff.amountMinor = { local: subscription.amountMinor, remote: remote.amountMinor };
+        }
+        if (normalizeCurrency(remote.currency) !== subscription.currency) {
+          diff.currency = { local: subscription.currency, remote: normalizeCurrency(remote.currency) };
+        }
+        if (Object.keys(diff).length > 0) {
+          await billingRepository.createReconciliationAlert({
+            customerId: subscription.customerId,
+            subscriptionId: subscription._id,
+            severity: 'WARNING',
+            diff,
+          });
+          billingMetrics.increment('billing.reconciliation.discrepancy', 1, { type: 'subscription' });
+          logger.warn('Billing reconciliation discrepancy', {
+            service: 'billing',
+            operation: 'reconciliation.subscription',
+            customerId: subscription.customerId.toString(),
+            subscriptionId: subscription._id.toString(),
+            outcome: 'failure',
+            diff,
+          });
+        }
+      } catch (error) {
+        await billingRepository.createReconciliationAlert({
+          customerId: subscription.customerId,
+          subscriptionId: subscription._id,
+          severity: 'CRITICAL',
+          diff: {
+            error: error instanceof Error ? error.message : 'Remote subscription lookup failed',
+          },
+        });
+      }
+    }
+
+    for (const payment of payments) {
+      if (!payment.providerPaymentId || payment.amountMinor < 0) continue;
+      if (payment.status === 'FAILED' && payment.providerPaymentId) {
+        await billingRepository.createReconciliationAlert({
+          customerId: payment.customerId,
+          paymentId: payment._id,
+          severity: 'INFO',
+          diff: { paymentStatus: { local: payment.status, review: 'provider failure retained' } },
+        });
+      }
+    }
+
+    const openAlerts = await billingRepository.listOpenReconciliationAlerts(500);
+    return {
+      generatedAt: new Date().toISOString(),
+      openAlerts: openAlerts.map(mapReconciliationAlert),
+    };
+  }
+
+  async report(): Promise<BillingAdminReconciliationReport> {
+    const openAlerts = await billingRepository.listOpenReconciliationAlerts(500);
+    return {
+      generatedAt: new Date().toISOString(),
+      openAlerts: openAlerts.map(mapReconciliationAlert),
+    };
+  }
 }
 
 export class BillingService {
-  private readonly stripeSubscriptionSyncLimit = 200;
-  private readonly stripeInvoiceSyncLimit = 300;
+  private readonly auditService = new BillingAuditService();
+  private readonly subscriptionService = new SubscriptionService(this.auditService);
+  private readonly invoiceService = new InvoiceService();
+  private readonly webhookService: WebhookService;
+  private readonly dunningService: DunningService;
+  private readonly reconciliationService: ReconciliationService;
 
-  private billingSyncMinIntervalMs(): number {
-    const seconds = Math.max(15, env.BILLING_SYNC_MIN_INTERVAL_SECONDS);
-    return seconds * 1000;
+  constructor(private readonly gateway: PaymentGatewayPort = getPaymentGateway()) {
+    this.webhookService = new WebhookService(gateway, this.auditService, this.subscriptionService);
+    this.dunningService = new DunningService(gateway, this.auditService, this.subscriptionService);
+    this.reconciliationService = new ReconciliationService(gateway);
+  }
+
+  private billingEnabled(): boolean {
+    return isStripeConfigured();
   }
 
   private getAllowedOrigins(): Set<string> {
@@ -187,15 +1075,19 @@ export class BillingService {
     try {
       origins.add(new URL(env.APP_URL).origin);
     } catch {
-      // APP_URL is validated at startup.
+      return origins;
     }
 
-    for (const origin of env.CORS_ORIGINS) {
+    for (const origin of env.CORS_ORIGINS ?? []) {
       if (origin === '*') continue;
       try {
         origins.add(new URL(origin).origin);
       } catch {
-        // Skip malformed optional origins.
+        logger.warn('Invalid optional CORS origin skipped for billing URL allow-list', {
+          service: 'billing',
+          operation: 'resolveSafeUrl',
+          origin,
+        });
       }
     }
 
@@ -212,1395 +1104,1210 @@ export class BillingService {
       throw new AppError('Invalid return URL.', 422, 'INVALID_BILLING_URL');
     }
 
-    const allowedOrigins = this.getAllowedOrigins();
-    if (!allowedOrigins.has(parsed.origin)) {
+    if (!this.getAllowedOrigins().has(parsed.origin)) {
       throw new AppError('Return URL origin is not allowed.', 422, 'INVALID_BILLING_URL');
     }
 
     return parsed.toString();
   }
 
-  private defaultSuccessUrl(): string {
-    return env.BILLING_DEFAULT_SUCCESS_URL ?? `${env.APP_URL}/main/billing?checkout=success`;
-  }
-
-  private defaultCancelUrl(): string {
-    return env.BILLING_DEFAULT_CANCEL_URL ?? `${env.APP_URL}/main/billing?checkout=cancelled`;
-  }
-
-  private defaultPortalReturnUrl(): string {
-    return `${env.APP_URL}/main/billing`;
-  }
-
-  private assertStripeEnabled(): void {
-    if (!isStripeConfigured()) {
-      throw new AppError(
-        'Billing is not enabled on this environment.',
-        503,
-        'BILLING_NOT_CONFIGURED',
-      );
+  private async withOperation<T>(
+    operation: string,
+    customerId: string | undefined,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const startedAt = Date.now();
+    try {
+      const result = await fn();
+      logger.info('Billing operation completed', {
+        ...createBillingLogBase(operation, startedAt),
+        customerId,
+      });
+      return result;
+    } catch (error) {
+      logger.warn('Billing operation failed', {
+        ...createBillingLogBase(operation, startedAt, error),
+        customerId,
+      });
+      throw error;
     }
   }
 
-  private billingPortalUrl(): string {
-    return `${env.APP_URL.replace(/\/$/, '')}/main/billing`;
-  }
-
-  private shouldSendBillingEmails(): boolean {
-    return env.BILLING_EMAIL_NOTIFICATIONS_ENABLED;
-  }
-
-  private async resolveBillingRecipientByStripeCustomerId(
-    stripeCustomerId: string | null,
-  ): Promise<{ email: string; name?: string | null } | null> {
-    if (!stripeCustomerId) return null;
-    const customer = await billingRepository.findCustomerByStripeCustomerId(stripeCustomerId);
-    if (!customer) return null;
-
-    const user = await userRepository.findById(customer.userId);
-    const canonicalEmail = user?.email?.toLowerCase().trim();
-    if (canonicalEmail) {
-      return {
-        email: canonicalEmail,
-        name: user?.fullName ?? customer.name ?? null,
-      };
-    }
-
-    if (customer.email) {
-      return {
-        email: customer.email.toLowerCase().trim(),
-        name: customer.name ?? null,
-      };
-    }
-
-    return null;
-  }
-
-  private async resolveBillingUserIdByStripeCustomerId(
-    stripeCustomerId: string | null,
-  ): Promise<Types.ObjectId | null> {
-    if (!stripeCustomerId) return null;
-    const customer = await billingRepository.findCustomerByStripeCustomerId(stripeCustomerId);
-    return customer?.userId ?? null;
-  }
-
-  private async createInAppBillingNotification(input: {
-    userId: Types.ObjectId | null;
-    eventId: string;
-    severity: 'info' | 'success' | 'warning' | 'error';
-    title: string;
-    message: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<void> {
-    if (!input.userId) return;
-    await notificationsService.createNotification(input.userId, {
-      kind: 'billing',
-      severity: input.severity,
-      title: input.title,
-      message: input.message,
-      action_url: this.billingPortalUrl(),
-      dedupe_key: `billing-event:${input.eventId}`,
-      metadata: input.metadata,
-    });
-  }
-
-  private subscriptionEntitlementState(subscription: IBillingSubscriptionDocument): {
-    status: BillingOverviewEntitlement['status'];
-    canAccessPaidFeatures: boolean;
-    issueCode: string | null;
-    issueMessage: string | null;
-  } {
-    if (subscription.status === 'trialing') {
-      return {
-        status: 'trialing',
-        canAccessPaidFeatures: true,
-        issueCode: null,
-        issueMessage: null,
-      };
-    }
-
-    if (subscription.status === 'active') {
-      return {
-        status: 'active',
-        canAccessPaidFeatures: true,
-        issueCode: null,
-        issueMessage: null,
-      };
-    }
-
-    if (subscription.status === 'past_due') {
-      return {
-        status: 'past_due_grace',
-        canAccessPaidFeatures: true,
-        issueCode: 'PAYMENT_PAST_DUE',
-        issueMessage: 'Payment is past due. Update the payment method to avoid losing access.',
-      };
-    }
-
-    if (subscription.status === 'incomplete') {
-      return {
-        status: 'payment_action_required',
-        canAccessPaidFeatures: false,
-        issueCode: 'PAYMENT_ACTION_REQUIRED',
-        issueMessage: 'Payment requires confirmation before this subscription becomes active.',
-      };
-    }
-
-    if (subscription.status === 'canceled' || subscription.status === 'incomplete_expired') {
-      return {
-        status: 'canceled',
-        canAccessPaidFeatures: false,
-        issueCode: null,
-        issueMessage: null,
-      };
-    }
-
-    return {
-      status: 'suspended',
-      canAccessPaidFeatures: false,
-      issueCode: `SUBSCRIPTION_${subscription.status.toUpperCase()}`,
-      issueMessage: 'Subscription access is suspended until the billing issue is resolved.',
-    };
-  }
-
-  private async upsertFreeEntitlement(userId: Types.ObjectId): Promise<IBillingEntitlementDocument> {
-    const freePlan = getBillingPlan('free') as BillingPlan;
-    return billingRepository.upsertEntitlement({
-      userId,
-      planId: freePlan.id,
-      status: 'none',
-      canAccessPaidFeatures: false,
-      creditsIncluded: freePlan.includedCredits,
-      features: freePlan.features,
-      issueCode: null,
-      issueMessage: null,
-      lastSyncedAt: new Date(),
-    });
-  }
-
-  private entitlementAccessEndsAt(entitlement: IBillingEntitlementDocument): Date | null {
-    return entitlement.accessEndsAt ?? entitlement.currentPeriodEnd ?? null;
-  }
-
-  private isEntitlementExpired(
-    entitlement: IBillingEntitlementDocument,
-    now: Date,
-  ): boolean {
-    const accessEndsAt = this.entitlementAccessEndsAt(entitlement);
-    if (!entitlement.canAccessPaidFeatures || !accessEndsAt) return false;
-    return accessEndsAt.getTime() <= now.getTime();
-  }
-
-  private isSubscriptionWindowActive(
-    subscription: IBillingSubscriptionDocument | null,
-    now: Date,
-  ): boolean {
-    if (!subscription) return false;
-    if (!CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
-      return false;
-    }
-    if (!subscription.currentPeriodEnd) return true;
-    return subscription.currentPeriodEnd.getTime() > now.getTime();
-  }
-
-  private async reconcileExpiredEntitlement(
-    userId: Types.ObjectId,
-    entitlement: IBillingEntitlementDocument,
-    activeSubscription: IBillingSubscriptionDocument | null,
-    now: Date,
-  ): Promise<IBillingEntitlementDocument> {
-    if (!this.isEntitlementExpired(entitlement, now)) {
-      return entitlement;
-    }
-
-    if (activeSubscription && this.isSubscriptionWindowActive(activeSubscription, now)) {
-      return this.syncEntitlementFromSubscription(
-        activeSubscription,
-        'entitlement_resynced_before_expiry',
-      );
-    }
-
-    const previousPlanId = normalizePlanId(entitlement.planId);
-    const expiredAt = this.entitlementAccessEndsAt(entitlement);
-    const freeEntitlement = await this.upsertFreeEntitlement(userId);
-
-    await billingRepository.recordBillingEvent({
-      userId,
-      action: 'entitlement_expired_to_free',
-      status: 'success',
-      metadata: {
-        previousPlanId,
-        previousStatus: entitlement.status,
-        expiredAt: expiredAt?.toISOString() ?? null,
-      },
-    });
-
-    await this.createInAppBillingNotification({
-      userId,
-      eventId: `entitlement-expired:${userId.toHexString()}:${expiredAt?.getTime() ?? now.getTime()}`,
-      severity: 'info',
-      title: 'Plan expired',
-      message: 'Your paid plan expired. Your account has moved to the Free plan.',
-      metadata: {
-        previousPlanId,
-        expiredAt: expiredAt?.toISOString() ?? null,
-      },
-    });
-
-    return freeEntitlement;
-  }
-
-  private async syncEntitlementFromSubscription(
-    subscription: IBillingSubscriptionDocument,
-    action: string,
-  ): Promise<IBillingEntitlementDocument> {
-    const planId = normalizePlanId(subscription.planId);
-    const plan = getBillingPlan(planId) ?? (getBillingPlan('free') as BillingPlan);
-    const state = this.subscriptionEntitlementState(subscription);
-
-    const entitlement = await billingRepository.upsertEntitlement({
-      userId: subscription.userId,
-      planId,
-      status: state.status,
-      canAccessPaidFeatures: state.canAccessPaidFeatures,
-      creditsIncluded: plan.includedCredits,
-      features: plan.features,
-      stripeSubscriptionId: subscription.stripeSubscriptionId,
-      currentPeriodStart: subscription.currentPeriodStart,
-      currentPeriodEnd: subscription.currentPeriodEnd,
-      accessEndsAt: subscription.currentPeriodEnd,
-      issueCode: state.issueCode,
-      issueMessage: state.issueMessage,
-      lastSyncedAt: new Date(),
-    });
-
-    await billingRepository.recordBillingEvent({
-      userId: subscription.userId,
-      objectId: subscription.stripeSubscriptionId,
-      action,
-      status: 'success',
-      metadata: {
-        planId,
-        subscriptionStatus: subscription.status,
-        entitlementStatus: state.status,
-        canAccessPaidFeatures: state.canAccessPaidFeatures,
-      },
-    });
-
-    return entitlement;
-  }
-
-  private async getOrCreateCustomer(
-    userId: Types.ObjectId,
-  ): Promise<IBillingCustomerDocument> {
-    const existing = await billingRepository.findCustomerByUserId(userId);
-    if (existing) return existing;
-
-    this.assertStripeEnabled();
-    const stripe = getStripeClient();
-    const user = await userRepository.findById(userId);
-    if (!user) {
-      throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
-    }
-
-    const userIdString = userId.toHexString();
-    const customer = await stripe.customers.create(
-      {
-        email: user.email,
-        name: user.fullName,
-        metadata: {
-          userId: userIdString,
-        },
-      },
-      {
-        idempotencyKey: `billing:customer:create:${userIdString}`,
-      },
+  private async runIdempotent<T>(
+    key: string,
+    operation: string,
+    requestPayload: JsonObject,
+    executor: () => Promise<OperationOutcome<T>>,
+    responseMapper: (response: JsonObject) => T,
+  ): Promise<T> {
+    const record: IdempotencyStartResult = await billingRepository.startIdempotency(
+      key,
+      operation,
+      hashPayload(requestPayload),
+      new Date(Date.now() + 24 * 60 * 60 * 1000),
     );
 
-    return billingRepository.upsertCustomer({
-      userId,
-      stripeCustomerId: customer.id,
+    if (record.existing) {
+      if (record.record.status === 'SUCCEEDED' && record.record.response) {
+        return responseMapper(toJsonObject(record.record.response) ?? {});
+      }
+      if (record.record.status === 'FAILED') {
+        throw new AppError('Previous idempotent billing operation failed.', 409, record.record.errorCode ?? 'IDEMPOTENT_OPERATION_FAILED');
+      }
+      throw new IdempotencyConflictError('Billing operation is already in progress.', { key });
+    }
+
+    try {
+      const result = await executor();
+      await billingRepository.completeIdempotency(key, 'SUCCEEDED', result.response);
+      return result.value;
+    } catch (error) {
+      await billingRepository.completeIdempotency(
+        key,
+        'FAILED',
+        undefined,
+        error instanceof AppError ? error.code : 'BILLING_OPERATION_FAILED',
+      );
+      throw error;
+    }
+  }
+
+  private async getOrCreateCustomer(userId: Types.ObjectId): Promise<IBillingCustomerDocument> {
+    const existing = await billingRepository.findCustomerByUserId(userId);
+    if (existing?.providerCustomerId) return existing;
+    if (!this.billingEnabled()) {
+      throw new AppError('Billing is not configured on the server.', 503, 'BILLING_NOT_CONFIGURED');
+    }
+
+    const user = await userRepository.findById(userId);
+    if (!user) throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+    const gatewayCustomer = await this.gateway.createCustomer({
+      userId: userId.toString(),
       email: user.email,
       name: user.fullName,
     });
-  }
 
-  private async syncCustomerFromStripe(
-    userId: Types.ObjectId,
-    stripeCustomerId: string,
-    fallbackEmail?: string,
-    fallbackName?: string,
-  ): Promise<IBillingCustomerDocument | null> {
-    this.assertStripeEnabled();
-    const stripe = getStripeClient();
-
-    const customer = await stripe.customers.retrieve(stripeCustomerId, {
-      expand: ['invoice_settings.default_payment_method'],
-    });
-
-    if ('deleted' in customer && customer.deleted) {
-      return null;
-    }
-
-    const paymentMethod = mapCardPaymentMethod(
-      customer.invoice_settings.default_payment_method,
-    );
-
-    const email =
-      customer.email ??
-      fallbackEmail ??
-      `${stripeCustomerId}@nirex.local.invalid`;
-
-    const name = customer.name ?? fallbackName;
-
-    return billingRepository.upsertCustomer({
-      userId,
-      stripeCustomerId: customer.id,
-      email,
-      name,
-      defaultPaymentMethod: paymentMethod,
-    });
-  }
-
-  private async syncSubscriptionFromStripe(
-    subscription: Stripe.Subscription,
-  ): Promise<IBillingSubscriptionDocument | null> {
-    const stripeCustomerId = getStripeCustomerId(subscription.customer);
-    if (!stripeCustomerId) return null;
-
-    let customerDoc = await billingRepository.findCustomerByStripeCustomerId(
-      stripeCustomerId,
-    );
-
-    if (!customerDoc) {
-      const metadataUserId = subscription.metadata?.['userId'];
-      if (!metadataUserId || !Types.ObjectId.isValid(metadataUserId)) {
-        logger.warn('Skipping subscription sync without customer mapping.', {
-          subscriptionId: subscription.id,
-          stripeCustomerId,
-        });
-        return null;
-      }
-
-      const userId = new Types.ObjectId(metadataUserId);
-      const user = await userRepository.findById(userId);
-      customerDoc = await this.syncCustomerFromStripe(
-        userId,
-        stripeCustomerId,
-        user?.email,
-        user?.fullName,
+    return billingRepository.withTransaction(async (session) => {
+      const customer = await billingRepository.upsertCustomer(
+        {
+          userId,
+          providerCustomerId: gatewayCustomer.id,
+        },
+        session,
       );
-      if (!customerDoc) return null;
-    }
-
-    const primaryPrice = subscription.items.data[0]?.price;
-    const stripePriceId = primaryPrice?.id;
-    const resolvedPlan = resolvePlanFromStripePriceId(stripePriceId);
-
-    const recurringInterval = primaryPrice?.recurring?.interval;
-    const inferredCycle: BillingCycle =
-      recurringInterval === 'year' ? 'year' : 'month';
-
-    const billingCycle = resolvedPlan?.billingCycle ?? inferredCycle;
-    const planId = resolvedPlan?.planId ?? 'custom';
-    const amountCents = primaryPrice?.unit_amount ?? 0;
-    const currency = (primaryPrice?.currency ?? subscription.currency ?? 'usd').toLowerCase();
-    const latestInvoiceId = getStripeResourceId(subscription.latest_invoice);
-    const period = resolveSubscriptionPeriod(subscription);
-
-    const synced = await billingRepository.upsertSubscription({
-      userId: customerDoc.userId,
-      stripeCustomerId,
-      stripeSubscriptionId: subscription.id,
-      stripePriceId: stripePriceId ?? undefined,
-      planId,
-      billingCycle,
-      status: subscription.status,
-      currency,
-      amountCents,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-      currentPeriodStart: period.start,
-      currentPeriodEnd: period.end,
-      canceledAt: toDateFromUnix(subscription.canceled_at),
-      endedAt: toDateFromUnix(subscription.ended_at),
-      trialStart: toDateFromUnix(subscription.trial_start),
-      trialEnd: toDateFromUnix(subscription.trial_end),
-      latestInvoiceId: latestInvoiceId ?? undefined,
-    });
-
-    await this.syncEntitlementFromSubscription(synced, 'subscription_synced');
-    return synced;
-  }
-
-  private async syncInvoiceFromStripe(
-    invoice: Stripe.Invoice,
-    options?: { strictCustomerMapping?: boolean },
-  ): Promise<IBillingInvoiceDocument | null> {
-    if (!invoice.id) {
-      logger.warn('Skipping invoice sync because Stripe invoice id is missing.');
-      return null;
-    }
-
-    const stripeCustomerId = getStripeCustomerId(invoice.customer);
-    if (!stripeCustomerId) return null;
-
-    const customerDoc = await billingRepository.findCustomerByStripeCustomerId(
-      stripeCustomerId,
-    );
-
-    let resolvedCustomer = customerDoc;
-    if (!resolvedCustomer && isStripeConfigured()) {
-      const stripe = getStripeClient();
-      let mappedUserId: Types.ObjectId | null = null;
-
-      try {
-        const stripeCustomer = await stripe.customers.retrieve(stripeCustomerId);
-        const metadataUserId =
-          !('deleted' in stripeCustomer && stripeCustomer.deleted)
-            ? stripeCustomer.metadata?.['userId']
-            : undefined;
-        if (
-          metadataUserId &&
-          Types.ObjectId.isValid(metadataUserId)
-        ) {
-          mappedUserId = new Types.ObjectId(metadataUserId);
-        }
-      } catch (error) {
-        logger.warn('Failed to retrieve Stripe customer while syncing invoice.', {
-          invoiceId: invoice.id,
-          stripeCustomerId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-
-      if (!mappedUserId) {
-        const stripeSubscriptionId = getStripeResourceId(
-          invoice.parent?.subscription_details?.subscription,
-        );
-        if (stripeSubscriptionId) {
-          try {
-            const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-            const metadataUserId = subscription.metadata?.['userId'];
-            if (metadataUserId && Types.ObjectId.isValid(metadataUserId)) {
-              mappedUserId = new Types.ObjectId(metadataUserId);
-            }
-          } catch (error) {
-            logger.warn('Failed to retrieve Stripe subscription while syncing invoice.', {
-              invoiceId: invoice.id,
-              stripeCustomerId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      }
-
-      if (mappedUserId) {
-        const user = await userRepository.findById(mappedUserId);
-        resolvedCustomer = await this.syncCustomerFromStripe(
-          mappedUserId,
-          stripeCustomerId,
-          user?.email,
-          user?.fullName,
-        );
-      }
-    }
-
-    if (!resolvedCustomer) {
-      logger.warn('Skipping invoice sync without customer mapping.', {
-        invoiceId: invoice.id,
-        stripeCustomerId,
-      });
-      if (options?.strictCustomerMapping) {
-        throw new AppError(
-          'Unable to map invoice to a billing customer.',
-          409,
-          'BILLING_CUSTOMER_MAPPING_NOT_FOUND',
-        );
-      }
-      return null;
-    }
-
-    const firstLine = invoice.lines.data[0];
-    const periodStart = toDateFromUnix(firstLine?.period?.start);
-    const periodEnd = toDateFromUnix(firstLine?.period?.end);
-    const paidAt = toDateFromUnix(invoice.status_transitions.paid_at);
-    const dueDate = toDateFromUnix(invoice.due_date);
-    const stripeSubscriptionId = getStripeResourceId(
-      invoice.parent?.subscription_details?.subscription,
-    );
-    const taxCents =
-      invoice.total_taxes?.reduce(
-        (sum, taxItem) => sum + (taxItem.amount ?? 0),
-        0,
-      ) ?? 0;
-
-    return billingRepository.upsertInvoice({
-      userId: resolvedCustomer.userId,
-      stripeCustomerId,
-      stripeInvoiceId: invoice.id,
-      stripeSubscriptionId: stripeSubscriptionId ?? undefined,
-      number: invoice.number ?? undefined,
-      status: statusFromStripeInvoice(invoice.status),
-      currency: (invoice.currency ?? 'usd').toLowerCase(),
-      subtotalCents: invoice.subtotal ?? 0,
-      taxCents,
-      totalCents: invoice.total ?? 0,
-      amountDueCents: invoice.amount_due ?? 0,
-      amountPaidCents: invoice.amount_paid ?? 0,
-      amountRemainingCents: invoice.amount_remaining ?? 0,
-      hostedInvoiceUrl: invoice.hosted_invoice_url ?? undefined,
-      invoicePdfUrl: invoice.invoice_pdf ?? undefined,
-      dueDate,
-      paidAt,
-      periodStart,
-      periodEnd,
-      stripeCreatedAt: toDateFromUnix(invoice.created) ?? new Date(),
+      await this.auditService.record(
+        {
+          userId,
+          customerId: customer._id,
+          action: 'customer.created',
+          outcome: 'SUCCESS',
+          after: { providerCustomerId: gatewayCustomer.id },
+        },
+        { actorType: 'SYSTEM', actorId: 'BillingService' },
+        session,
+      );
+      return customer;
     });
   }
 
-  private async listSubscriptionsForCustomer(
-    stripe: Stripe,
-    stripeCustomerId: string,
-    maxItems: number,
-  ): Promise<Stripe.Subscription[]> {
-    const data: Stripe.Subscription[] = [];
-    let startingAfter: string | undefined;
-
-    while (data.length < maxItems) {
-      const page = await stripe.subscriptions.list({
-        customer: stripeCustomerId,
-        status: 'all',
-        limit: Math.min(100, maxItems - data.length),
-        starting_after: startingAfter,
-      });
-      data.push(...page.data);
-      if (!page.has_more || page.data.length === 0) break;
-      startingAfter = page.data[page.data.length - 1]?.id;
+  private async resolveEligibleTrialDays(userId: Types.ObjectId, plan: BillingPlan): Promise<number> {
+    if (plan.trialDays <= 0 || plan.id === 'free' || plan.id === 'custom') {
+      return 0;
     }
 
-    if (data.length >= maxItems) {
-      logger.warn('Subscription sync truncated at configured maximum.', {
-        stripeCustomerId,
-        maxItems,
-      });
-    }
-
-    return data;
+    const hasUsedTrial = await billingRepository.hasUsedTrialForPlan(userId, plan.id);
+    return hasUsedTrial ? 0 : plan.trialDays;
   }
 
-  private async listInvoicesForCustomer(
-    stripe: Stripe,
-    stripeCustomerId: string,
-    maxItems: number,
-  ): Promise<Stripe.Invoice[]> {
-    const data: Stripe.Invoice[] = [];
-    let startingAfter: string | undefined;
-
-    while (data.length < maxItems) {
-      const page = await stripe.invoices.list({
-        customer: stripeCustomerId,
-        limit: Math.min(100, maxItems - data.length),
-        starting_after: startingAfter,
-      });
-      data.push(...page.data);
-      if (!page.has_more || page.data.length === 0) break;
-      startingAfter = page.data[page.data.length - 1]?.id;
-    }
-
-    if (data.length >= maxItems) {
-      logger.warn('Invoice sync truncated at configured maximum.', {
-        stripeCustomerId,
-        maxItems,
-      });
-    }
-
-    return data;
+  private async getPlansForUser(userId: Types.ObjectId): Promise<BillingPlan[]> {
+    const plans = getBillingPlans();
+    const resolved = await Promise.all(
+      plans.map(async (plan) => ({
+        ...plan,
+        trialDays: await this.resolveEligibleTrialDays(userId, plan),
+      })),
+    );
+    return resolved;
   }
 
-  private async refreshBillingState(
+  private shouldSyncCustomerFromProvider(
+    customer: IBillingCustomerDocument,
+    options: { force?: boolean },
+  ): boolean {
+    if (!customer.providerCustomerId || !this.billingEnabled()) {
+      return false;
+    }
+    if (options.force) {
+      return true;
+    }
+    const minIntervalMs = Math.max(0, env.BILLING_SYNC_MIN_INTERVAL_SECONDS) * 1000;
+    const lastSyncMs = customer.lastProviderSyncAt?.getTime() ?? 0;
+    return Date.now() - lastSyncMs >= minIntervalMs;
+  }
+
+  private async syncCustomerFromProvider(
     userId: Types.ObjectId,
-    options?: { force?: boolean },
+    customer: IBillingCustomerDocument,
   ): Promise<void> {
-    if (!isStripeConfigured()) return;
-    const customer = await billingRepository.findCustomerByUserId(userId);
-    if (!customer) return;
-    if (!options?.force && customer.lastStripeSyncAt) {
-      const elapsed = Date.now() - customer.lastStripeSyncAt.getTime();
-      if (elapsed < this.billingSyncMinIntervalMs()) {
-        return;
-      }
+    if (!customer.providerCustomerId) {
+      return;
     }
 
-    const stripe = getStripeClient();
-    await this.syncCustomerFromStripe(
-      userId,
-      customer.stripeCustomerId,
-      customer.email,
-      customer.name,
-    );
-
-    const [subscriptions, invoices] = await Promise.all([
-      this.listSubscriptionsForCustomer(
-        stripe,
-        customer.stripeCustomerId,
-        this.stripeSubscriptionSyncLimit,
-      ),
-      this.listInvoicesForCustomer(
-        stripe,
-        customer.stripeCustomerId,
-        this.stripeInvoiceSyncLimit,
-      ),
+    const [
+      defaultPaymentMethodResult,
+      paymentMethodsResult,
+      subscriptionsResult,
+      invoicesResult,
+    ] = await Promise.allSettled([
+      this.gateway.getCustomerDefaultPaymentMethodId(customer.providerCustomerId),
+      this.gateway.listCustomerPaymentMethods(customer.providerCustomerId),
+      this.gateway.listCustomerSubscriptions(customer.providerCustomerId),
+      this.gateway.listCustomerInvoices(customer.providerCustomerId, 100),
     ]);
 
-    await Promise.all(
-      subscriptions.map((subscription) =>
-        this.syncSubscriptionFromStripe(subscription),
-      ),
+    const syncFailures: string[] = [];
+    const readSyncResult = <T>(
+      result: PromiseSettledResult<T>,
+      operation: string,
+      fallback: T,
+    ): T => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      }
+
+      syncFailures.push(operation);
+      logger.warn('Billing provider sync segment failed; continuing with available data.', {
+        service: 'billing',
+        operation: `syncCustomerFromProvider.${operation}`,
+        userId: userId.toString(),
+        customerId: customer._id.toString(),
+        providerCustomerId: customer.providerCustomerId,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      });
+      return fallback;
+    };
+
+    const defaultPaymentMethodId = readSyncResult<string | null>(
+      defaultPaymentMethodResult,
+      'getCustomerDefaultPaymentMethodId',
+      null,
+    );
+    const gatewayPaymentMethods = readSyncResult<GatewayPaymentMethod[]>(
+      paymentMethodsResult,
+      'listCustomerPaymentMethods',
+      [],
+    );
+    const gatewaySubscriptions = readSyncResult<GatewaySubscription[]>(
+      subscriptionsResult,
+      'listCustomerSubscriptions',
+      [],
+    );
+    const gatewayInvoices = readSyncResult<GatewayInvoice[]>(
+      invoicesResult,
+      'listCustomerInvoices',
+      [],
     );
 
-    await Promise.all(
-      invoices.map((invoice) => this.syncInvoiceFromStripe(invoice)),
+    if (syncFailures.length === 4) {
+      throw new GatewayUnavailableError('Billing provider sync failed.');
+    }
+
+    const sortedSubscriptions = [...gatewaySubscriptions].sort(
+      (a, b) => (b.currentPeriodEnd?.getTime() ?? 0) - (a.currentPeriodEnd?.getTime() ?? 0),
     );
+    const targetSubscription =
+      sortedSubscriptions.find((subscription) =>
+        ACTIVE_SUBSCRIPTION_STATUSES.includes(mapProviderSubscriptionStatus(subscription.status)),
+      ) ?? sortedSubscriptions[0] ?? null;
 
-    await billingRepository.markCustomerStripeSynced(userId);
-  }
+    await billingRepository.withTransaction(async (session) => {
+      let firstMethodId: Types.ObjectId | null = null;
+      let resolvedDefaultMethodId: Types.ObjectId | null = null;
 
-  private mapPaymentMethod(
-    paymentMethod: PaymentMethodSnapshot | undefined,
-  ): BillingOverviewPaymentMethod | null {
-    if (!paymentMethod) return null;
-    return {
-      brand: paymentMethod.brand,
-      last4: paymentMethod.last4,
-      expMonth: paymentMethod.expMonth,
-      expYear: paymentMethod.expYear,
-      funding: paymentMethod.funding ?? null,
-    };
-  }
+      for (const method of gatewayPaymentMethods) {
+        const savedMethod = await billingRepository.upsertPaymentMethod(
+          {
+            customerId: customer._id,
+            userId,
+            providerPaymentMethodId: method.id,
+            type: method.type,
+            brand: method.brand,
+            last4: method.last4,
+            expMonth: method.expMonth,
+            expYear: method.expYear,
+            funding: method.funding,
+            isDefault: method.id === defaultPaymentMethodId,
+          },
+          session,
+        );
 
-  private mapInvoice(doc: IBillingInvoiceDocument): BillingInvoiceItem {
-    return {
-      invoiceId: doc.stripeInvoiceId,
-      number: doc.number ?? null,
-      status: doc.status,
-      currency: doc.currency,
-      subtotalCents: doc.subtotalCents,
-      taxCents: doc.taxCents,
-      totalCents: doc.totalCents,
-      amountDueCents: doc.amountDueCents,
-      amountPaidCents: doc.amountPaidCents,
-      amountRemainingCents: doc.amountRemainingCents,
-      paidAt: toIsoString(doc.paidAt),
-      dueDate: toIsoString(doc.dueDate),
-      periodStart: toIsoString(doc.periodStart),
-      periodEnd: toIsoString(doc.periodEnd),
-      hostedInvoiceUrl: doc.hostedInvoiceUrl ?? null,
-      invoicePdfUrl: doc.invoicePdfUrl ?? null,
-      createdAt: doc.stripeCreatedAt.toISOString(),
-    };
-  }
+        if (!firstMethodId) {
+          firstMethodId = savedMethod._id;
+        }
+        if (method.id === defaultPaymentMethodId) {
+          resolvedDefaultMethodId = savedMethod._id;
+        }
+      }
 
-  private mapSubscriptionOverview(
-    subscription: IBillingSubscriptionDocument | null,
-  ): BillingOverviewSubscription {
-    if (!subscription) {
-      return {
-        subscriptionId: null,
-        status: 'none',
-        cancelAtPeriodEnd: false,
-        currentPeriodStart: null,
-        currentPeriodEnd: null,
-      };
-    }
+      if (!resolvedDefaultMethodId && firstMethodId) {
+        resolvedDefaultMethodId = firstMethodId;
+      }
+      if (resolvedDefaultMethodId) {
+        await billingRepository.setDefaultPaymentMethod(customer._id, resolvedDefaultMethodId, session);
+      }
 
-    return {
-      subscriptionId: subscription.stripeSubscriptionId,
-      status: subscription.status,
-      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
-      currentPeriodStart: toIsoString(subscription.currentPeriodStart),
-      currentPeriodEnd: toIsoString(subscription.currentPeriodEnd),
-    };
-  }
+      let syncedSubscription: IBillingSubscriptionDocument | null = null;
+      if (targetSubscription) {
+        const existing = await billingRepository.findSubscriptionByProviderId(targetSubscription.id, session);
+        const mappedPlan = resolvePlanFromStripePriceId(targetSubscription.providerPriceId);
+        const planCode = mappedPlan?.planId ?? existing?.planCode ?? 'custom';
+        const billingCycle = mappedPlan?.billingCycle ?? existing?.billingCycle ?? 'month';
+        const planPrice = mappedPlan ? getPlanPrice(mappedPlan.planId, mappedPlan.billingCycle) : null;
 
-  private mapEntitlementOverview(
-    entitlement: IBillingEntitlementDocument | null,
-  ): BillingOverviewEntitlement {
-    if (!entitlement) {
-      return {
-        status: 'none',
-        planId: 'free',
-        canAccessPaidFeatures: false,
-        isBillingIssue: false,
-        issueCode: null,
-        issueMessage: null,
-        accessEndsAt: null,
-        lastSyncedAt: null,
-      };
-    }
+        syncedSubscription = await billingRepository.upsertSubscription(
+          {
+            customerId: customer._id,
+            userId,
+            planCode,
+            billingCycle,
+            status: mapProviderSubscriptionStatus(targetSubscription.status),
+            providerSubscriptionId: targetSubscription.id,
+            providerPriceId: targetSubscription.providerPriceId,
+            currency: planPrice?.currency ?? targetSubscription.currency ?? existing?.currency ?? DEFAULT_BILLING_CURRENCY,
+            amountMinor: planPrice?.amountMinor ?? targetSubscription.amountMinor ?? existing?.amountMinor ?? 0,
+            cancelAtPeriodEnd: targetSubscription.cancelAtPeriodEnd,
+            currentPeriodStart: targetSubscription.currentPeriodStart,
+            currentPeriodEnd: targetSubscription.currentPeriodEnd,
+            trialStart: targetSubscription.trialStart,
+            trialEnd: targetSubscription.trialEnd,
+            metadata: { source: 'provider.sync' },
+          },
+          session,
+        );
+      }
 
-    return {
-      status: entitlement.status,
-      planId: normalizePlanId(entitlement.planId),
-      canAccessPaidFeatures: entitlement.canAccessPaidFeatures,
-      isBillingIssue: Boolean(entitlement.issueCode),
-      issueCode: entitlement.issueCode ?? null,
-      issueMessage: entitlement.issueMessage ?? null,
-      accessEndsAt: toIsoString(entitlement.accessEndsAt),
-      lastSyncedAt: entitlement.lastSyncedAt.toISOString(),
-    };
-  }
+      for (const invoice of gatewayInvoices) {
+        let invoiceSubscriptionId: Types.ObjectId | undefined;
+        if (invoice.providerSubscriptionId) {
+          if (syncedSubscription?.providerSubscriptionId === invoice.providerSubscriptionId) {
+            invoiceSubscriptionId = syncedSubscription._id;
+          } else {
+            const matching = await billingRepository.findSubscriptionByProviderId(invoice.providerSubscriptionId, session);
+            invoiceSubscriptionId = matching?._id;
+          }
+        }
 
-  private calculateYearlySavings(
-    plan: BillingPlan,
-    subscription: IBillingSubscriptionDocument | null,
-  ): number {
-    if (!subscription || subscription.billingCycle !== 'year') return 0;
-    const monthly = plan.prices.month?.amountCents;
-    if (!monthly || monthly <= 0) return 0;
+        await billingRepository.upsertInvoice(
+          {
+            customerId: customer._id,
+            userId,
+            subscriptionId: invoiceSubscriptionId,
+            providerInvoiceId: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            description: invoice.description,
+            status: invoice.status,
+            currency: invoice.currency,
+            subtotalMinor: invoice.subtotalMinor,
+            taxMinor: invoice.taxMinor,
+            discountMinor: invoice.discountMinor,
+            totalMinor: invoice.totalMinor,
+            amountDueMinor: invoice.amountDueMinor,
+            amountPaidMinor: invoice.amountPaidMinor,
+            amountRemainingMinor: invoice.amountRemainingMinor,
+            hostedInvoiceUrl: invoice.hostedInvoiceUrl,
+            invoicePdfUrl: invoice.invoicePdfUrl,
+            dueAt: invoice.dueAt,
+            paidAt: invoice.paidAt,
+            periodStart: invoice.periodStart,
+            periodEnd: invoice.periodEnd,
+            providerCreatedAt: invoice.createdAt,
+          },
+          session,
+        );
+      }
 
-    const yearly = plan.prices.year?.amountCents;
-    if (!yearly || yearly <= 0) return 0;
-
-    const planMonthlyCurrency = plan.prices.month?.currency?.toLowerCase();
-    const planYearlyCurrency = plan.prices.year?.currency?.toLowerCase();
-    const subscriptionCurrency = subscription.currency.toLowerCase();
-    if (planMonthlyCurrency && planMonthlyCurrency !== subscriptionCurrency) return 0;
-    if (planYearlyCurrency && planYearlyCurrency !== subscriptionCurrency) return 0;
-
-    const savings = monthly * 12 - yearly;
-    return savings > 0 ? savings : 0;
-  }
-
-  private async resolveUsageData(
-    userId: Types.ObjectId,
-    currentPlan: BillingPlan,
-  ): Promise<{
-    creditsUsed: number | null;
-    creditsIncluded: number | null;
-    creditsUsagePct: number | null;
-  }> {
-    try {
-      const usageOverview = await usageService.getOverview(userId, 'month_to_date');
-      const creditsUsed = Math.round(usageOverview.summary.credits_used);
-      const includedCredits = currentPlan.includedCredits;
-
-      return {
-        creditsUsed,
-        creditsIncluded: includedCredits,
-        creditsUsagePct:
-          includedCredits && includedCredits > 0
-            ? Number(((creditsUsed / includedCredits) * 100).toFixed(2))
-            : null,
-      };
-    } catch {
-      return {
-        creditsUsed: null,
-        creditsIncluded: currentPlan.includedCredits,
-        creditsUsagePct: null,
-      };
-    }
+      if (syncFailures.length === 0) {
+        await billingRepository.markCustomerSynced(customer._id, new Date(), session);
+      }
+      return { ok: true };
+    });
   }
 
   async getBillingOverview(
     userId: Types.ObjectId,
-    options?: { force?: boolean },
+    options: { force?: boolean } = {},
   ): Promise<BillingOverviewResponse> {
-    const plans = getBillingPlans();
-    const now = new Date();
+    return this.withOperation('getBillingOverview', undefined, async () => {
+      const customer = await billingRepository.findCustomerByUserId(userId);
 
-    if (!isStripeConfigured()) {
-      const freePlan = getBillingPlan('free') as BillingPlan;
+      if (customer && this.shouldSyncCustomerFromProvider(customer, options)) {
+        try {
+          await this.syncCustomerFromProvider(userId, customer);
+        } catch (error) {
+          logger.warn('Billing provider sync failed; using local state.', {
+            service: 'billing',
+            operation: 'getBillingOverview.syncCustomerFromProvider',
+            userId: userId.toString(),
+            customerId: customer._id.toString(),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const [subscription, paymentMethods, invoices, totalPaidYtdMinor] = await Promise.all([
+        billingRepository.findLatestSubscriptionByUserId(userId, OVERVIEW_SUBSCRIPTION_STATUSES),
+        billingRepository.listPaymentMethods(userId),
+        this.invoiceService.listForUser(userId, 10),
+        billingRepository.getPaidInvoicesYtdTotalMinor(userId, new Date().getUTCFullYear()),
+      ]);
+      const plans = await this.getPlansForUser(userId);
+
+      const planId = subscription?.planCode ?? 'free';
+      const currentPlan = plans.find((plan) => plan.id === planId) ?? plans.find((plan) => plan.id === 'free') ?? plans[0];
+      if (!currentPlan) {
+        throw new AppError('Billing plan catalog is empty.', 500, 'BILLING_CATALOG_EMPTY');
+      }
+
+      const price =
+        getPlanPrice(planId, subscription?.billingCycle ?? 'month') ??
+        getPlanPrice(planId, 'month') ??
+        currentPlan.prices.month;
+      const defaultPaymentMethod = paymentMethods.find((method) => method.isDefault) ?? paymentMethods[0] ?? null;
+      const periodEnd = subscription?.currentPeriodEnd ?? null;
+
       return {
-        billingEnabled: false,
-        customerId: null,
-        currentPlan: freePlan,
-        subscription: this.mapSubscriptionOverview(null),
-        entitlement: {
-          status: 'none',
-          planId: 'free',
-          canAccessPaidFeatures: false,
-          isBillingIssue: false,
-          issueCode: null,
-          issueMessage: null,
-          accessEndsAt: null,
-          lastSyncedAt: null,
-        },
-        paymentMethod: null,
+        billingEnabled: this.billingEnabled(),
+        adminAccess: env.BILLING_ADMIN_USER_IDS?.includes(userId.toString()) ?? false,
+        customerId: customer?._id.toString() ?? null,
+        providerCustomerId: customer?.providerCustomerId ?? null,
+        currentPlan: mapPlan(currentPlan),
+        subscription: mapOverviewSubscription(subscription),
+        entitlement: deriveEntitlement(subscription, planId),
+        paymentMethod: defaultPaymentMethod ? mapOverviewPaymentMethod(defaultPaymentMethod) : null,
+        paymentMethods: paymentMethods.map(mapPaymentMethod),
         usage: {
           creditsUsed: null,
-          creditsIncluded: freePlan.includedCredits,
+          creditsIncluded: currentPlan.includedCredits,
           creditsUsagePct: null,
         },
         kpis: {
-          currentPlanAmountCents: 0,
-          currency: 'usd',
-          totalPaidYtdCents: 0,
-          periodEndDate: null,
-          nextBillingDate: null,
-          yearlySavingsCents: 0,
+          currentPlanAmountMinor: price?.amountMinor ?? 0,
+          currentPlanAmountCents: price?.amountMinor ?? 0,
+          currency: price?.currency ?? DEFAULT_BILLING_CURRENCY,
+          totalPaidYtdMinor,
+          totalPaidYtdCents: totalPaidYtdMinor,
+          periodEndDate: iso(periodEnd),
+          nextBillingDate: iso(periodEnd),
+          nextRenewalAmountMinor: subscription?.amountMinor ?? price?.amountMinor ?? 0,
+          yearlySavingsMinor:
+            Math.max(
+              0,
+              (getPlanPrice(planId, 'month')?.amountMinor ?? 0) * 12 -
+              (getPlanPrice(planId, 'year')?.amountMinor ?? 0),
+            ),
+          yearlySavingsCents:
+            Math.max(
+              0,
+              (getPlanPrice(planId, 'month')?.amountMinor ?? 0) * 12 -
+              (getPlanPrice(planId, 'year')?.amountMinor ?? 0),
+            ),
+          lastFetchedAt: new Date().toISOString(),
         },
-        invoices: [],
+        invoices: invoices.items,
         plans,
       };
-    }
-
-    try {
-      await this.refreshBillingState(userId, options);
-    } catch (error) {
-      logger.warn('Failed to refresh billing state. Using cached DB snapshot.', {
-        userId: userId.toHexString(),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const [customer, activeSubscription] = await Promise.all([
-      billingRepository.findCustomerByUserId(userId),
-      billingRepository.findLatestSubscriptionByUserId(
-        userId,
-        ACTIVE_SUBSCRIPTION_STATUSES,
-      ),
-    ]);
-
-    let entitlement = await billingRepository.findEntitlementByUserId(userId);
-    if (!entitlement) {
-      entitlement = activeSubscription
-        ? await this.syncEntitlementFromSubscription(activeSubscription, 'entitlement_backfilled')
-        : await this.upsertFreeEntitlement(userId);
-    }
-
-    entitlement = await this.reconcileExpiredEntitlement(
-      userId,
-      entitlement,
-      activeSubscription,
-      now,
-    );
-
-    const currentPlanId = entitlement.canAccessPaidFeatures
-      ? normalizePlanId(entitlement.planId)
-      : normalizePlanId(activeSubscription?.planId);
-    const currentPlan = getBillingPlan(currentPlanId) ?? (getBillingPlan('free') as BillingPlan);
-    const usage = await this.resolveUsageData(userId, currentPlan);
-    const [invoices, totalPaidYtdCents] = await Promise.all([
-      billingRepository.listInvoicesByUserId(userId, 20),
-      billingRepository.getPaidInvoicesYtdTotalCents(userId, now.getUTCFullYear()),
-    ]);
-
-    let inferredEntitlementCycle: BillingCycle | null = null;
-    if (
-      entitlement.canAccessPaidFeatures &&
-      entitlement.currentPeriodStart &&
-      entitlement.currentPeriodEnd
-    ) {
-      inferredEntitlementCycle =
-        entitlement.currentPeriodEnd.getTime() -
-          entitlement.currentPeriodStart.getTime() >
-          32 * 24 * 60 * 60 * 1000
-          ? 'year'
-          : 'month';
-    }
-
-    const resolvedBillingCycle = activeSubscription?.billingCycle ?? inferredEntitlementCycle;
-
-    const currentPlanAmountCents =
-      activeSubscription?.amountCents ??
-      (resolvedBillingCycle === 'year' ? currentPlan.prices.year?.amountCents : currentPlan.prices.month?.amountCents) ??
-      0;
-
-    const periodEndDate = toIsoString(
-      activeSubscription?.currentPeriodEnd ??
-      (entitlement.canAccessPaidFeatures
-        ? entitlement.accessEndsAt ?? entitlement.currentPeriodEnd
-        : undefined),
-    );
-
-    return {
-      billingEnabled: true,
-      customerId: customer?.stripeCustomerId ?? null,
-      currentPlan,
-      subscription: this.mapSubscriptionOverview(activeSubscription),
-      entitlement: this.mapEntitlementOverview(entitlement),
-      paymentMethod: this.mapPaymentMethod(customer?.defaultPaymentMethod),
-      usage,
-      kpis: {
-        currentPlanAmountCents,
-        currency: activeSubscription?.currency ?? currentPlan.prices.month?.currency ?? 'usd',
-        totalPaidYtdCents,
-        periodEndDate,
-        nextBillingDate: activeSubscription ? toIsoString(activeSubscription.currentPeriodEnd) : null,
-        yearlySavingsCents: this.calculateYearlySavings(currentPlan, activeSubscription),
-      },
-      invoices: invoices.map((invoice) => this.mapInvoice(invoice)),
-      plans,
-    };
+    });
   }
 
-  async listInvoices(userId: Types.ObjectId, limit: number): Promise<BillingInvoiceItem[]> {
-    if (isStripeConfigured()) {
+  async listPlans(userId: Types.ObjectId): Promise<BillingPlan[]> {
+    return this.withOperation('listPlans', undefined, async () => this.getPlansForUser(userId));
+  }
+
+  async listInvoices(
+    userId: Types.ObjectId,
+    limitOrInput: number | { limit?: number; cursor?: string } = 20,
+  ): Promise<BillingInvoicesResponse> {
+    const input = typeof limitOrInput === 'number' ? { limit: limitOrInput } : limitOrInput;
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    if (customer && this.shouldSyncCustomerFromProvider(customer, { force: false })) {
       try {
-        await this.refreshBillingState(userId);
-      } catch {
-        // Continue with persisted records.
+        await this.syncCustomerFromProvider(userId, customer);
+      } catch (error) {
+        logger.warn('Billing provider sync failed during invoice listing; using local state.', {
+          service: 'billing',
+          operation: 'listInvoices.syncCustomerFromProvider',
+          userId: userId.toString(),
+          customerId: customer._id.toString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
-    const invoices = await billingRepository.listInvoicesByUserId(userId, limit);
-    return invoices.map((invoice) => this.mapInvoice(invoice));
+    return this.invoiceService.listForUser(userId, input.limit ?? 20, input.cursor);
+  }
+
+  async listPaymentMethods(userId: Types.ObjectId): Promise<BillingPaymentMethod[]> {
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    if (customer && this.shouldSyncCustomerFromProvider(customer, { force: false })) {
+      try {
+        await this.syncCustomerFromProvider(userId, customer);
+      } catch (error) {
+        logger.warn('Billing provider sync failed during payment method listing; using local state.', {
+          service: 'billing',
+          operation: 'listPaymentMethods.syncCustomerFromProvider',
+          userId: userId.toString(),
+          customerId: customer._id.toString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const methods = await billingRepository.listPaymentMethods(userId);
+    return methods.map(mapPaymentMethod);
   }
 
   async createCheckoutSession(
     userId: Types.ObjectId,
     input: CreateCheckoutSessionInput,
   ): Promise<CreateCheckoutSessionResult> {
-    this.assertStripeEnabled();
+    return this.withOperation('createCheckoutSession', undefined, async () => {
+      const plan = getBillingPlan(input.planId);
+      const price = getPlanPrice(input.planId, input.billingCycle);
+      if (!plan || !price?.providerPriceId) {
+        throw new AppError('Plan is not available for checkout.', 422, 'PLAN_NOT_CHECKOUT_ENABLED');
+      }
 
-    const plan = getBillingPlan(input.planId);
-    if (!plan) {
-      throw new AppError('Selected plan does not exist.', 422, 'INVALID_PLAN');
-    }
-    if (!plan.checkoutEnabled) {
-      throw new AppError(
-        'Selected plan is not available for direct checkout.',
-        422,
-        'PLAN_NOT_CHECKOUT_ENABLED',
-      );
-    }
-
-    const price = getPlanPrice(input.planId, input.billingCycle);
-    if (!price?.stripePriceId) {
-      throw new AppError(
-        'Stripe price is not configured for this billing cycle.',
-        503,
-        'BILLING_PRICE_NOT_CONFIGURED',
-      );
-    }
-
-    try {
-      await this.refreshBillingState(userId, { force: true });
-    } catch (error) {
-      logger.warn('Failed to force-refresh billing state before checkout.', {
-        userId: userId.toHexString(),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const now = new Date();
-    const [existingEntitlementDoc, activeSubscription] = await Promise.all([
-      billingRepository.findEntitlementByUserId(userId),
-      billingRepository.findLatestSubscriptionByUserId(
+      const existing = await billingRepository.findLatestSubscriptionByUserId(
         userId,
         CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES,
-      ),
-    ]);
-    let existingEntitlement = existingEntitlementDoc;
-
-    if (existingEntitlement) {
-      existingEntitlement = await this.reconcileExpiredEntitlement(
-        userId,
-        existingEntitlement,
-        activeSubscription,
-        now,
       );
-    }
+      if (existing && existing.planCode === input.planId && existing.status !== 'CANCELED') {
+        throw new AppError('An active subscription already exists.', 409, 'SUBSCRIPTION_ALREADY_ACTIVE');
+      }
 
-    const entitlementAccessEndsAt =
-      existingEntitlement?.accessEndsAt ?? existingEntitlement?.currentPeriodEnd;
-    const hasActiveEntitlement =
-      existingEntitlement?.canAccessPaidFeatures === true &&
-      (!entitlementAccessEndsAt || entitlementAccessEndsAt > now);
-
-    const hasBlockingSubscription = this.isSubscriptionWindowActive(
-      activeSubscription,
-      now,
-    );
-
-    if (hasActiveEntitlement || hasBlockingSubscription) {
-      throw new AppError(
-        'You already have an active plan. Wait for it to expire before purchasing again.',
-        409,
-        'ACTIVE_PLAN_EXISTS',
+      const customer = await this.getOrCreateCustomer(userId);
+      const successUrl = this.resolveSafeUrl(
+        input.successUrl,
+        env.BILLING_DEFAULT_SUCCESS_URL ?? `${env.APP_URL}/billing?checkout=success`,
       );
-    }
+      const cancelUrl = this.resolveSafeUrl(
+        input.cancelUrl,
+        env.BILLING_DEFAULT_CANCEL_URL ?? `${env.APP_URL}/billing?checkout=cancelled`,
+      );
+      const trialDays = await this.resolveEligibleTrialDays(userId, plan);
 
-    const customer = await this.getOrCreateCustomer(userId);
-    const stripe = getStripeClient();
-    const successUrl = this.resolveSafeUrl(input.successUrl, this.defaultSuccessUrl());
-    const cancelUrl = this.resolveSafeUrl(input.cancelUrl, this.defaultCancelUrl());
-    const userIdString = userId.toHexString();
-
-    const priceObject = await stripe.prices.retrieve(price.stripePriceId);
-    const isRecurring = !!priceObject.recurring;
-
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
-      mode: isRecurring ? 'subscription' : 'payment',
-      customer: customer.stripeCustomerId,
-      line_items: [{ price: price.stripePriceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      allow_promotion_codes: true,
-      billing_address_collection: 'auto',
-      customer_update: {
-        address: 'auto',
-        name: 'auto',
-      },
-      automatic_tax: {
-        enabled: env.STRIPE_AUTOMATIC_TAX_ENABLED,
-      },
-      client_reference_id: userIdString,
-      metadata: {
-        userId: userIdString,
-        planId: input.planId,
-        billingCycle: input.billingCycle,
-      },
-    };
-
-    if (isRecurring) {
-      sessionParams.subscription_data = {
+      const session = await this.gateway.createCheckoutSession({
+        customerId: customer.providerCustomerId ?? '',
+        priceId: price.providerPriceId,
+        successUrl,
+        cancelUrl,
+        trialDays,
         metadata: {
-          userId: userIdString,
+          userId: userId.toString(),
           planId: input.planId,
           billingCycle: input.billingCycle,
+          couponCode: input.couponCode ?? null,
         },
+      });
+
+      await billingRepository.withTransaction(async (dbSession) => {
+        await this.auditService.record(
+          {
+            userId,
+            customerId: customer._id,
+            action: 'checkout_session.created',
+            outcome: 'SUCCESS',
+            metadata: {
+              planId: input.planId,
+              billingCycle: input.billingCycle,
+              providerCheckoutSessionId: session.id,
+            },
+          },
+          { actorType: 'USER', actorId: userId.toString() },
+          dbSession,
+        );
+        return { ok: true };
+      });
+
+      return {
+        sessionId: session.id,
+        checkoutUrl: session.url,
       };
+    });
+  }
+
+  async createPortalSession(
+    userId: Types.ObjectId,
+    input: CreatePortalSessionInput,
+  ): Promise<CreatePortalSessionResult> {
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    if (!customer?.providerCustomerId) {
+      throw new AppError('No billing customer found.', 404, 'BILLING_CUSTOMER_NOT_FOUND');
+    }
+    const returnUrl = this.resolveSafeUrl(input.returnUrl, `${env.APP_URL}/billing`);
+    const key = `billing:portal:${deterministicKey([customer._id.toString(), returnUrl])}`;
+    const session = await this.gateway.createPortalSession(customer.providerCustomerId, returnUrl, key);
+    return { portalUrl: session.url };
+  }
+
+  async attachPaymentMethod(userId: Types.ObjectId, input: { providerToken: string; setDefault?: boolean }): Promise<BillingPaymentMethod> {
+    const customer = await this.getOrCreateCustomer(userId);
+    const gatewayPaymentMethod = await this.gateway.attachPaymentMethod(customer.providerCustomerId ?? '', input.providerToken);
+    const existingMethods = await billingRepository.listPaymentMethods(userId);
+    const shouldSetDefault = input.setDefault === true || existingMethods.length === 0;
+    if (shouldSetDefault) {
+      await this.gateway.setDefaultPaymentMethod(customer.providerCustomerId ?? '', gatewayPaymentMethod.id);
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams, {
-      idempotencyKey: [
-        'billing',
-        'checkout',
-        'v3', // Incremented version to avoid collision with previous failed params
-        userIdString,
-        input.planId,
-        input.billingCycle,
-        Buffer.from(successUrl).toString('base64url').slice(0, 48),
-      ].join(':'),
+    const created = await billingRepository.withTransaction(async (session) => {
+      const method = await billingRepository.upsertPaymentMethod(
+        {
+          customerId: customer._id,
+          userId,
+          providerPaymentMethodId: gatewayPaymentMethod.id,
+          type: gatewayPaymentMethod.type,
+          brand: gatewayPaymentMethod.brand,
+          last4: gatewayPaymentMethod.last4,
+          expMonth: gatewayPaymentMethod.expMonth,
+          expYear: gatewayPaymentMethod.expYear,
+          funding: gatewayPaymentMethod.funding,
+          isDefault: shouldSetDefault,
+        },
+        session,
+      );
+      if (shouldSetDefault) {
+        await billingRepository.setDefaultPaymentMethod(customer._id, method._id, session);
+      }
+      await this.auditService.record(
+        {
+          userId,
+          customerId: customer._id,
+          action: 'payment_method.attached',
+          outcome: 'SUCCESS',
+          metadata: { paymentMethodId: method._id.toString() },
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return method;
     });
 
-    if (!session.url) {
-      throw new AppError('Stripe checkout session did not include a redirect URL.', 500, 'BILLING_CHECKOUT_SESSION_INVALID');
-    }
+    return mapPaymentMethod(created);
+  }
 
+  async removePaymentMethod(userId: Types.ObjectId, paymentMethodId: string): Promise<void> {
+    const method = await this.getOwnedPaymentMethod(userId, paymentMethodId);
+    const active = await billingRepository.findLatestSubscriptionByUserId(userId, ['TRIALING', 'ACTIVE', 'PAST_DUE']);
+    if (active && method.isDefault) {
+      throw new AppError('Default payment method cannot be removed while subscription is active.', 409, 'DEFAULT_PAYMENT_METHOD_IN_USE');
+    }
+    await this.gateway.detachPaymentMethod(method.providerPaymentMethodId);
+    await billingRepository.withTransaction(async (session) => {
+      await billingRepository.detachPaymentMethod(method._id, session);
+      await this.auditService.record(
+        {
+          userId,
+          customerId: method.customerId,
+          action: 'payment_method.detached',
+          outcome: 'SUCCESS',
+          metadata: { paymentMethodId },
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return { ok: true };
+    });
+  }
+
+  async setDefaultPaymentMethod(userId: Types.ObjectId, paymentMethodId: string): Promise<BillingPaymentMethod> {
+    const method = await this.getOwnedPaymentMethod(userId, paymentMethodId);
+    const customer = await billingRepository.findCustomerById(method.customerId);
+    if (!customer?.providerCustomerId) {
+      throw new AppError('Billing customer not found.', 404, 'BILLING_CUSTOMER_NOT_FOUND');
+    }
+    await this.gateway.setDefaultPaymentMethod(customer.providerCustomerId, method.providerPaymentMethodId);
+    await billingRepository.withTransaction(async (session) => {
+      await billingRepository.setDefaultPaymentMethod(customer._id, method._id, session);
+      await this.auditService.record(
+        {
+          userId,
+          customerId: customer._id,
+          action: 'payment_method.default_set',
+          outcome: 'SUCCESS',
+          metadata: { paymentMethodId },
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return { ok: true };
+    });
+    const updated = await this.getOwnedPaymentMethod(userId, paymentMethodId);
+    return mapPaymentMethod(updated);
+  }
+
+  async changePlan(userId: Types.ObjectId, input: ChangePlanRequest): Promise<BillingOverviewSubscription> {
+    const plan = getBillingPlan(input.planId);
+    const price = getPlanPrice(input.planId, input.billingCycle);
+    if (!plan || !price?.providerPriceId) {
+      throw new AppError('Plan is not available.', 422, 'PLAN_NOT_AVAILABLE');
+    }
+    const providerPriceId = price.providerPriceId;
+    const customer = await this.getOrCreateCustomer(userId);
+    const existing = await billingRepository.findLatestSubscriptionByUserId(userId, ACTIVE_SUBSCRIPTION_STATUSES);
+    const key = `billing:change-plan:${deterministicKey([userId.toString(), existing?._id.toString(), input.planId, input.billingCycle])}`;
+
+    return this.runIdempotent(
+      key,
+      'changePlan',
+      { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+      async () => {
+        const trialDays = await this.resolveEligibleTrialDays(userId, plan);
+        const gatewaySubscription: GatewaySubscription = existing?.providerSubscriptionId
+          ? await this.gateway.updateSubscription(existing.providerSubscriptionId, {
+            priceId: providerPriceId,
+            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+          })
+          : await this.gateway.createSubscription({
+            customerId: customer.providerCustomerId ?? '',
+            priceId: providerPriceId,
+            trialDays,
+            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+          });
+
+        const saved = await billingRepository.withTransaction(async (session) => {
+          const subscription = await billingRepository.upsertSubscription(
+            {
+              customerId: customer._id,
+              userId,
+              planCode: input.planId,
+              billingCycle: input.billingCycle,
+              status: mapProviderSubscriptionStatus(gatewaySubscription.status),
+              providerSubscriptionId: gatewaySubscription.id,
+              providerPriceId,
+              currency: price.currency,
+              amountMinor: price.amountMinor,
+              cancelAtPeriodEnd: gatewaySubscription.cancelAtPeriodEnd,
+              currentPeriodStart: gatewaySubscription.currentPeriodStart,
+              currentPeriodEnd: gatewaySubscription.currentPeriodEnd,
+              trialStart: gatewaySubscription.trialStart,
+              trialEnd: gatewaySubscription.trialEnd,
+              metadata: { source: 'changePlan' },
+            },
+            session,
+          );
+          await this.auditService.record(
+            {
+              userId,
+              customerId: customer._id,
+              subscriptionId: subscription._id,
+              action: 'subscription.plan_changed',
+              outcome: 'SUCCESS',
+              before: existing
+                ? { planId: existing.planCode, billingCycle: existing.billingCycle }
+                : undefined,
+              after: { planId: input.planId, billingCycle: input.billingCycle },
+            },
+            { actorType: 'USER', actorId: userId.toString() },
+            session,
+          );
+          return subscription;
+        });
+        const response = mapOverviewSubscription(saved);
+        return {
+          value: response,
+          response: { subscriptionId: response.subscriptionId, status: response.status },
+        };
+      },
+      (response) => ({
+        subscriptionId: readString(response, 'subscriptionId') ?? null,
+        status: (readString(response, 'status') as BillingSubscriptionStatus | undefined) ?? 'ACTIVE',
+        planId: input.planId,
+        billingCycle: input.billingCycle,
+        cancelAtPeriodEnd: false,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        trialEnd: null,
+      }),
+    );
+  }
+
+  async cancelSubscription(userId: Types.ObjectId, input: CancelSubscriptionInput): Promise<BillingOverviewSubscription> {
+    const subscription = await this.requireOwnedSubscription(userId);
+    if (!subscription.providerSubscriptionId) {
+      throw new AppError('Subscription is missing provider identity.', 409, 'SUBSCRIPTION_PROVIDER_MISSING');
+    }
+    const atPeriodEnd = input.atPeriodEnd !== false;
+    const key = `billing:cancel:${deterministicKey([subscription._id.toString(), atPeriodEnd])}`;
+
+    return this.runIdempotent(
+      key,
+      'cancelSubscription',
+      { subscriptionId: subscription._id.toString(), atPeriodEnd },
+      async () => {
+        await this.gateway.cancelSubscription(subscription.providerSubscriptionId ?? '', {
+          atPeriodEnd,
+          idempotencyKey: key,
+        });
+        const updated = await billingRepository.withTransaction(async (session) => {
+          if (atPeriodEnd) {
+            const doc = await billingRepository.updateSubscriptionState(
+              subscription._id,
+              subscription.status,
+              { cancelAtPeriodEnd: true },
+              session,
+            );
+            if (!doc) throw new AppError('Subscription not found.', 404, 'SUBSCRIPTION_NOT_FOUND');
+            await this.auditService.record(
+              {
+                userId,
+                customerId: subscription.customerId,
+                subscriptionId: subscription._id,
+                action: 'subscription.cancel_scheduled',
+                outcome: 'SUCCESS',
+                before: { cancelAtPeriodEnd: subscription.cancelAtPeriodEnd },
+                after: { cancelAtPeriodEnd: true },
+                metadata: { reason: input.reason ?? null },
+              },
+              { actorType: 'USER', actorId: userId.toString() },
+              session,
+            );
+            return doc;
+          }
+          return this.subscriptionService.transition(
+            subscription,
+            'CANCELED',
+            { actorType: 'USER', actorId: userId.toString() },
+            { cancelAtPeriodEnd: false, canceledAt: new Date(), endedAt: new Date() },
+            session,
+          );
+        });
+        const response = mapOverviewSubscription(updated);
+        return {
+          value: response,
+          response: { subscriptionId: response.subscriptionId, status: response.status },
+        };
+      },
+      (response) => ({
+        subscriptionId: readString(response, 'subscriptionId') ?? subscription._id.toString(),
+        status: (readString(response, 'status') as BillingSubscriptionStatus | undefined) ?? subscription.status,
+        planId: subscription.planCode,
+        billingCycle: subscription.billingCycle,
+        cancelAtPeriodEnd: true,
+        currentPeriodStart: iso(subscription.currentPeriodStart),
+        currentPeriodEnd: iso(subscription.currentPeriodEnd),
+        trialEnd: iso(subscription.trialEnd),
+      }),
+    );
+  }
+
+  async pauseSubscription(userId: Types.ObjectId, _input: PauseSubscriptionRequest = {}): Promise<BillingOverviewSubscription> {
+    if (!env.BILLING_FEATURE_PAUSE_ENABLED) {
+      throw new AppError('Subscription pause is not enabled.', 403, 'BILLING_PAUSE_DISABLED');
+    }
+    const subscription = await this.requireOwnedSubscription(userId);
+    if (!subscription.providerSubscriptionId) {
+      throw new AppError('Subscription is missing provider identity.', 409, 'SUBSCRIPTION_PROVIDER_MISSING');
+    }
+    const key = `billing:pause:${deterministicKey([subscription._id.toString()])}`;
+    await this.gateway.pauseSubscription(subscription.providerSubscriptionId, { idempotencyKey: key });
+    const updated = await billingRepository.withTransaction(async (session) =>
+      this.subscriptionService.transition(
+        subscription,
+        'PAUSED',
+        { actorType: 'USER', actorId: userId.toString() },
+        { pausedAt: new Date() },
+        session,
+      ),
+    );
+    return mapOverviewSubscription(updated);
+  }
+
+  async resumeSubscription(userId: Types.ObjectId, _input: ResumeSubscriptionRequest = {}): Promise<ResumeSubscriptionResponse['subscription']> {
+    const subscription = await this.requireOwnedSubscription(userId, ['PAUSED', 'ACTIVE']);
+    if (subscription.status === 'ACTIVE' && !subscription.cancelAtPeriodEnd) {
+      throw new AppError('Subscription is not scheduled for cancellation.', 409, 'SUBSCRIPTION_NOT_SCHEDULED_FOR_CANCEL');
+    }
+    if (!subscription.providerSubscriptionId) {
+      throw new AppError('Subscription is missing provider identity.', 409, 'SUBSCRIPTION_PROVIDER_MISSING');
+    }
+    const key = `billing:resume:${deterministicKey([subscription._id.toString()])}`;
+    await this.gateway.resumeSubscription(subscription.providerSubscriptionId, { idempotencyKey: key });
+    const updated = await billingRepository.withTransaction(async (session) => {
+      if (subscription.status === 'PAUSED') {
+        return this.subscriptionService.transition(
+          subscription,
+          'ACTIVE',
+          { actorType: 'USER', actorId: userId.toString() },
+          { pausedAt: undefined, cancelAtPeriodEnd: false },
+          session,
+        );
+      }
+      const doc = await billingRepository.updateSubscriptionState(
+        subscription._id,
+        subscription.status,
+        { cancelAtPeriodEnd: false },
+        session,
+      );
+      if (!doc) throw new AppError('Subscription not found.', 404, 'SUBSCRIPTION_NOT_FOUND');
+      await this.auditService.record(
+        {
+          userId,
+          customerId: subscription.customerId,
+          subscriptionId: subscription._id,
+          action: 'subscription.cancel_resumed',
+          outcome: 'SUCCESS',
+          before: { cancelAtPeriodEnd: true },
+          after: { cancelAtPeriodEnd: false },
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return doc;
+    });
+    return mapOverviewSubscription(updated);
+  }
+
+  async retryPayment(userId: Types.ObjectId, input: RetryPaymentRequest): Promise<BillingPayment> {
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    if (!customer?.providerCustomerId) {
+      throw new AppError('Billing customer not found.', 404, 'BILLING_CUSTOMER_NOT_FOUND');
+    }
+    const subscription = await this.requireOwnedSubscription(userId, ['PAST_DUE', 'UNPAID', 'ACTIVE']);
+    const invoiceId = input.invoiceId
+      ? objectIdFromString(input.invoiceId, 'INVOICE_NOT_FOUND')
+      : subscription.latestInvoiceId;
+    if (!invoiceId) {
+      throw new AppError('No invoice is available for retry.', 404, 'INVOICE_NOT_FOUND');
+    }
+    const invoice = await billingRepository.findInvoiceById(invoiceId);
+    if (!invoice || invoice.userId.toString() !== userId.toString()) {
+      throw new BillingAuthorizationError('Invoice access denied.', { userId: userId.toString() });
+    }
+    const paymentMethod = input.paymentMethodId
+      ? await this.getOwnedPaymentMethod(userId, input.paymentMethodId)
+      : null;
+    const key = `billing:retry-payment:${deterministicKey([invoice._id.toString(), paymentMethod?._id.toString()])}`;
+    const gatewayPayment = await this.gateway.chargeInvoice(invoice._id.toString(), {
+      providerCustomerId: customer.providerCustomerId,
+      amountMinor: invoice.amountRemainingMinor,
+      currency: invoice.currency,
+      description: invoice.description ?? `Invoice ${invoice.invoiceNumber ?? invoice._id.toString()}`,
+      paymentMethodId: paymentMethod?.providerPaymentMethodId,
+      idempotencyKey: key,
+      metadata: { userId: userId.toString(), invoiceId: invoice._id.toString() },
+    });
+    return this.persistGatewayPayment(userId, customer, invoice, paymentMethod, gatewayPayment, key);
+  }
+
+  async applyDiscount(userId: Types.ObjectId, input: ApplyDiscountRequest): Promise<BillingOverviewResponse> {
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    const subscription = await this.requireOwnedSubscription(userId, ACTIVE_SUBSCRIPTION_STATUSES);
+    const coupon = await billingRepository.findCouponByCode(input.code);
+    if (!customer || !coupon || !coupon.active) {
+      throw new AppError('Discount code is invalid.', 422, 'DISCOUNT_INVALID');
+    }
+    if (coupon.expiresAt && coupon.expiresAt <= new Date()) {
+      throw new AppError('Discount code has expired.', 422, 'DISCOUNT_EXPIRED');
+    }
+    if (coupon.maxRedemptions && coupon.redeemedCount >= coupon.maxRedemptions) {
+      throw new AppError('Discount code has reached its usage limit.', 422, 'DISCOUNT_REDEEMED');
+    }
+    const price = Money.of(subscription.amountMinor, subscription.currency);
+    const discountMinor = coupon.type === 'PERCENTAGE'
+      ? price.prorate(coupon.percentOff ?? 0, 100).amountMinor
+      : Math.min(coupon.amountOffMinor ?? 0, subscription.amountMinor);
+
+    await billingRepository.withTransaction(async (session) => {
+      await billingRepository.createDiscount(
+        {
+          couponId: coupon._id,
+          customerId: customer._id,
+          subscriptionId: subscription._id,
+          amountMinor: discountMinor,
+          currency: subscription.currency,
+        },
+        session,
+      );
+      await this.auditService.record(
+        {
+          userId,
+          customerId: customer._id,
+          subscriptionId: subscription._id,
+          action: 'discount.applied',
+          outcome: 'SUCCESS',
+          metadata: { code: coupon.code, amountMinor: discountMinor },
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return { ok: true };
+    });
+
+    return this.getBillingOverview(userId, { force: true });
+  }
+
+  async getProrationPreview(userId: Types.ObjectId, input: ProrationPreviewQuery): Promise<ProrationPreviewResponse> {
+    const subscription = await billingRepository.findLatestSubscriptionByUserId(userId, ACTIVE_SUBSCRIPTION_STATUSES);
+    const targetPrice = getPlanPrice(input.planId, input.billingCycle);
+    if (!targetPrice) {
+      throw new AppError('Plan is not available.', 422, 'PLAN_NOT_AVAILABLE');
+    }
+    const now = new Date();
+    const currentRemainingMinor = subscription?.currentPeriodEnd && subscription.currentPeriodStart
+      ? Money.of(subscription.amountMinor, subscription.currency).prorate(
+        Math.max(0, subscription.currentPeriodEnd.getTime() - now.getTime()),
+        Math.max(1, subscription.currentPeriodEnd.getTime() - subscription.currentPeriodStart.getTime()),
+      ).amountMinor
+      : 0;
+    const amountDueToday = Math.max(0, targetPrice.amountMinor - currentRemainingMinor);
     return {
-      sessionId: session.id,
-      checkoutUrl: session.url,
+      amountDueToday: { amountMinor: amountDueToday, currency: targetPrice.currency },
+      newRecurringAmount: { amountMinor: targetPrice.amountMinor, currency: targetPrice.currency },
+      creditApplied: { amountMinor: currentRemainingMinor, currency: targetPrice.currency },
+      description: 'Proration preview based on the remaining value of the current billing period.',
     };
   }
 
-  private async handleCheckoutSessionCompleted(
-    session: Stripe.Checkout.Session,
-  ): Promise<void> {
-    const stripeCustomerId = getStripeCustomerId(session.customer);
-    const metadataUserId = session.client_reference_id ?? session.metadata?.['userId'];
+  async downloadInvoicePdf(userId: Types.ObjectId, invoiceId: string): Promise<DownloadInvoicePdfResponse> {
+    return this.invoiceService.downloadPdf(userId, invoiceId);
+  }
 
-    if (
-      stripeCustomerId &&
-      metadataUserId &&
-      Types.ObjectId.isValid(metadataUserId)
-    ) {
-      const userId = new Types.ObjectId(metadataUserId);
-      const user = await userRepository.findById(userId);
-      await this.syncCustomerFromStripe(userId, stripeCustomerId, user?.email, user?.fullName);
+  async processStripeWebhook(payload: Buffer, signatureHeader: string | string[] | undefined): Promise<StripeWebhookResponse> {
+    return this.webhookService.ingestStripeWebhook(payload, signatureHeader);
+  }
 
-      // If this was a subscription-mode checkout, immediately set it to cancel at period end
-      // to ensure it remains a one-time purchase.
-      if (session.mode === 'subscription' && session.subscription) {
-        const stripe = getStripeClient();
-        const subscriptionId = getStripeResourceId(session.subscription);
-        if (subscriptionId) {
-          try {
-            await stripe.subscriptions.update(subscriptionId, {
-              cancel_at_period_end: true,
-            });
-          } catch (error) {
-            logger.error('Failed to set subscription to cancel at period end after checkout.', {
-              subscriptionId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      }
+  async runDunningJob(now: Date = new Date()): Promise<number> {
+    return this.dunningService.runDue(now);
+  }
 
-      const planId = session.metadata?.['planId'] as BillingPlanId | undefined;
-      const billingCycle = session.metadata?.['billingCycle'] as BillingCycle | undefined;
+  async runReconciliation(): Promise<BillingAdminReconciliationReport> {
+    return this.reconciliationService.run();
+  }
 
-      if (planId && billingCycle) {
-        const plan = getBillingPlan(planId);
-        if (plan) {
-          const now = new Date();
-          const endDate = new Date(now);
-          if (billingCycle === 'year') {
-            endDate.setUTCFullYear(endDate.getUTCFullYear() + 1);
-          } else {
-            endDate.setUTCMonth(endDate.getUTCMonth() + 1);
-          }
+  async getReconciliationReport(): Promise<BillingAdminReconciliationReport> {
+    return this.reconciliationService.report();
+  }
 
-          await billingRepository.upsertEntitlement({
-            userId,
-            planId,
-            status: 'active',
-            canAccessPaidFeatures: true,
-            creditsIncluded: plan.includedCredits,
-            features: plan.features,
-            currentPeriodStart: now,
-            currentPeriodEnd: endDate,
-            accessEndsAt: endDate,
-            lastSyncedAt: now,
-          });
-
-          await billingRepository.recordBillingEvent({
-            userId,
-            objectId: session.id,
-            action: 'checkout_fulfilled',
-            status: 'success',
-            metadata: {
-              planId,
-              billingCycle,
-              mode: session.mode,
-            },
-          });
-        }
-      }
+  async getAdminCustomerSummary(customerId: string): Promise<BillingAdminCustomerSummary> {
+    const customer = await billingRepository.findCustomerById(objectIdFromString(customerId, 'BILLING_CUSTOMER_NOT_FOUND'));
+    if (!customer) {
+      throw new AppError('Billing customer not found.', 404, 'BILLING_CUSTOMER_NOT_FOUND');
     }
+    const [subscription, paymentMethods, invoices, auditLogs] = await Promise.all([
+      billingRepository.findLatestSubscriptionByUserId(customer.userId, ACTIVE_SUBSCRIPTION_STATUSES),
+      billingRepository.listPaymentMethods(customer.userId),
+      this.invoiceService.listForUser(customer.userId, 100),
+      billingRepository.listAuditLogsByCustomer(customer._id, 100),
+    ]);
+
+    return {
+      customer: {
+        id: customer._id.toString(),
+        userId: customer.userId.toString(),
+        provider: customer.provider,
+        providerCustomerId: customer.providerCustomerId ?? null,
+        defaultPaymentMethodId: customer.defaultPaymentMethodId?.toString() ?? null,
+        createdAt: customer.createdAt.toISOString(),
+        updatedAt: customer.updatedAt.toISOString(),
+      },
+      subscription: subscription ? mapSubscription(subscription) : null,
+      paymentMethods: paymentMethods.map(mapPaymentMethod),
+      invoices: invoices.items,
+      payments: [],
+      auditLogs: auditLogs.map(mapAuditLog),
+    };
   }
 
-  private async handleInvoiceEvent(invoice: Stripe.Invoice): Promise<void> {
-    await this.syncInvoiceFromStripe(invoice, { strictCustomerMapping: true });
-  }
-
-  private async sendBillingNotificationForEvent(event: Stripe.Event): Promise<void> {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const stripeCustomerId = getStripeCustomerId(session.customer);
-        const [recipient, userId] = await Promise.all([
-          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
-          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
-        ]);
-        const planId = session.metadata?.['planId'] as BillingPlanId | undefined;
-        const planName = planId ? getBillingPlan(planId)?.name ?? null : null;
-        await this.createInAppBillingNotification({
-          userId,
-          eventId: event.id,
-          severity: 'success',
-          title: 'Purchase completed',
-          message: planName
-            ? `Your ${planName} plan purchase is complete.`
-            : 'Your purchase is complete.',
-          metadata: {
-            stripeEventType: event.type,
-            planId: planId ?? null,
-            planName,
-          },
-        });
-        if (this.shouldSendBillingEmails() && recipient) {
-          await sendBillingCheckoutCompletedEmail({
-            to: recipient.email,
-            customerName: recipient.name,
-            planName,
-            billingPortalUrl: this.billingPortalUrl(),
-          });
-        }
-        return;
-      }
-
-      case 'invoice.paid': {
-        const invoice = event.data.object as Stripe.Invoice;
-        const stripeCustomerId = getStripeCustomerId(invoice.customer);
-        const [recipient, userId] = await Promise.all([
-          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
-          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
-        ]);
-
-        const firstPriceId = getInvoicePrimaryPriceId(invoice);
-        const planName = resolvePlanNameFromPriceId(firstPriceId);
-        await this.createInAppBillingNotification({
-          userId,
-          eventId: event.id,
-          severity: 'success',
-          title: 'Invoice paid',
-          message: planName
-            ? `${planName} invoice ${invoice.number ?? ''} has been paid.`.trim()
-            : `Invoice ${invoice.number ?? ''} has been paid.`.trim(),
-          metadata: {
-            stripeEventType: event.type,
-            invoiceId: invoice.id,
-            invoiceNumber: invoice.number ?? null,
-            amountCents: invoice.amount_paid ?? invoice.total ?? 0,
-            currency: invoice.currency ?? 'usd',
-          },
-        });
-        if (this.shouldSendBillingEmails() && recipient) {
-          await sendBillingPaymentSucceededEmail({
-            to: recipient.email,
-            customerName: recipient.name,
-            planName,
-            amountCents: invoice.amount_paid ?? invoice.total ?? 0,
-            currency: invoice.currency ?? 'usd',
-            invoiceNumber: invoice.number ?? null,
-            invoicePdfUrl: invoice.invoice_pdf ?? null,
-            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-            paidAt: toDateFromUnix(invoice.status_transitions.paid_at),
-            billingPortalUrl: this.billingPortalUrl(),
-          });
-        }
-        return;
-      }
-
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice;
-        const stripeCustomerId = getStripeCustomerId(invoice.customer);
-        const [recipient, userId] = await Promise.all([
-          this.resolveBillingRecipientByStripeCustomerId(stripeCustomerId),
-          this.resolveBillingUserIdByStripeCustomerId(stripeCustomerId),
-        ]);
-
-        const firstPriceId = getInvoicePrimaryPriceId(invoice);
-        const planName = resolvePlanNameFromPriceId(firstPriceId);
-        await this.createInAppBillingNotification({
-          userId,
-          eventId: event.id,
-          severity: 'warning',
-          title: 'Payment failed',
-          message: planName
-            ? `Payment failed for your ${planName} plan invoice.`
-            : 'Payment failed for your plan invoice.',
-          metadata: {
-            stripeEventType: event.type,
-            invoiceId: invoice.id,
-            invoiceNumber: invoice.number ?? null,
-            amountCents: invoice.amount_due ?? invoice.total ?? 0,
-            currency: invoice.currency ?? 'usd',
-            dueDate: toDateFromUnix(invoice.due_date)?.toISOString() ?? null,
-          },
-        });
-        if (this.shouldSendBillingEmails() && recipient) {
-          await sendBillingPaymentFailedEmail({
-            to: recipient.email,
-            customerName: recipient.name,
-            planName,
-            amountCents: invoice.amount_due ?? invoice.total ?? 0,
-            currency: invoice.currency ?? 'usd',
-            invoiceNumber: invoice.number ?? null,
-            hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-            dueDate: toDateFromUnix(invoice.due_date),
-            billingPortalUrl: this.billingPortalUrl(),
-          });
-        }
-        return;
-      }
-
-      default:
-        return;
+  async adminRefund(actorUserId: Types.ObjectId, input: AdminRefundRequest): Promise<void> {
+    const payment = await billingRepository.findPaymentById(objectIdFromString(input.paymentId, 'PAYMENT_NOT_FOUND'));
+    if (!payment?.providerPaymentId) {
+      throw new AppError('Payment not found.', 404, 'PAYMENT_NOT_FOUND');
     }
-  }
-
-  private async processStripeEvent(event: Stripe.Event): Promise<boolean> {
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await this.handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-        return true;
-      case 'invoice.finalized':
-      case 'invoice.created':
-      case 'invoice.finalization_failed':
-      case 'invoice.paid':
-      case 'invoice.payment_succeeded':
-      case 'invoice.payment_failed':
-      case 'invoice.payment_action_required':
-      case 'invoice.updated':
-        await this.handleInvoiceEvent(event.data.object as Stripe.Invoice);
-        return true;
-      default:
-        return false;
+    const requested = Money.of(input.amountMinor, input.currency);
+    const paid = Money.of(payment.amountMinor, payment.currency);
+    if (requested.amountMinor > paid.amountMinor) {
+      throw new AppError('Refund amount exceeds payment amount.', 422, 'REFUND_AMOUNT_INVALID');
     }
-  }
-
-  async processStripeWebhook(
-    rawBody: Buffer,
-    signatureHeader: string | string[] | undefined,
-  ): Promise<{ received: true; duplicate: boolean }> {
-    this.assertStripeEnabled();
-    const stripe = getStripeClient();
-    const endpointSecret = getStripeWebhookSecret();
-
-    if (!signatureHeader || Array.isArray(signatureHeader)) {
-      throw new AppError(
-        'Missing Stripe-Signature header.',
-        400,
-        'INVALID_STRIPE_SIGNATURE',
+    const key = `billing:refund:${deterministicKey([payment._id.toString(), input.amountMinor, input.currency])}`;
+    const refund = await this.gateway.refundPayment(payment._id.toString(), {
+      providerPaymentId: payment.providerPaymentId,
+      amountMinor: requested.amountMinor,
+      currency: requested.currency,
+      reason: input.reason,
+      idempotencyKey: key,
+    });
+    await billingRepository.withTransaction(async (session) => {
+      await billingRepository.createRefund(
+        {
+          paymentId: payment._id,
+          customerId: payment.customerId,
+          userId: payment.userId,
+          providerRefundId: refund.id,
+          idempotencyKey: key,
+          status: refund.status,
+          amountMinor: refund.amountMinor,
+          currency: refund.currency,
+          reason: input.reason,
+          requestedByActorType: 'ADMIN',
+          requestedByActorId: actorUserId.toString(),
+        },
+        session,
       );
-    }
-
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        rawBody,
-        signatureHeader,
-        endpointSecret,
-        env.STRIPE_WEBHOOK_TOLERANCE_SECONDS,
+      await this.auditService.record(
+        {
+          userId: payment.userId,
+          customerId: payment.customerId,
+          paymentId: payment._id,
+          action: 'payment.refunded',
+          outcome: 'SUCCESS',
+          metadata: { amountMinor: refund.amountMinor, currency: refund.currency },
+        },
+        { actorType: 'ADMIN', actorId: actorUserId.toString() },
+        session,
       );
-    } catch (error) {
-      logger.warn('Stripe webhook signature verification failed.', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new AppError(
-        `Webhook signature verification failed: ${error instanceof Error ? error.message : 'Unknown error'
-        }`,
-        400,
-        'INVALID_STRIPE_SIGNATURE',
-      );
-    }
+      return { ok: true };
+    });
+  }
 
-    const claim = await billingRepository.claimWebhookEventForProcessing(
-      event.id,
-      event.type,
-      env.BILLING_WEBHOOK_STALE_RETRY_SECONDS,
+  async adminManualCharge(actorUserId: Types.ObjectId, input: AdminManualChargeRequest): Promise<BillingPayment> {
+    const customer = await billingRepository.findCustomerById(objectIdFromString(input.customerId, 'BILLING_CUSTOMER_NOT_FOUND'));
+    if (!customer?.providerCustomerId) {
+      throw new AppError('Billing customer not found.', 404, 'BILLING_CUSTOMER_NOT_FOUND');
+    }
+    const paymentMethod = input.paymentMethodId
+      ? await billingRepository.findPaymentMethodById(objectIdFromString(input.paymentMethodId, 'PAYMENT_METHOD_NOT_FOUND'))
+      : null;
+    const key = `billing:manual-charge:${deterministicKey([customer._id.toString(), input.amountMinor, input.currency, input.description])}`;
+    const invoice = await billingRepository.withTransaction(async (session) => {
+      const created = await billingRepository.createInvoice(
+        {
+          customerId: customer._id,
+          userId: customer.userId,
+          description: input.description,
+          status: 'OPEN',
+          currency: input.currency,
+          subtotalMinor: input.amountMinor,
+          taxMinor: 0,
+          discountMinor: 0,
+          totalMinor: input.amountMinor,
+          amountDueMinor: input.amountMinor,
+          amountPaidMinor: 0,
+          amountRemainingMinor: input.amountMinor,
+        },
+        session,
+      );
+      await this.auditService.record(
+        {
+          userId: customer.userId,
+          customerId: customer._id,
+          invoiceId: created._id,
+          action: 'invoice.manual_created',
+          outcome: 'SUCCESS',
+          metadata: { amountMinor: input.amountMinor, currency: input.currency },
+        },
+        { actorType: 'ADMIN', actorId: actorUserId.toString() },
+        session,
+      );
+      return created;
+    });
+    const intent = await this.gateway.chargeInvoice(invoice._id.toString(), {
+      providerCustomerId: customer.providerCustomerId,
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      description: input.description,
+      paymentMethodId: paymentMethod?.providerPaymentMethodId,
+      idempotencyKey: key,
+      metadata: { adminUserId: actorUserId.toString() },
+    });
+    return this.persistGatewayPayment(customer.userId, customer, invoice, paymentMethod, intent, key);
+  }
+
+  private async persistGatewayPayment(
+    userId: Types.ObjectId,
+    customer: IBillingCustomerDocument,
+    invoice: IBillingInvoiceDocument,
+    paymentMethod: IBillingPaymentMethodDocument | null,
+    gatewayPayment: GatewayPaymentIntent,
+    idempotencyKey: string,
+  ): Promise<BillingPayment> {
+    const created = await billingRepository.withTransaction(async (session) => {
+      const payment = await billingRepository.createPayment(
+        {
+          invoiceId: invoice._id,
+          customerId: customer._id,
+          userId,
+          paymentMethodId: paymentMethod?._id,
+          providerPaymentId: gatewayPayment.id,
+          idempotencyKey,
+          status: gatewayPayment.status,
+          amountMinor: gatewayPayment.amountMinor,
+          currency: gatewayPayment.currency,
+          failureCode: gatewayPayment.failureCode,
+          failureMessage: gatewayPayment.failureMessage,
+          requiresActionUrl: gatewayPayment.requiresActionUrl,
+        },
+        session,
+      );
+      await this.auditService.record(
+        {
+          userId,
+          customerId: customer._id,
+          invoiceId: invoice._id,
+          paymentId: payment._id,
+          action: 'payment.attempted',
+          outcome: gatewayPayment.status === 'FAILED' ? 'FAILURE' : 'SUCCESS',
+          metadata: { status: gatewayPayment.status },
+          errorCode: gatewayPayment.failureCode,
+        },
+        { actorType: 'USER', actorId: userId.toString() },
+        session,
+      );
+      return payment;
+    });
+
+    billingMetrics.increment('billing.payment.attempt', 1, {
+      outcome: gatewayPayment.status === 'SUCCEEDED' ? 'success' : 'failure',
+      error_type: gatewayPayment.failureCode ?? 'none',
+    });
+
+    return mapPayment(created);
+  }
+
+  private async getOwnedPaymentMethod(
+    userId: Types.ObjectId,
+    paymentMethodId: string,
+  ): Promise<IBillingPaymentMethodDocument> {
+    const method = await billingRepository.findPaymentMethodById(
+      objectIdFromString(paymentMethodId, 'PAYMENT_METHOD_NOT_FOUND'),
     );
-
-    if (!claim.shouldProcess) {
-      logger.info('Stripe webhook duplicate delivery ignored.', {
-        eventId: event.id,
-        eventType: event.type,
+    if (!method || method.userId.toString() !== userId.toString()) {
+      throw new BillingAuthorizationError('Payment method access denied.', {
+        userId: userId.toString(),
+        paymentMethodId,
       });
-      return { received: true, duplicate: true };
     }
+    return method;
+  }
 
-    try {
-      const handled = await this.processStripeEvent(event);
-      if (handled) {
-        await billingRepository.markWebhookEventProcessed(event.id);
-      } else {
-        await billingRepository.markWebhookEventIgnored(event.id);
-      }
-
-      if (handled) {
-        try {
-          await this.sendBillingNotificationForEvent(event);
-        } catch (notifyError) {
-          logger.error('Billing email notification failed.', {
-            eventId: event.id,
-            eventType: event.type,
-            error: notifyError instanceof Error ? notifyError.message : String(notifyError),
-          });
-        }
-      }
-
-      logger.info('Stripe webhook processed.', {
-        eventId: event.id,
-        eventType: event.type,
-        handled,
-      });
-      return { received: true, duplicate: false };
-    } catch (error) {
-      await billingRepository.markWebhookEventFailed(
-        event.id,
-        error instanceof Error ? error.message : String(error),
-      );
-      logger.error('Stripe webhook processing failed.', {
-        eventId: event.id,
-        eventType: event.type,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
+  private async requireOwnedSubscription(
+    userId: Types.ObjectId,
+    statuses: ActiveSubscriptionStatus[] = ACTIVE_SUBSCRIPTION_STATUSES,
+  ): Promise<IBillingSubscriptionDocument> {
+    const subscription = await billingRepository.findLatestSubscriptionByUserId(userId, statuses);
+    if (!subscription) {
+      throw new AppError('No active subscription found.', 404, 'SUBSCRIPTION_NOT_FOUND');
     }
+    if (subscription.userId.toString() !== userId.toString()) {
+      throw new BillingAuthorizationError('Subscription access denied.', {
+        userId: userId.toString(),
+        subscriptionId: subscription._id.toString(),
+      });
+    }
+    return subscription;
   }
 }
 
 export const billingService = new BillingService();
+
+export function isBillingError(error: unknown): error is BillingError {
+  return error instanceof BillingError;
+}

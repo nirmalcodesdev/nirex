@@ -102,6 +102,34 @@ const envSchema = z.object({
     .transform((v) => v.toLowerCase() === 'true'),
   BILLING_DEFAULT_SUCCESS_URL: z.string().url().optional(),
   BILLING_DEFAULT_CANCEL_URL: z.string().url().optional(),
+  BILLING_ADMIN_USER_IDS: z
+    .string()
+    .default('')
+    .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
+  BILLING_DUNNING_SCHEDULE_DAYS: z
+    .string()
+    .default('0,3,7,14,21')
+    .transform((v) => v.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite)),
+  BILLING_GATEWAY_TIMEOUT_MS: z
+    .string()
+    .default('10000')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_GATEWAY_MAX_RETRIES: z
+    .string()
+    .default('3')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_MUTATION_RATE_LIMIT_PER_MINUTE: z
+    .string()
+    .default('20')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_ADMIN_RATE_LIMIT_PER_MINUTE: z
+    .string()
+    .default('60')
+    .transform((v) => parseInt(v, 10)),
+  BILLING_FEATURE_PAUSE_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() === 'true'),
 
   // Rate limiting
   RATE_LIMIT_WINDOW_MS: z

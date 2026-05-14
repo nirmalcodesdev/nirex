@@ -247,6 +247,7 @@ export const plans: PricingPlans = [
         price: '$0',
         period: '/month',
         description: 'For individual developers exploring AI-assisted coding.',
+        trialDays: 0,
         features: [
             '50 commands per month',
             '2 AI agents (GPT-4o mini, Gemini Flash)',
@@ -261,6 +262,7 @@ export const plans: PricingPlans = [
         price: '$29',
         period: '/month',
         description: 'For professional developers who ship fast.',
+        trialDays: 14,
         features: [
             'Unlimited commands',
             'All AI agents (GPT-4, Claude, Gemini Pro & more)',
@@ -276,6 +278,7 @@ export const plans: PricingPlans = [
         price: '$49',
         period: '/user/month',
         description: 'For engineering teams that need shared context.',
+        trialDays: 0,
         features: [
             'Everything in Pro',
             'Shared codebase context across team',

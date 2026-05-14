@@ -16,14 +16,18 @@ function getProPrices(): BillingPlan['prices'] {
   return {
     month: {
       billingCycle: 'month',
+      amountMinor: PRO_MONTHLY_DEFAULT_CENTS,
       amountCents: PRO_MONTHLY_DEFAULT_CENTS,
       currency: DEFAULT_BILLING_CURRENCY,
+      providerPriceId: env.STRIPE_PRICE_PRO_MONTHLY,
       stripePriceId: env.STRIPE_PRICE_PRO_MONTHLY,
     },
     year: {
       billingCycle: 'year',
+      amountMinor: PRO_YEARLY_DEFAULT_CENTS,
       amountCents: PRO_YEARLY_DEFAULT_CENTS,
       currency: DEFAULT_BILLING_CURRENCY,
+      providerPriceId: env.STRIPE_PRICE_PRO_YEARLY,
       stripePriceId: env.STRIPE_PRICE_PRO_YEARLY,
     },
   };
@@ -38,6 +42,7 @@ export function getBillingPlans(): BillingPlan[] {
       prices: {
         month: {
           billingCycle: 'month',
+          amountMinor: 0,
           amountCents: 0,
           currency: DEFAULT_BILLING_CURRENCY,
         },

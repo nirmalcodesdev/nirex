@@ -15,13 +15,12 @@ import type { BillingSubscriptionStatus } from '../billing/billing.model.js';
 
 const CREDIT_UNIT_PRICE_USD = 0.05;
 const DEFAULT_CREDITS_LIMIT = 10000;
-const ACTIVE_SUBSCRIPTION_STATUSES: BillingSubscriptionStatus[] = [
-  'trialing',
-  'active',
-  'incomplete',
-  'past_due',
-  'unpaid',
-  'paused',
+const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
 ];
 
 interface Snapshot {
@@ -232,68 +231,46 @@ export class UsageService {
   private async resolveCurrentPlan(userId: Types.ObjectId): Promise<ResolvedCurrentPlan> {
     const freePlan = getBillingPlan('free');
     const defaultPlanName = freePlan?.name ?? 'Free';
-    const defaultMonthlyPrice = (getPlanPrice('free', 'month')?.amountCents ?? 0) / 100;
+    const defaultMonthlyPrice = (getPlanPrice('free', 'month')?.amountMinor ?? 0) / 100;
 
     try {
-      const [subscription, entitlement] = await Promise.all([
-        billingRepository.findLatestSubscriptionByUserId(
-          userId,
-          ACTIVE_SUBSCRIPTION_STATUSES,
-        ),
-        billingRepository.findEntitlementByUserId(userId),
-      ]);
+      const subscription = await billingRepository.findLatestSubscriptionByUserId(
+        userId,
+        ACTIVE_SUBSCRIPTION_STATUSES,
+      );
 
       const now = new Date();
-      const entitlementAccessEndsAt =
-        entitlement?.accessEndsAt ?? entitlement?.currentPeriodEnd ?? null;
       const subscriptionWindowActive =
         subscription !== null &&
         ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status) &&
         (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > now);
 
-      const entitlementAllowsPaidAccess =
-        entitlement?.canAccessPaidFeatures === true &&
-        ((!entitlementAccessEndsAt || entitlementAccessEndsAt > now) ||
-          subscriptionWindowActive);
-
-      const entitlementCreditsIncluded = entitlementAllowsPaidAccess
-        ? entitlement?.creditsIncluded
-        : undefined;
-
-      const entitlementPeriodStart = entitlementAllowsPaidAccess
-        ? entitlement?.currentPeriodStart ?? null
-        : null;
-      const entitlementPeriodEnd = entitlementAllowsPaidAccess
-        ? entitlement?.currentPeriodEnd ?? entitlement?.accessEndsAt ?? null
-        : null;
       const subscriptionPeriodStart = subscriptionWindowActive
         ? subscription?.currentPeriodStart ?? null
         : null;
       const subscriptionPeriodEnd = subscriptionWindowActive
         ? subscription?.currentPeriodEnd ?? null
         : null;
-      const effectivePeriodStart = entitlementPeriodStart ?? subscriptionPeriodStart;
-      const effectivePeriodEnd = entitlementPeriodEnd ?? subscriptionPeriodEnd;
+      const effectivePeriodStart = subscriptionPeriodStart;
+      const effectivePeriodEnd = subscriptionPeriodEnd;
 
-      const rawPlanId = entitlementAllowsPaidAccess
-        ? entitlement?.planId
-        : subscriptionWindowActive
-          ? subscription?.planId
-          : 'free';
+      const rawPlanId = subscriptionWindowActive
+        ? subscription?.planCode
+        : 'free';
       const planId = normalizePlanId(rawPlanId);
 
       if (planId === 'custom') {
         const monthlyPrice = subscriptionWindowActive && subscription
           ? subscription.billingCycle === 'year'
-            ? subscription.amountCents / 1200
-            : subscription.amountCents / 100
+            ? subscription.amountMinor / 1200
+            : subscription.amountMinor / 100
           : 0;
 
         return {
           planId: 'custom',
           planName: 'Custom',
           priceUsdMonthly: round(monthlyPrice, 2),
-          includedCredits: entitlementCreditsIncluded ?? DEFAULT_CREDITS_LIMIT,
+          includedCredits: DEFAULT_CREDITS_LIMIT,
           nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
           billingCycle:
             subscriptionWindowActive && subscription
@@ -306,11 +283,11 @@ export class UsageService {
 
       const plan = getBillingPlan(planId) ?? freePlan;
       const monthlyPriceCents =
-        getPlanPrice(planId, 'month')?.amountCents ??
+        getPlanPrice(planId, 'month')?.amountMinor ??
         (subscriptionWindowActive && subscription
           ? subscription.billingCycle === 'year'
-            ? Math.round(subscription.amountCents / 12)
-            : subscription.amountCents
+            ? Math.round(subscription.amountMinor / 12)
+            : subscription.amountMinor
           : 0);
 
       return {
@@ -318,7 +295,6 @@ export class UsageService {
         planName: plan?.name ?? defaultPlanName,
         priceUsdMonthly: round(monthlyPriceCents / 100, 2),
         includedCredits:
-          entitlementCreditsIncluded ??
           plan?.includedCredits ??
           DEFAULT_CREDITS_LIMIT,
         nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
