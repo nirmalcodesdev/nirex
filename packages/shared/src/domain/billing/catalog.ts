@@ -8,7 +8,7 @@ export type BillingCatalogPlanId = Exclude<BillingPlanId, 'custom'>;
 
 export type BillingPlanCatalogEntry = Pick<
   BillingPlan,
-  'id' | 'name' | 'description' | 'features' | 'includedCredits'
+  'id' | 'name' | 'description' | 'features' | 'includedCredits' | 'trialDays' | 'active'
 >;
 
 export const BILLING_PLAN_CATALOG: Record<
@@ -26,6 +26,8 @@ export const BILLING_PLAN_CATALOG: Record<
       'Limited to Agentic Team AI',
     ],
     includedCredits: 10_000,
+    trialDays: 0,
+    active: true,
   },
   pro: {
     id: 'pro',
@@ -38,6 +40,8 @@ export const BILLING_PLAN_CATALOG: Record<
       'Access to Agentic Team AI',
     ],
     includedCredits: 50_000,
+    trialDays: 14,
+    active: true,
   },
   enterprise: {
     id: 'enterprise',
@@ -51,6 +55,8 @@ export const BILLING_PLAN_CATALOG: Record<
       'Custom SLAs and onboarding',
     ],
     includedCredits: null,
+    trialDays: 0,
+    active: true,
   },
 };
 

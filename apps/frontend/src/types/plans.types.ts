@@ -5,6 +5,7 @@ export interface PricingPlan {
     price: string;
     period: string;
     description: string;
+    trialDays?: number;
     features: string[];
     cta: string;
     highlight: boolean;

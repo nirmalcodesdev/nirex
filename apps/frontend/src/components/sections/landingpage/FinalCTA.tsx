@@ -1,4 +1,4 @@
-import MagneticButton from '@nirex/ui/MagneticButton';
+import { MagneticButton } from '@nirex/ui/MagneticButton';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 

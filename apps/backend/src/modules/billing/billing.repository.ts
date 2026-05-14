@@ -1,105 +1,223 @@
-import { Types } from 'mongoose';
+import mongoose, { ClientSession, FilterQuery, Types } from 'mongoose';
+import type {
+  BillingActorType,
+  BillingAuditOutcome,
+  BillingCycle,
+  BillingInvoiceStatus,
+  BillingPaymentStatus,
+  BillingPlanId,
+  BillingRefundStatus,
+  BillingSubscriptionStatus,
+  BillingWebhookStatus,
+  JsonObject,
+} from '@nirex/shared';
 import {
+  BillingAuditLogModel,
+  BillingCouponModel,
   BillingCustomerModel,
-  BillingEntitlementModel,
-  BillingEventLogModel,
+  BillingDiscountModel,
+  BillingDunningAttemptModel,
+  BillingIdempotencyKeyModel,
+  BillingInvoiceLineItemModel,
   BillingInvoiceModel,
+  BillingPaymentMethodModel,
+  BillingPaymentModel,
+  BillingPlanModel,
+  BillingReconciliationAlertModel,
+  BillingRefundModel,
   BillingSubscriptionModel,
+  BillingUsageRecordModel,
   BillingWebhookEventModel,
-  type BillingEntitlementStatus,
-  type BillingSubscriptionStatus,
+  type IBillingAuditLogDocument,
+  type IBillingCouponDocument,
   type IBillingCustomerDocument,
-  type IBillingEntitlementDocument,
+  type IBillingDunningAttemptDocument,
+  type IBillingIdempotencyKeyDocument,
   type IBillingInvoiceDocument,
+  type IBillingInvoiceLineItemDocument,
+  type IBillingPaymentDocument,
+  type IBillingPaymentMethodDocument,
+  type IBillingPlanDocument,
+  type IBillingReconciliationAlertDocument,
+  type IBillingRefundDocument,
   type IBillingSubscriptionDocument,
-  type PaymentMethodSnapshot,
+  type IBillingUsageRecordDocument,
+  type IBillingWebhookEventDocument,
 } from './billing.model.js';
 
-interface UpsertCustomerInput {
+export type BillingSession = ClientSession;
+
+export interface CustomerInput {
   userId: Types.ObjectId;
-  stripeCustomerId: string;
-  email: string;
-  name?: string;
-  defaultPaymentMethod?: PaymentMethodSnapshot;
+  providerCustomerId?: string;
+  defaultPaymentMethodId?: Types.ObjectId;
 }
 
-interface UpsertSubscriptionInput {
+export interface PaymentMethodInput {
+  customerId: Types.ObjectId;
   userId: Types.ObjectId;
-  stripeCustomerId: string;
-  stripeSubscriptionId: string;
-  stripePriceId?: string;
-  planId: string;
-  billingCycle: 'month' | 'year';
-  status: BillingSubscriptionStatus;
+  providerPaymentMethodId: string;
+  type: 'card' | 'bank_account' | 'wallet' | 'unknown';
+  brand?: string;
+  last4?: string;
+  expMonth?: number;
+  expYear?: number;
+  funding?: string;
+  isDefault?: boolean;
+}
+
+export interface PlanInput {
+  code: BillingPlanId;
+  name: string;
+  description: string;
+  features: string[];
+  includedCredits?: number | null;
+  trialDays: number;
   currency: string;
-  amountCents: number;
-  cancelAtPeriodEnd: boolean;
+  amountMinor: number;
+  billingCycle: BillingCycle;
+  providerPriceId?: string;
+  providerProductId?: string;
+  active: boolean;
+}
+
+export interface SubscriptionInput {
+  customerId: Types.ObjectId;
+  userId: Types.ObjectId;
+  planCode: BillingPlanId;
+  billingCycle: BillingCycle;
+  status: Exclude<BillingSubscriptionStatus, 'NONE'>;
+  providerSubscriptionId?: string;
+  providerPriceId?: string;
+  currency: string;
+  amountMinor: number;
+  cancelAtPeriodEnd?: boolean;
   currentPeriodStart?: Date;
   currentPeriodEnd?: Date;
-  canceledAt?: Date;
-  endedAt?: Date;
   trialStart?: Date;
   trialEnd?: Date;
-  latestInvoiceId?: string;
+  metadata?: JsonObject;
 }
 
-interface UpsertInvoiceInput {
+export interface InvoiceInput {
+  customerId: Types.ObjectId;
   userId: Types.ObjectId;
-  stripeCustomerId: string;
-  stripeInvoiceId: string;
-  stripeSubscriptionId?: string;
-  number?: string;
-  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void' | 'unknown';
+  subscriptionId?: Types.ObjectId;
+  providerInvoiceId?: string;
+  invoiceNumber?: string;
+  description?: string;
+  status: BillingInvoiceStatus;
   currency: string;
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-  amountDueCents: number;
-  amountPaidCents: number;
-  amountRemainingCents: number;
+  subtotalMinor: number;
+  taxMinor: number;
+  discountMinor: number;
+  totalMinor: number;
+  amountDueMinor: number;
+  amountPaidMinor: number;
+  amountRemainingMinor: number;
   hostedInvoiceUrl?: string;
   invoicePdfUrl?: string;
-  dueDate?: Date;
+  dueAt?: Date;
   paidAt?: Date;
   periodStart?: Date;
   periodEnd?: Date;
-  stripeCreatedAt: Date;
+  providerCreatedAt?: Date;
 }
 
-interface UpsertEntitlementInput {
+export interface InvoiceLineItemInput {
+  invoiceId: Types.ObjectId;
   userId: Types.ObjectId;
-  planId: string;
-  status: BillingEntitlementStatus;
-  canAccessPaidFeatures: boolean;
-  creditsIncluded?: number | null;
-  features: string[];
-  stripeSubscriptionId?: string;
-  currentPeriodStart?: Date;
-  currentPeriodEnd?: Date;
-  accessEndsAt?: Date;
-  issueCode?: string | null;
-  issueMessage?: string | null;
-  lastSyncedAt?: Date;
+  customerId: Types.ObjectId;
+  subscriptionId?: Types.ObjectId;
+  description: string;
+  quantity: number;
+  unitAmountMinor: number;
+  amountMinor: number;
+  currency: string;
+  planCode?: BillingPlanId;
+  usageRecordId?: Types.ObjectId;
 }
 
-interface RecordBillingEventInput {
+export interface PaymentInput {
+  invoiceId?: Types.ObjectId;
+  customerId: Types.ObjectId;
+  userId: Types.ObjectId;
+  paymentMethodId?: Types.ObjectId;
+  providerPaymentId?: string;
+  idempotencyKey: string;
+  status: BillingPaymentStatus;
+  amountMinor: number;
+  currency: string;
+  failureCode?: string;
+  failureMessage?: string;
+  requiresActionUrl?: string;
+  attemptedAt?: Date;
+}
+
+export interface RefundInput {
+  paymentId: Types.ObjectId;
+  customerId: Types.ObjectId;
+  userId: Types.ObjectId;
+  providerRefundId?: string;
+  idempotencyKey: string;
+  status: BillingRefundStatus;
+  amountMinor: number;
+  currency: string;
+  reason?: string;
+  requestedByActorType: BillingActorType;
+  requestedByActorId?: string;
+}
+
+export interface AuditLogInput {
   userId?: Types.ObjectId;
-  stripeEventId?: string;
-  eventType?: string;
-  objectId?: string;
+  customerId?: Types.ObjectId;
+  subscriptionId?: Types.ObjectId;
+  invoiceId?: Types.ObjectId;
+  paymentId?: Types.ObjectId;
+  actorType: BillingActorType;
+  actorId?: string;
   action: string;
-  status: 'success' | 'failed' | 'ignored';
-  message?: string;
-  metadata?: Record<string, unknown>;
+  outcome: BillingAuditOutcome;
+  before?: JsonObject;
+  after?: JsonObject;
+  metadata?: JsonObject;
+  ip?: string;
+  userAgent?: string;
+  requestId?: string;
+  errorCode?: string;
   occurredAt?: Date;
 }
 
-interface WebhookEventClaimResult {
-  shouldProcess: boolean;
-  duplicate: boolean;
+export interface ReconciliationAlertInput {
+  customerId?: Types.ObjectId;
+  subscriptionId?: Types.ObjectId;
+  paymentId?: Types.ObjectId;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  diff: JsonObject;
 }
 
-function isMongoDuplicateKeyError(error: unknown): boolean {
+export interface ListInvoicesInput {
+  userId: Types.ObjectId;
+  limit: number;
+  cursor?: string;
+  status?: BillingInvoiceStatus;
+}
+
+export interface ListInvoicesResult {
+  items: IBillingInvoiceDocument[];
+  nextCursor: string | null;
+}
+
+export interface IdempotencyStartResult {
+  record: IBillingIdempotencyKeyDocument;
+  existing: boolean;
+}
+
+function optionalSession(session?: ClientSession): { session?: ClientSession } {
+  return session ? { session } : {};
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -109,339 +227,727 @@ function isMongoDuplicateKeyError(error: unknown): boolean {
 }
 
 export class BillingRepository {
-  async findCustomerByUserId(
-    userId: Types.ObjectId,
-  ): Promise<IBillingCustomerDocument | null> {
-    return BillingCustomerModel.findOne({ userId }).exec();
+  async withTransaction<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await mongoose.startSession();
+    try {
+      let result: T | undefined;
+      await session.withTransaction(async () => {
+        result = await fn(session);
+      });
+      if (result === undefined) {
+        throw new Error('Billing transaction did not return a result.');
+      }
+      return result;
+    } finally {
+      await session.endSession();
+    }
   }
 
-  async findCustomerByStripeCustomerId(
-    stripeCustomerId: string,
+  async findCustomerByUserId(
+    userId: Types.ObjectId,
+    session?: ClientSession,
   ): Promise<IBillingCustomerDocument | null> {
-    return BillingCustomerModel.findOne({ stripeCustomerId }).exec();
+    return BillingCustomerModel.findOne({ userId, deletedAt: { $exists: false } })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async findCustomerById(
+    customerId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<IBillingCustomerDocument | null> {
+    return BillingCustomerModel.findOne({ _id: customerId, deletedAt: { $exists: false } })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async findCustomerByProviderCustomerId(
+    providerCustomerId: string,
+    session?: ClientSession,
+  ): Promise<IBillingCustomerDocument | null> {
+    return BillingCustomerModel.findOne({
+      provider: 'stripe',
+      providerCustomerId,
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
+      .exec();
   }
 
   async upsertCustomer(
-    input: UpsertCustomerInput,
+    input: CustomerInput,
+    session?: ClientSession,
   ): Promise<IBillingCustomerDocument> {
     const update: Record<string, unknown> = {
-      stripeCustomerId: input.stripeCustomerId,
-      email: input.email.toLowerCase().trim(),
+      provider: 'stripe',
+      deletedAt: undefined,
     };
-    if (input.name !== undefined) update.name = input.name.trim();
-    if (input.defaultPaymentMethod !== undefined) {
-      update.defaultPaymentMethod = input.defaultPaymentMethod;
-    }
+    if (input.providerCustomerId !== undefined) update.providerCustomerId = input.providerCustomerId;
+    if (input.defaultPaymentMethodId !== undefined) update.defaultPaymentMethodId = input.defaultPaymentMethodId;
 
     const doc = await BillingCustomerModel.findOneAndUpdate(
-      { userId: input.userId },
+      { userId: input.userId, provider: 'stripe' },
       { $set: update },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
     ).exec();
 
-    if (!doc) {
-      throw new Error('Failed to upsert billing customer.');
-    }
-
+    if (!doc) throw new Error('Failed to upsert billing customer.');
     return doc;
   }
 
-  async markCustomerStripeSynced(
-    userId: Types.ObjectId,
-    syncedAt: Date = new Date(),
+  async markCustomerSynced(
+    customerId: Types.ObjectId,
+    syncedAt: Date,
+    session?: ClientSession,
   ): Promise<void> {
     await BillingCustomerModel.updateOne(
-      { userId },
+      { _id: customerId },
+      { $set: { lastProviderSyncAt: syncedAt } },
+      optionalSession(session),
+    ).exec();
+  }
+
+  async upsertPlan(input: PlanInput, session?: ClientSession): Promise<IBillingPlanDocument> {
+    const doc = await BillingPlanModel.findOneAndUpdate(
+      { code: input.code, billingCycle: input.billingCycle, currency: input.currency.toLowerCase() },
       {
         $set: {
-          lastStripeSyncAt: syncedAt,
+          ...input,
+          provider: 'stripe',
+          currency: input.currency.toLowerCase(),
+          deletedAt: undefined,
         },
       },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
     ).exec();
+    if (!doc) throw new Error('Failed to upsert billing plan.');
+    return doc;
+  }
+
+  async listActivePlans(session?: ClientSession): Promise<IBillingPlanDocument[]> {
+    return BillingPlanModel.find({ active: true, deletedAt: { $exists: false } })
+      .sort({ code: 1, billingCycle: 1 })
+      .session(session ?? null)
+      .exec();
   }
 
   async findLatestSubscriptionByUserId(
     userId: Types.ObjectId,
-    statuses?: BillingSubscriptionStatus[],
+    statuses?: Exclude<BillingSubscriptionStatus, 'NONE'>[],
+    session?: ClientSession,
   ): Promise<IBillingSubscriptionDocument | null> {
-    const filter: {
-      userId: Types.ObjectId;
-      status?: { $in: BillingSubscriptionStatus[] };
-    } = { userId };
+    const filter: FilterQuery<IBillingSubscriptionDocument> = {
+      userId,
+      deletedAt: { $exists: false },
+    };
     if (statuses && statuses.length > 0) {
       filter.status = { $in: statuses };
     }
 
     return BillingSubscriptionModel.findOne(filter)
       .sort({ currentPeriodEnd: -1, createdAt: -1 })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async hasUsedTrialForPlan(
+    userId: Types.ObjectId,
+    planCode: BillingPlanId,
+    session?: ClientSession,
+  ): Promise<boolean> {
+    const doc = await BillingSubscriptionModel.findOne({
+      userId,
+      planCode,
+      deletedAt: { $exists: false },
+      $or: [
+        { trialStart: { $exists: true, $ne: null } },
+        { trialEnd: { $exists: true, $ne: null } },
+        { status: 'TRIALING' },
+      ],
+    })
+      .select({ _id: 1 })
+      .session(session ?? null)
+      .lean()
+      .exec();
+
+    return Boolean(doc);
+  }
+
+  async findSubscriptionById(
+    subscriptionId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<IBillingSubscriptionDocument | null> {
+    return BillingSubscriptionModel.findOne({
+      _id: subscriptionId,
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async findSubscriptionByProviderId(
+    providerSubscriptionId: string,
+    session?: ClientSession,
+  ): Promise<IBillingSubscriptionDocument | null> {
+    return BillingSubscriptionModel.findOne({
+      provider: 'stripe',
+      providerSubscriptionId,
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
       .exec();
   }
 
   async upsertSubscription(
-    input: UpsertSubscriptionInput,
+    input: SubscriptionInput,
+    session?: ClientSession,
   ): Promise<IBillingSubscriptionDocument> {
+    const filter = input.providerSubscriptionId
+      ? { provider: 'stripe', providerSubscriptionId: input.providerSubscriptionId }
+      : { customerId: input.customerId, status: { $ne: 'CANCELED' }, planCode: input.planCode };
+
     const doc = await BillingSubscriptionModel.findOneAndUpdate(
-      { stripeSubscriptionId: input.stripeSubscriptionId },
+      filter,
       {
         $set: {
-          userId: input.userId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripePriceId: input.stripePriceId,
-          planId: input.planId,
-          billingCycle: input.billingCycle,
-          status: input.status,
-          currency: input.currency,
-          amountCents: input.amountCents,
-          cancelAtPeriodEnd: input.cancelAtPeriodEnd,
-          currentPeriodStart: input.currentPeriodStart,
-          currentPeriodEnd: input.currentPeriodEnd,
-          canceledAt: input.canceledAt,
-          endedAt: input.endedAt,
-          trialStart: input.trialStart,
-          trialEnd: input.trialEnd,
-          latestInvoiceId: input.latestInvoiceId,
+          ...input,
+          provider: 'stripe',
+          currency: input.currency.toLowerCase(),
+          cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+          deletedAt: undefined,
         },
       },
-      {
-        new: true,
-        upsert: true,
-        setDefaultsOnInsert: true,
-      },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
     ).exec();
-
-    if (!doc) {
-      throw new Error('Failed to upsert billing subscription.');
-    }
-
+    if (!doc) throw new Error('Failed to upsert billing subscription.');
     return doc;
   }
 
-  async upsertInvoice(input: UpsertInvoiceInput): Promise<IBillingInvoiceDocument> {
-    const doc = await BillingInvoiceModel.findOneAndUpdate(
-      { stripeInvoiceId: input.stripeInvoiceId },
-      {
-        $set: {
-          userId: input.userId,
-          stripeCustomerId: input.stripeCustomerId,
-          stripeSubscriptionId: input.stripeSubscriptionId,
-          number: input.number,
-          status: input.status,
-          currency: input.currency,
-          subtotalCents: input.subtotalCents,
-          taxCents: input.taxCents,
-          totalCents: input.totalCents,
-          amountDueCents: input.amountDueCents,
-          amountPaidCents: input.amountPaidCents,
-          amountRemainingCents: input.amountRemainingCents,
-          hostedInvoiceUrl: input.hostedInvoiceUrl,
-          invoicePdfUrl: input.invoicePdfUrl,
-          dueDate: input.dueDate,
-          paidAt: input.paidAt,
-          periodStart: input.periodStart,
-          periodEnd: input.periodEnd,
-          stripeCreatedAt: input.stripeCreatedAt,
-        },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
+  async updateSubscriptionState(
+    subscriptionId: Types.ObjectId,
+    status: Exclude<BillingSubscriptionStatus, 'NONE'>,
+    fields: Partial<Pick<IBillingSubscriptionDocument, 'cancelAtPeriodEnd' | 'canceledAt' | 'pausedAt' | 'endedAt' | 'currentPeriodStart' | 'currentPeriodEnd'>> = {},
+    session?: ClientSession,
+  ): Promise<IBillingSubscriptionDocument | null> {
+    return BillingSubscriptionModel.findByIdAndUpdate(
+      subscriptionId,
+      { $set: { status, ...fields } },
+      { new: true, ...optionalSession(session) },
     ).exec();
-
-    if (!doc) {
-      throw new Error('Failed to upsert billing invoice.');
-    }
-
-    return doc;
   }
 
-  async findEntitlementByUserId(
-    userId: Types.ObjectId,
-  ): Promise<IBillingEntitlementDocument | null> {
-    return BillingEntitlementModel.findOne({ userId }).exec();
-  }
-
-  async upsertEntitlement(
-    input: UpsertEntitlementInput,
-  ): Promise<IBillingEntitlementDocument> {
-    const update: Record<string, unknown> = {
-      planId: input.planId,
-      status: input.status,
-      canAccessPaidFeatures: input.canAccessPaidFeatures,
-      creditsIncluded: input.creditsIncluded,
-      features: input.features,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-      currentPeriodStart: input.currentPeriodStart,
-      currentPeriodEnd: input.currentPeriodEnd,
-      accessEndsAt: input.accessEndsAt,
-      issueCode: input.issueCode,
-      issueMessage: input.issueMessage,
-      lastSyncedAt: input.lastSyncedAt ?? new Date(),
-    };
-
-    const doc = await BillingEntitlementModel.findOneAndUpdate(
-      { userId: input.userId },
-      { $set: update },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
-    ).exec();
-
-    if (!doc) {
-      throw new Error('Failed to upsert billing entitlement.');
-    }
-
-    return doc;
-  }
-
-  async recordBillingEvent(input: RecordBillingEventInput): Promise<void> {
-    await BillingEventLogModel.create({
-      userId: input.userId,
-      stripeEventId: input.stripeEventId,
-      eventType: input.eventType,
-      objectId: input.objectId,
-      action: input.action,
-      status: input.status,
-      message: input.message,
-      metadata: input.metadata,
-      occurredAt: input.occurredAt ?? new Date(),
-    });
-  }
-
-  async listInvoicesByUserId(
-    userId: Types.ObjectId,
-    limit: number = 20,
-  ): Promise<IBillingInvoiceDocument[]> {
-    return BillingInvoiceModel.find({ userId })
-      .sort({ stripeCreatedAt: -1 })
-      .limit(limit)
+  async listActiveSubscriptions(session?: ClientSession): Promise<IBillingSubscriptionDocument[]> {
+    return BillingSubscriptionModel.find({
+      status: { $in: ['TRIALING', 'ACTIVE', 'PAST_DUE'] },
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
       .exec();
   }
 
-  async getPaidInvoicesYtdTotalCents(
+  async listPaymentMethods(
     userId: Types.ObjectId,
-    year: number,
-  ): Promise<number> {
-    const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
-
-    const result = await BillingInvoiceModel.aggregate<{
-      totalPaid: number;
-    }>([
-      {
-        $match: {
-          userId,
-          status: 'paid',
-          paidAt: { $gte: start, $lt: end },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalPaid: { $sum: '$amountPaidCents' },
-        },
-      },
-    ]);
-
-    return result[0]?.totalPaid ?? 0;
+    session?: ClientSession,
+  ): Promise<IBillingPaymentMethodDocument[]> {
+    return BillingPaymentMethodModel.find({
+      userId,
+      status: 'ACTIVE',
+      deletedAt: { $exists: false },
+    })
+      .sort({ isDefault: -1, createdAt: -1 })
+      .session(session ?? null)
+      .exec();
   }
 
-  async claimWebhookEventForProcessing(
-    eventId: string,
-    eventType: string,
-    staleProcessingAfterSeconds: number,
-  ): Promise<WebhookEventClaimResult> {
-    const now = new Date();
-    const staleBefore = new Date(
-      now.getTime() - Math.max(60, staleProcessingAfterSeconds) * 1000,
-    );
+  async findPaymentMethodById(
+    paymentMethodId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<IBillingPaymentMethodDocument | null> {
+    return BillingPaymentMethodModel.findOne({
+      _id: paymentMethodId,
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
+      .exec();
+  }
 
-    const reclaimed = await BillingWebhookEventModel.findOneAndUpdate(
+  async upsertPaymentMethod(
+    input: PaymentMethodInput,
+    session?: ClientSession,
+  ): Promise<IBillingPaymentMethodDocument> {
+    const doc = await BillingPaymentMethodModel.findOneAndUpdate(
+      { provider: 'stripe', providerPaymentMethodId: input.providerPaymentMethodId },
       {
-        stripeEventId: eventId,
-        $or: [
-          { status: 'failed' },
-          { status: 'processing', updatedAt: { $lte: staleBefore } },
-        ],
+        $set: {
+          ...input,
+          provider: 'stripe',
+          isDefault: input.isDefault ?? false,
+          status: 'ACTIVE',
+          deletedAt: undefined,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
+    ).exec();
+    if (!doc) throw new Error('Failed to upsert billing payment method.');
+    return doc;
+  }
+
+  async setDefaultPaymentMethod(
+    customerId: Types.ObjectId,
+    paymentMethodId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<void> {
+    await BillingPaymentMethodModel.updateMany(
+      { customerId },
+      { $set: { isDefault: false } },
+      optionalSession(session),
+    ).exec();
+    await BillingPaymentMethodModel.updateOne(
+      { _id: paymentMethodId, customerId },
+      { $set: { isDefault: true } },
+      optionalSession(session),
+    ).exec();
+    await BillingCustomerModel.updateOne(
+      { _id: customerId },
+      { $set: { defaultPaymentMethodId: paymentMethodId } },
+      optionalSession(session),
+    ).exec();
+  }
+
+  async detachPaymentMethod(
+    paymentMethodId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<void> {
+    await BillingPaymentMethodModel.updateOne(
+      { _id: paymentMethodId },
+      { $set: { status: 'DETACHED', deletedAt: new Date(), isDefault: false } },
+      optionalSession(session),
+    ).exec();
+  }
+
+  async createInvoice(input: InvoiceInput, session?: ClientSession): Promise<IBillingInvoiceDocument> {
+    const docs = await BillingInvoiceModel.create([{ ...input, provider: 'stripe', currency: input.currency.toLowerCase() }], optionalSession(session));
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create billing invoice.');
+    return doc;
+  }
+
+  async upsertInvoice(input: InvoiceInput, session?: ClientSession): Promise<IBillingInvoiceDocument> {
+    if (!input.providerInvoiceId) {
+      return this.createInvoice(input, session);
+    }
+
+    const doc = await BillingInvoiceModel.findOneAndUpdate(
+      {
+        provider: 'stripe',
+        userId: input.userId,
+        providerInvoiceId: input.providerInvoiceId,
       },
       {
         $set: {
-          eventType,
-          status: 'processing',
-          receivedAt: now,
-        },
-        $unset: {
-          processedAt: '',
-          lastError: '',
-        },
-        $inc: {
-          attempts: 1,
+          ...input,
+          provider: 'stripe',
+          currency: input.currency.toLowerCase(),
+          deletedAt: undefined,
         },
       },
-      { new: true },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
     ).exec();
+    if (!doc) throw new Error('Failed to upsert billing invoice.');
+    return doc;
+  }
 
-    if (reclaimed) {
-      return { shouldProcess: true, duplicate: false };
+  async createInvoiceLineItem(
+    input: InvoiceLineItemInput,
+    session?: ClientSession,
+  ): Promise<IBillingInvoiceLineItemDocument> {
+    const docs = await BillingInvoiceLineItemModel.create([{ ...input, currency: input.currency.toLowerCase() }], optionalSession(session));
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create invoice line item.');
+    return doc;
+  }
+
+  async listInvoiceLineItems(
+    invoiceIds: Types.ObjectId[],
+    session?: ClientSession,
+  ): Promise<IBillingInvoiceLineItemDocument[]> {
+    return BillingInvoiceLineItemModel.find({ invoiceId: { $in: invoiceIds }, deletedAt: { $exists: false } })
+      .sort({ createdAt: 1 })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async findInvoiceById(
+    invoiceId: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<IBillingInvoiceDocument | null> {
+    return BillingInvoiceModel.findOne({ _id: invoiceId, deletedAt: { $exists: false } })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async listInvoicesByUserId(input: ListInvoicesInput, session?: ClientSession): Promise<ListInvoicesResult> {
+    const limit = Math.max(1, Math.min(100, input.limit));
+    const filter: FilterQuery<IBillingInvoiceDocument> = {
+      userId: input.userId,
+      deletedAt: { $exists: false },
+    };
+    if (input.status) filter.status = input.status;
+    if (input.cursor && Types.ObjectId.isValid(input.cursor)) {
+      filter._id = { $lt: new Types.ObjectId(input.cursor) };
     }
 
+    const docs = await BillingInvoiceModel.find(filter)
+      .sort({ _id: -1 })
+      .limit(limit + 1)
+      .session(session ?? null)
+      .exec();
+    const items = docs.slice(0, limit);
+    const nextCursor = docs.length > limit ? items[items.length - 1]?._id.toString() ?? null : null;
+    return { items, nextCursor };
+  }
+
+  async getPaidInvoicesYtdTotalMinor(userId: Types.ObjectId, year: number): Promise<number> {
+    const start = new Date(Date.UTC(year, 0, 1));
+    const end = new Date(Date.UTC(year + 1, 0, 1));
+    const result = await BillingInvoiceModel.aggregate<{ totalPaid: number }>([
+      {
+        $match: {
+          userId,
+          status: 'PAID',
+          paidAt: { $gte: start, $lt: end },
+          deletedAt: { $exists: false },
+        },
+      },
+      { $group: { _id: null, totalPaid: { $sum: '$amountPaidMinor' } } },
+    ]);
+    return result[0]?.totalPaid ?? 0;
+  }
+
+  async createPayment(input: PaymentInput, session?: ClientSession): Promise<IBillingPaymentDocument> {
+    const docs = await BillingPaymentModel.create(
+      [{
+        ...input,
+        provider: 'stripe',
+        currency: input.currency.toLowerCase(),
+        attemptedAt: input.attemptedAt ?? new Date(),
+      }],
+      optionalSession(session),
+    );
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create billing payment.');
+    return doc;
+  }
+
+  async findPaymentById(paymentId: Types.ObjectId, session?: ClientSession): Promise<IBillingPaymentDocument | null> {
+    return BillingPaymentModel.findOne({ _id: paymentId, deletedAt: { $exists: false } })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async listRecentPayments(session?: ClientSession): Promise<IBillingPaymentDocument[]> {
+    const since = new Date(Date.now() - 1000 * 60 * 60 * 24 * 45);
+    return BillingPaymentModel.find({ attemptedAt: { $gte: since }, deletedAt: { $exists: false } })
+      .sort({ attemptedAt: -1 })
+      .limit(1000)
+      .session(session ?? null)
+      .exec();
+  }
+
+  async createRefund(input: RefundInput, session?: ClientSession): Promise<IBillingRefundDocument> {
+    const docs = await BillingRefundModel.create(
+      [{ ...input, provider: 'stripe', currency: input.currency.toLowerCase() }],
+      optionalSession(session),
+    );
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create billing refund.');
+    return doc;
+  }
+
+  async createWebhookEvent(
+    input: {
+      providerEventId: string;
+      eventType: string;
+      rawPayload: string;
+      signature?: string;
+      status?: BillingWebhookStatus;
+    },
+    session?: ClientSession,
+  ): Promise<{ doc: IBillingWebhookEventDocument | null; duplicate: boolean }> {
     try {
-      await BillingWebhookEventModel.create({
-        stripeEventId: eventId,
-        eventType,
-        status: 'processing',
-        attempts: 1,
-        receivedAt: new Date(),
-      });
-      return { shouldProcess: true, duplicate: false };
+      const docs = await BillingWebhookEventModel.create(
+        [{
+          provider: 'stripe',
+          providerEventId: input.providerEventId,
+          eventType: input.eventType,
+          rawPayload: input.rawPayload,
+          signature: input.signature,
+          status: input.status ?? 'PENDING',
+          attempts: 0,
+          receivedAt: new Date(),
+        }],
+        optionalSession(session),
+      );
+      return { doc: docs[0] ?? null, duplicate: false };
     } catch (error) {
-      if (isMongoDuplicateKeyError(error)) {
-        await BillingWebhookEventModel.updateOne(
-          { stripeEventId: eventId },
-          { $inc: { attempts: 1 } },
-        ).exec();
-        return { shouldProcess: false, duplicate: true };
+      if (isDuplicateKeyError(error)) {
+        return { doc: null, duplicate: true };
       }
       throw error;
     }
   }
 
-  async markWebhookEventProcessed(eventId: string): Promise<void> {
-    await BillingWebhookEventModel.updateOne(
-      { stripeEventId: eventId },
+  async findWebhookEventByProviderId(
+    providerEventId: string,
+    session?: ClientSession,
+  ): Promise<IBillingWebhookEventDocument | null> {
+    return BillingWebhookEventModel.findOne({ provider: 'stripe', providerEventId })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async findWebhookEventById(
+    id: Types.ObjectId,
+    session?: ClientSession,
+  ): Promise<IBillingWebhookEventDocument | null> {
+    return BillingWebhookEventModel.findById(id).session(session ?? null).exec();
+  }
+
+  async claimWebhookEvent(
+    id: Types.ObjectId,
+    workerId: string,
+    staleBefore?: Date,
+    session?: ClientSession,
+  ): Promise<IBillingWebhookEventDocument | null> {
+    const retryableStatuses: BillingWebhookStatus[] = ['PENDING', 'FAILED', 'DEAD'];
+    const statusFilter: FilterQuery<IBillingWebhookEventDocument> = staleBefore
+      ? {
+        $or: [
+          { status: { $in: retryableStatuses } },
+          { status: 'PROCESSING', lockedAt: { $lt: staleBefore } },
+        ],
+      }
+      : { status: { $in: retryableStatuses } };
+
+    return BillingWebhookEventModel.findOneAndUpdate(
+      {
+        _id: id,
+        ...statusFilter,
+      },
       {
         $set: {
-          status: 'processed',
-          processedAt: new Date(),
+          status: 'PROCESSING',
+          lockedBy: workerId,
+          lockedAt: new Date(),
+          processingStartedAt: new Date(),
         },
-        $unset: {
-          lastError: '',
-        },
+        $inc: { attempts: 1 },
       },
+      { new: true, ...optionalSession(session) },
     ).exec();
   }
 
-  async markWebhookEventIgnored(eventId: string): Promise<void> {
+  async markWebhookEventStatus(
+    id: Types.ObjectId,
+    status: BillingWebhookStatus,
+    error?: string,
+    session?: ClientSession,
+  ): Promise<void> {
+    const update: Record<string, unknown> = {
+      status,
+      processedAt: ['PROCESSED', 'IGNORED', 'DEAD'].includes(status) ? new Date() : undefined,
+      lockedBy: undefined,
+      lockedAt: undefined,
+    };
+    if (error) {
+      update.lastError = error.slice(0, 2000);
+    }
     await BillingWebhookEventModel.updateOne(
-      { stripeEventId: eventId },
-      {
-        $set: {
-          status: 'ignored',
-          processedAt: new Date(),
-        },
-        $unset: {
-          lastError: '',
-        },
-      },
+      { _id: id },
+      { $set: update },
+      optionalSession(session),
     ).exec();
   }
 
-  async markWebhookEventFailed(eventId: string, error: string): Promise<void> {
-    await BillingWebhookEventModel.updateOne(
-      { stripeEventId: eventId },
-      {
-        $set: {
-          status: 'failed',
-          processedAt: new Date(),
-          lastError: error.slice(0, 2000),
-        },
-      },
+  async recordAuditLog(input: AuditLogInput, session?: ClientSession): Promise<IBillingAuditLogDocument> {
+    const docs = await BillingAuditLogModel.create(
+      [{ ...input, occurredAt: input.occurredAt ?? new Date() }],
+      optionalSession(session),
+    );
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create billing audit log.');
+    return doc;
+  }
+
+  async listAuditLogsByCustomer(
+    customerId: Types.ObjectId,
+    limit: number,
+    session?: ClientSession,
+  ): Promise<IBillingAuditLogDocument[]> {
+    return BillingAuditLogModel.find({ customerId, deletedAt: { $exists: false } })
+      .sort({ occurredAt: -1 })
+      .limit(Math.max(1, Math.min(200, limit)))
+      .session(session ?? null)
+      .exec();
+  }
+
+  async startIdempotency(
+    key: string,
+    operation: string,
+    requestHash: string,
+    expiresAt: Date,
+    session?: ClientSession,
+  ): Promise<IdempotencyStartResult> {
+    try {
+      const docs = await BillingIdempotencyKeyModel.create(
+        [{ key, operation, requestHash, expiresAt, status: 'IN_PROGRESS' }],
+        optionalSession(session),
+      );
+      const record = docs[0];
+      if (!record) throw new Error('Failed to create idempotency key.');
+      return { record, existing: false };
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+      const record = await BillingIdempotencyKeyModel.findOne({ key }).session(session ?? null).exec();
+      if (!record) throw error;
+      return { record, existing: true };
+    }
+  }
+
+  async completeIdempotency(
+    key: string,
+    status: 'SUCCEEDED' | 'FAILED',
+    response?: JsonObject,
+    errorCode?: string,
+    session?: ClientSession,
+  ): Promise<void> {
+    await BillingIdempotencyKeyModel.updateOne(
+      { key },
+      { $set: { status, response, errorCode } },
+      optionalSession(session),
     ).exec();
+  }
+
+  async findCouponByCode(code: string, session?: ClientSession): Promise<IBillingCouponDocument | null> {
+    return BillingCouponModel.findOne({
+      code: code.toUpperCase(),
+      active: true,
+      deletedAt: { $exists: false },
+    })
+      .session(session ?? null)
+      .exec();
+  }
+
+  async createDiscount(
+    input: {
+      couponId: Types.ObjectId;
+      customerId: Types.ObjectId;
+      subscriptionId?: Types.ObjectId;
+      invoiceId?: Types.ObjectId;
+      amountMinor: number;
+      currency: string;
+    },
+    session?: ClientSession,
+  ): Promise<void> {
+    await BillingDiscountModel.create(
+      [{ ...input, currency: input.currency.toLowerCase(), appliedAt: new Date() }],
+      optionalSession(session),
+    );
+    await BillingCouponModel.updateOne(
+      { _id: input.couponId },
+      { $inc: { redeemedCount: 1 } },
+      optionalSession(session),
+    ).exec();
+  }
+
+  async createUsageRecord(
+    input: {
+      userId: Types.ObjectId;
+      customerId?: Types.ObjectId;
+      subscriptionId?: Types.ObjectId;
+      meterKey: string;
+      quantity: number;
+      idempotencyKey: string;
+      occurredAt: Date;
+      metadata?: JsonObject;
+    },
+    session?: ClientSession,
+  ): Promise<IBillingUsageRecordDocument> {
+    const docs = await BillingUsageRecordModel.create([input], optionalSession(session));
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create usage record.');
+    return doc;
+  }
+
+  async createDunningAttempt(
+    input: {
+      subscriptionId: Types.ObjectId;
+      invoiceId?: Types.ObjectId;
+      customerId: Types.ObjectId;
+      userId: Types.ObjectId;
+      day: number;
+      scheduledAt: Date;
+    },
+    session?: ClientSession,
+  ): Promise<IBillingDunningAttemptDocument> {
+    const doc = await BillingDunningAttemptModel.findOneAndUpdate(
+      { subscriptionId: input.subscriptionId, day: input.day },
+      { $setOnInsert: { ...input, status: 'SCHEDULED' } },
+      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
+    ).exec();
+    if (!doc) throw new Error('Failed to create dunning attempt.');
+    return doc;
+  }
+
+  async listDueDunningAttempts(now: Date, session?: ClientSession): Promise<IBillingDunningAttemptDocument[]> {
+    return BillingDunningAttemptModel.find({
+      status: 'SCHEDULED',
+      scheduledAt: { $lte: now },
+      deletedAt: { $exists: false },
+    })
+      .sort({ scheduledAt: 1 })
+      .limit(200)
+      .session(session ?? null)
+      .exec();
+  }
+
+  async updateDunningAttempt(
+    id: Types.ObjectId,
+    status: 'SUCCEEDED' | 'FAILED' | 'CANCELED',
+    errorCode?: string,
+    session?: ClientSession,
+  ): Promise<void> {
+    await BillingDunningAttemptModel.updateOne(
+      { _id: id },
+      { $set: { status, attemptedAt: new Date(), errorCode } },
+      optionalSession(session),
+    ).exec();
+  }
+
+  async createReconciliationAlert(
+    input: ReconciliationAlertInput,
+    session?: ClientSession,
+  ): Promise<IBillingReconciliationAlertDocument> {
+    const docs = await BillingReconciliationAlertModel.create(
+      [{ ...input, status: 'OPEN' }],
+      optionalSession(session),
+    );
+    const doc = docs[0];
+    if (!doc) throw new Error('Failed to create reconciliation alert.');
+    return doc;
+  }
+
+  async listOpenReconciliationAlerts(
+    limit: number,
+    session?: ClientSession,
+  ): Promise<IBillingReconciliationAlertDocument[]> {
+    return BillingReconciliationAlertModel.find({ status: 'OPEN', deletedAt: { $exists: false } })
+      .sort({ createdAt: -1 })
+      .limit(Math.max(1, Math.min(500, limit)))
+      .session(session ?? null)
+      .exec();
   }
 }
 

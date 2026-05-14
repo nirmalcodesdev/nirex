@@ -130,6 +130,36 @@ export const billingWebhookLimiter = rateLimit({
   skip: () => env.NODE_ENV === 'test',
 });
 
+/** Strict limiter for authenticated billing mutations. */
+export const billingMutationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: env.BILLING_MUTATION_RATE_LIMIT_PER_MINUTE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createRedisStore('billing_mutation'),
+  message: {
+    status: 'fail',
+    code: 'RATE_LIMIT',
+    message: 'Too many billing requests. Please try again later.',
+  },
+  skip: () => env.NODE_ENV === 'test',
+});
+
+/** Ops limiter for billing admin actions. */
+export const billingAdminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: env.BILLING_ADMIN_RATE_LIMIT_PER_MINUTE,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createRedisStore('billing_admin'),
+  message: {
+    status: 'fail',
+    code: 'RATE_LIMIT',
+    message: 'Too many billing admin requests. Please try again later.',
+  },
+  skip: () => env.NODE_ENV === 'test',
+});
+
 /** Rate limiter for SSE connections to prevent connection exhaustion. */
 export const sseConnectionLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute

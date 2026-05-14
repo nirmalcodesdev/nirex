@@ -1,5 +1,5 @@
 import { plans } from "@/constant/landingpage";
-import MagneticButton from "@nirex/ui/MagneticButton";
+import { MagneticButton } from "@nirex/ui/MagneticButton";
 
 export default function Pricing() {
     return (
@@ -36,6 +36,9 @@ export default function Pricing() {
                                     <span className="font-body text-sm text-nirex-text-muted">{plan.period}</span>
                                 </div>
                                 <p className="body-m text-nirex-text-secondary mb-8">{plan.description}</p>
+                                {plan.trialDays && plan.trialDays > 0 && (
+                                    <p className="text-xs text-nirex-text-muted mb-6">{plan.trialDays}-day free trial</p>
+                                )}
 
                                 <div className="border-t border-border pt-6 mb-8 space-y-3">
                                     {plan.features.map(f => (

@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { TooltipProvider } from "@nirex/ui/tooltip";
 import { SonnerToaster } from "@nirex/ui";
-import { Toaster } from "@nirex/ui/toaster";
 import CustomCursor from "@nirex/ui/CustomCursor";
 
 // Layouts
@@ -81,7 +80,6 @@ const App = () => (
       <ToastProvider> {/* ToastProvider moved here to be globally available */}
         <CustomCursor />
         <TooltipProvider> {/* Added closing tag for TooltipProvider */}
-          <Toaster />
           <SonnerToaster />
           <BrowserRouter>
             <AuthBootstrap />

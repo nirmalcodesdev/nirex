@@ -20,6 +20,7 @@ interface PlanCard {
   name: string;
   description: string;
   features: string[];
+  trialDays: number;
   monthlyPrice: string;
   yearlyPrice: string;
   fullYearlyPrice: string;
@@ -136,6 +137,7 @@ export function Plans() {
         features: apiPlan?.features.length
           ? apiPlan.features
           : catalogPlan.features,
+        trialDays: apiPlan?.trialDays ?? catalogPlan.trialDays,
         monthlyPrice: price.monthlyPrice,
         yearlyPrice: price.yearlyPrice,
         fullYearlyPrice: price.fullYearlyPrice,
@@ -246,6 +248,9 @@ export function Plans() {
                       Billed as {plan.fullYearlyPrice} once
                     </p>
                   )}
+                  {plan.trialDays > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">{plan.trialDays}-day free trial</p>
+                  )}
                 </div>
 
                 <MagneticButton
@@ -254,13 +259,12 @@ export function Plans() {
                     void handleCheckout(plan);
                   }}
                   disabled={plan.isCurrent || plan.cta === "Included"}
-                  className={`w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg text-sm font-medium transition-colors mb-6 sm:mb-8 ${
-                    plan.isCurrent || plan.cta === "Included"
+                  className={`w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg text-sm font-medium transition-colors mb-6 sm:mb-8 ${plan.isCurrent || plan.cta === "Included"
                       ? "bg-muted text-muted-foreground cursor-not-allowed opacity-80"
                       : plan.popular
                         ? "bg-primary text-primary-foreground hover:bg-primary/90"
                         : "bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
-                  } ${pendingPlanId ? "pointer-events-none opacity-70" : ""}`}
+                    } ${pendingPlanId ? "pointer-events-none opacity-70" : ""}`}
                 >
                   {pendingPlanId === plan.id ? "Redirecting..." : plan.cta}
                 </MagneticButton>

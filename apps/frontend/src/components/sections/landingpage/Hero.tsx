@@ -1,5 +1,5 @@
 import { useEffect, useRef, type JSX } from 'react';
-import MagneticButton from '@nirex/ui/MagneticButton';
+import { MagneticButton } from '@nirex/ui/MagneticButton';
 import { useTerminalTyping } from '@/hooks/useTerminalTyping';
 import { terminalLines } from '@/constant/landingpage';
 import { Link } from 'react-router-dom';

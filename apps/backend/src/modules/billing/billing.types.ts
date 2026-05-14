@@ -1,135 +1,53 @@
-export type BillingCycle = 'month' | 'year';
-
-export type BillingPlanId = 'free' | 'pro' | 'enterprise' | 'custom';
-
-export type BillingEntitlementStatus =
-  | 'active'
-  | 'trialing'
-  | 'past_due_grace'
-  | 'payment_action_required'
-  | 'suspended'
-  | 'canceled'
-  | 'none';
-
-export interface BillingPlanPrice {
-  billingCycle: BillingCycle;
-  amountCents: number;
-  currency: string;
-  stripePriceId?: string;
-}
-
-export interface BillingPlan {
-  id: BillingPlanId;
-  name: string;
-  description: string;
-  features: string[];
-  includedCredits: number | null;
-  prices: Partial<Record<BillingCycle, BillingPlanPrice>>;
-  checkoutEnabled: boolean;
-}
-
-export interface BillingOverviewSubscription {
-  subscriptionId: string | null;
-  status:
-  | 'trialing'
-  | 'active'
-  | 'incomplete'
-  | 'incomplete_expired'
-  | 'past_due'
-  | 'canceled'
-  | 'unpaid'
-  | 'paused'
-  | 'none';
-  cancelAtPeriodEnd: boolean;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-}
-
-export interface BillingOverviewPaymentMethod {
-  brand: string;
-  last4: string;
-  expMonth: number;
-  expYear: number;
-  funding: string | null;
-}
-
-export interface BillingOverviewEntitlement {
-  status: BillingEntitlementStatus;
-  planId: BillingPlanId;
-  canAccessPaidFeatures: boolean;
-  isBillingIssue: boolean;
-  issueCode: string | null;
-  issueMessage: string | null;
-  accessEndsAt: string | null;
-  lastSyncedAt: string | null;
-}
-
-export interface BillingInvoiceItem {
-  invoiceId: string;
-  number: string | null;
-  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void' | 'unknown';
-  currency: string;
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-  amountDueCents: number;
-  amountPaidCents: number;
-  amountRemainingCents: number;
-  paidAt: string | null;
-  dueDate: string | null;
-  periodStart: string | null;
-  periodEnd: string | null;
-  hostedInvoiceUrl: string | null;
-  invoicePdfUrl: string | null;
-  createdAt: string;
-}
-
-export interface BillingOverviewKpis {
-  currentPlanAmountCents: number;
-  currency: string;
-  totalPaidYtdCents: number;
-  periodEndDate: string | null;
-  nextBillingDate: string | null;
-  yearlySavingsCents: number;
-}
-
-export interface BillingOverviewResponse {
-  billingEnabled: boolean;
-  customerId: string | null;
-  currentPlan: BillingPlan;
-  subscription: BillingOverviewSubscription;
-  entitlement: BillingOverviewEntitlement;
-  paymentMethod: BillingOverviewPaymentMethod | null;
-  usage: {
-    creditsUsed: number | null;
-    creditsIncluded: number | null;
-    creditsUsagePct: number | null;
-  };
-  kpis: BillingOverviewKpis;
-  invoices: BillingInvoiceItem[];
-  plans: BillingPlan[];
-}
-
-export interface CreateCheckoutSessionInput {
-  planId: BillingPlanId;
-  billingCycle: BillingCycle;
-  successUrl?: string;
-  cancelUrl?: string;
-}
-
-export interface CreateCheckoutSessionResult {
-  sessionId: string;
-  checkoutUrl: string;
-}
-
-export interface CreatePortalSessionInput {
-  returnUrl?: string;
-}
-
-export interface CreatePortalSessionResult {
-  portalUrl: string;
-}
-
-export interface CancelSubscriptionInput {
-  atPeriodEnd?: boolean;
-}
+export type {
+  AdminManualChargeRequest,
+  AdminRefundRequest,
+  ApplyDiscountRequest,
+  BillingAdminCustomerSummary,
+  BillingAdminReconciliationReport,
+  BillingAuditLogItem,
+  BillingAuditOutcome,
+  BillingActorType,
+  BillingCycle,
+  BillingCustomer,
+  BillingDiscountType,
+  BillingInvoiceItem,
+  BillingInvoiceLineItem,
+  BillingInvoiceStatus,
+  BillingInvoicesQuery,
+  BillingInvoicesResponse,
+  BillingOverviewEntitlement,
+  BillingOverviewPaymentMethod,
+  BillingOverviewResponse,
+  BillingOverviewSubscription,
+  BillingPayment,
+  BillingPaymentMethod,
+  BillingPaymentStatus,
+  BillingPlan,
+  BillingPlanId,
+  BillingProvider,
+  BillingReconciliationAlertItem,
+  BillingRefund,
+  BillingRefundStatus,
+  BillingSubscription,
+  BillingSubscriptionStatus,
+  BillingTaxInclusiveMode,
+  BillingWebhookStatus,
+  CancelSubscriptionRequest as CancelSubscriptionInput,
+  CancelSubscriptionResponse,
+  ChangePlanRequest,
+  CreateCheckoutSessionRequest as CreateCheckoutSessionInput,
+  CreateCheckoutSessionResponse as CreateCheckoutSessionResult,
+  CreatePortalSessionRequest as CreatePortalSessionInput,
+  CreatePortalSessionResponse as CreatePortalSessionResult,
+  DownloadInvoicePdfResponse,
+  JsonObject,
+  JsonValue,
+  MoneyAmount,
+  PauseSubscriptionRequest,
+  ProrationPreviewQuery,
+  ProrationPreviewResponse,
+  ResumeSubscriptionRequest,
+  ResumeSubscriptionResponse,
+  RetryPaymentRequest,
+  StripeWebhookResponse,
+} from '@nirex/shared';
