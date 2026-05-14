@@ -25,6 +25,12 @@ import {
 import { env } from '../../config/env.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
+import {
+  sendBillingCheckoutCompletedEmail,
+  sendBillingPaymentFailedEmail,
+  sendBillingPaymentSucceededEmail,
+  sendBillingSubscriptionStateEmail,
+} from '../../utils/mailer.js';
 import { notificationsService } from '../notifications/notifications.service.js';
 import { userRepository } from '../user/user.repository.js';
 import { getBillingPlan, getBillingPlans, getPlanPrice, resolvePlanFromStripePriceId } from './billing.catalog.js';
@@ -721,6 +727,27 @@ export class WebhookService {
       session,
     );
 
+    const user = await userRepository.findById(customer.userId);
+    const planName = mappedPlan?.name ?? (existing ? getBillingPlan(existing.planCode)?.name : 'Nirex Subscription');
+
+    if (!existing && status === 'ACTIVE') {
+      // New subscription
+      if (user?.email) {
+        await sendBillingCheckoutCompletedEmail({
+          to: user.email,
+          customerName: user.fullName,
+          planName,
+          billingPortalUrl: `${env.APP_URL}/billing`,
+        });
+      }
+      await notificationsService.createNotification(customer.userId, {
+        kind: 'billing',
+        severity: 'info',
+        title: 'Subscription activated',
+        message: `Your ${planName} subscription is now active!`,
+      });
+    }
+
     if (existing && existing.status !== status && canTransitionSubscription(existing.status, status)) {
       await this.auditService.record(
         {
@@ -736,6 +763,33 @@ export class WebhookService {
         { actorType: 'WEBHOOK', actorId: event.id },
         session,
       );
+
+      // Notify of status changes
+      if (status === 'CANCELED') {
+        if (user?.email) {
+          await sendBillingSubscriptionStateEmail({
+            to: user.email,
+            customerName: user.fullName,
+            planName,
+            statusLabel: 'Canceled',
+            detail: 'Your subscription has been canceled and your access will end at the end of the current billing period.',
+            billingPortalUrl: `${env.APP_URL}/billing`,
+          });
+        }
+        await notificationsService.createNotification(customer.userId, {
+          kind: 'billing',
+          severity: 'warning',
+          title: 'Subscription canceled',
+          message: `Your ${planName} subscription has been canceled.`,
+        });
+      } else if (status === 'ACTIVE' && existing.status === 'PAST_DUE') {
+        await notificationsService.createNotification(customer.userId, {
+          kind: 'billing',
+          severity: 'info',
+          title: 'Subscription restored',
+          message: `Your ${planName} subscription is active again. Thank you!`,
+        });
+      }
     }
   }
 
@@ -804,6 +858,52 @@ export class WebhookService {
       { actorType: 'WEBHOOK', actorId: event.id },
       session,
     );
+
+    const user = await userRepository.findById(customer.userId);
+    const planName = subscription ? getBillingPlan(subscription.planCode)?.name : 'Nirex Subscription';
+
+    if (paid) {
+      if (user?.email) {
+        await sendBillingPaymentSucceededEmail({
+          to: user.email,
+          customerName: user.fullName,
+          planName,
+          amountCents: totalMinor,
+          currency: normalizeCurrency(readString(data, 'currency')),
+          invoiceNumber: readString(data, 'number'),
+          invoicePdfUrl: readString(data, 'invoice_pdf'),
+          hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+          paidAt: new Date(),
+          billingPortalUrl: `${env.APP_URL}/billing`,
+        });
+      }
+      await notificationsService.createNotification(customer.userId, {
+        kind: 'billing',
+        severity: 'info',
+        title: 'Payment received',
+        message: `We received your payment for ${planName}. Thank you!`,
+      });
+    } else {
+      if (user?.email) {
+        await sendBillingPaymentFailedEmail({
+          to: user.email,
+          customerName: user.fullName,
+          planName,
+          amountCents: totalMinor,
+          currency: normalizeCurrency(readString(data, 'currency')),
+          invoiceNumber: readString(data, 'number'),
+          dueDate: toDate(readNumber(data, 'due_date')),
+          hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+          billingPortalUrl: `${env.APP_URL}/billing`,
+        });
+      }
+      await notificationsService.createNotification(customer.userId, {
+        kind: 'billing',
+        severity: 'error',
+        title: 'Payment failed',
+        message: `We couldn't process your payment for ${planName}. Please update your payment method.`,
+      });
+    }
   }
 
   private async handlePaymentIntent(
@@ -1870,15 +1970,28 @@ export class BillingService {
               { actorType: 'USER', actorId: userId.toString() },
               session,
             );
+            await notificationsService.createNotification(userId, {
+              kind: 'billing',
+              severity: 'warning',
+              title: 'Cancellation scheduled',
+              message: `Your subscription will remain active until ${subscription.currentPeriodEnd?.toLocaleDateString() ?? 'the end of the period'}, then it will be canceled.`,
+            });
             return doc;
           }
-          return this.subscriptionService.transition(
+          const updated = await this.subscriptionService.transition(
             subscription,
             'CANCELED',
             { actorType: 'USER', actorId: userId.toString() },
             { cancelAtPeriodEnd: false, canceledAt: new Date(), endedAt: new Date() },
             session,
           );
+          await notificationsService.createNotification(userId, {
+            kind: 'billing',
+            severity: 'warning',
+            title: 'Subscription canceled',
+            message: 'Your subscription has been canceled immediately.',
+          });
+          return updated;
         });
         const response = mapOverviewSubscription(updated);
         return {
@@ -1909,15 +2022,22 @@ export class BillingService {
     }
     const key = `billing:pause:${deterministicKey([subscription._id.toString()])}`;
     await this.gateway.pauseSubscription(subscription.providerSubscriptionId, { idempotencyKey: key });
-    const updated = await billingRepository.withTransaction(async (session) =>
-      this.subscriptionService.transition(
+    const updated = await billingRepository.withTransaction(async (session) => {
+      const doc = await this.subscriptionService.transition(
         subscription,
         'PAUSED',
         { actorType: 'USER', actorId: userId.toString() },
         { pausedAt: new Date() },
         session,
-      ),
-    );
+      );
+      await notificationsService.createNotification(userId, {
+        kind: 'billing',
+        severity: 'info',
+        title: 'Subscription paused',
+        message: 'Your subscription has been paused. You will not be charged while it is paused.',
+      });
+      return doc;
+    });
     return mapOverviewSubscription(updated);
   }
 
@@ -1933,13 +2053,20 @@ export class BillingService {
     await this.gateway.resumeSubscription(subscription.providerSubscriptionId, { idempotencyKey: key });
     const updated = await billingRepository.withTransaction(async (session) => {
       if (subscription.status === 'PAUSED') {
-        return this.subscriptionService.transition(
+        const doc = await this.subscriptionService.transition(
           subscription,
           'ACTIVE',
           { actorType: 'USER', actorId: userId.toString() },
           { pausedAt: undefined, cancelAtPeriodEnd: false },
           session,
         );
+        await notificationsService.createNotification(userId, {
+          kind: 'billing',
+          severity: 'info',
+          title: 'Subscription resumed',
+          message: 'Welcome back! Your subscription is active again.',
+        });
+        return doc;
       }
       const doc = await billingRepository.updateSubscriptionState(
         subscription._id,
@@ -1961,6 +2088,12 @@ export class BillingService {
         { actorType: 'USER', actorId: userId.toString() },
         session,
       );
+      await notificationsService.createNotification(userId, {
+        kind: 'billing',
+        severity: 'info',
+        title: 'Cancellation reversed',
+        message: 'Your subscription will continue to renew automatically.',
+      });
       return doc;
     });
     return mapOverviewSubscription(updated);

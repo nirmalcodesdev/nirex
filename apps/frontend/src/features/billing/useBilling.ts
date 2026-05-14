@@ -18,6 +18,7 @@ import type {
 } from "@nirex/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { billingApi } from "./billingApi";
+import { notificationsBaseQueryKey } from "../notifications/useNotifications";
 
 type CheckoutPlanId = Exclude<BillingPlanId, "custom">;
 
@@ -85,7 +86,10 @@ export function useBillingPaymentMethodsQuery() {
 function useBillingInvalidation() {
   const queryClient = useQueryClient();
   return async () => {
-    await queryClient.invalidateQueries({ queryKey: billingQueryKeys.all });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: billingQueryKeys.all }),
+      queryClient.invalidateQueries({ queryKey: notificationsBaseQueryKey }),
+    ]);
   };
 }
 
