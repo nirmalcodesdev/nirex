@@ -50,6 +50,24 @@ export class TokenService {
     return tokenDoc;
   }
 
+  async verifyToken(rawToken: string, type: TokenType): Promise<ITokenDocument> {
+    const tokenHash = hashToken(rawToken);
+    const tokenDoc = await tokenRepository.findValidByHash(tokenHash, type);
+
+    if (!tokenDoc) {
+      throw new AppError('Token is invalid or has expired', 400, 'TOKEN_INVALID');
+    }
+
+    return tokenDoc;
+  }
+
+  async consumeToken(tokenId: Types.ObjectId): Promise<void> {
+    const markedAsUsed = await tokenRepository.markUsed(tokenId);
+    if (!markedAsUsed) {
+      throw new AppError('Token is invalid or has expired', 400, 'TOKEN_INVALID');
+    }
+  }
+
   // Find all tokens for a user (used primarily for testing)
   async findByUserId(userId: Types.ObjectId): Promise<ITokenDocument[]> {
     return tokenRepository.findByUserId(userId);

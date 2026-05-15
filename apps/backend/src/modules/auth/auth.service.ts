@@ -5,6 +5,7 @@ import {
   type SignUpRequest,
   type SignInRequest,
   type OAuthProfile as SharedOAuthProfile,
+  validatePasswordPolicy,
 } from '../../types/index.js';
 import {
   hashPassword,
@@ -27,11 +28,32 @@ export type SigninResult = TokenPair & {
   sessionId: string;
 };
 
+function assertPasswordAccepted(password: string, user: { email: string; fullName: string }): string {
+  const result = validatePasswordPolicy(password, {
+    email: user.email,
+    fullName: user.fullName,
+  });
+
+  if (!result.valid) {
+    throw new AppError(
+      result.issues[0]?.message ?? 'Password does not meet security requirements',
+      422,
+      'VALIDATION_ERROR',
+    );
+  }
+
+  return result.normalizedPassword;
+}
+
 // ── Sign Up ───────────────────────────────────────────────────────────────────
 export async function signup(input: SignupInput): Promise<{ userId: string }> {
+  const normalizedPassword = assertPasswordAccepted(input.password, {
+    email: input.email,
+    fullName: input.fullName,
+  });
   await userService.assertEmailAvailable(input.email);
 
-  const passwordHash = await hashPassword(input.password);
+  const passwordHash = await hashPassword(normalizedPassword);
   const user = await userService.createLocalUser({
     email: input.email,
     fullName: input.fullName,
@@ -191,8 +213,28 @@ export async function forgotPassword(email: string): Promise<void> {
 
 // ── Reset Password ────────────────────────────────────────────────────────────
 export async function resetPassword(rawToken: string, newPassword: string): Promise<void> {
-  const tokenDoc = await tokenService.verifyAndConsumeToken(rawToken, 'reset');
-  const passwordHash = await hashPassword(newPassword);
+  const tokenDoc = await tokenService.verifyToken(rawToken, 'reset');
+  const user = (await userRepository.findById(tokenDoc.userId)) as IUserDocument | null;
+  if (!user) throw new AppError('Token is invalid or has expired', 400, 'TOKEN_INVALID');
+
+  const localProvider = user.providers.find((p) => p.type === 'local');
+  if (!localProvider) {
+    throw new AppError(
+      'Password reset is not available for social login accounts.',
+      400,
+      'WRONG_PROVIDER',
+    );
+  }
+
+  const normalizedPassword = assertPasswordAccepted(newPassword, user);
+  const currentHash = (localProvider.data as { passwordHash: string }).passwordHash;
+  const isCurrentPassword = await verifyPassword(normalizedPassword, currentHash);
+  if (isCurrentPassword) {
+    throw new AppError('Choose a password you have not used for this account.', 422, 'VALIDATION_ERROR');
+  }
+
+  await tokenService.consumeToken(tokenDoc._id);
+  const passwordHash = await hashPassword(normalizedPassword);
   await userService.updatePassword(tokenDoc.userId, passwordHash);
   // Revoke all active sessions so existing refresh tokens are invalidated
   await sessionService.revokeAllSessions(tokenDoc.userId);
@@ -222,7 +264,13 @@ export async function changePassword(
     throw new AppError('Current password is incorrect', 400, 'INVALID_CREDENTIALS');
   }
 
-  const newHash = await hashPassword(newPassword);
+  const normalizedPassword = assertPasswordAccepted(newPassword, user);
+  const isSamePassword = await verifyPassword(normalizedPassword, passwordHash);
+  if (isSamePassword) {
+    throw new AppError('Choose a password you have not used for this account.', 422, 'VALIDATION_ERROR');
+  }
+
+  const newHash = await hashPassword(normalizedPassword);
   await userService.updatePassword(new Types.ObjectId(userId), newHash);
   // Revoke all sessions so other devices are signed out
   await sessionService.revokeAllSessions(new Types.ObjectId(userId));

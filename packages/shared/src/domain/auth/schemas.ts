@@ -18,6 +18,7 @@
  */
 
 import { z } from 'zod';
+import { validatePasswordPolicy } from './password-policy.js';
 
 // ============================================================================
 // Common Field Schemas
@@ -39,14 +40,23 @@ export const emailSchema = z
 
 /**
  * Password validation schema
- * - Min 8 characters (NIST recommendation)
- * - Max 128 characters (prevent DoS)
- * - No complexity requirements (NIST advises against arbitrary complexity)
+ * - Min 8 characters for user-chosen passwords
+ * - Max 128 characters to avoid resource exhaustion
+ * - No arbitrary character-class composition requirements
+ * - Rejects common, contextual, repeated, sequential, and invisible-character patterns
  */
 export const passwordSchema = z
   .string()
-  .min(8, 'Password must be at least 8 characters')
-  .max(128, 'Password must be at most 128 characters');
+  .superRefine((password, ctx) => {
+    const result = validatePasswordPolicy(password);
+    for (const issue of result.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: issue.message,
+      });
+    }
+  })
+  .transform((password) => validatePasswordPolicy(password).normalizedPassword);
 
 /**
  * Full name validation schema
@@ -100,11 +110,33 @@ export const signInSchema = z.object({
  * Sign up request schema
  * Used for new user signup
  */
-export const signUpSchema = z.object({
-  email: emailSchema,
-  fullName: fullNameSchema,
-  password: passwordSchema,
-});
+export const signUpSchema = z
+  .object({
+    email: emailSchema,
+    fullName: fullNameSchema,
+    password: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    const result = validatePasswordPolicy(data.password, {
+      email: data.email,
+      fullName: data.fullName,
+    });
+
+    for (const issue of result.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['password'],
+        message: issue.message,
+      });
+    }
+  })
+  .transform((data) => ({
+    ...data,
+    password: validatePasswordPolicy(data.password, {
+      email: data.email,
+      fullName: data.fullName,
+    }).normalizedPassword,
+  }));
 
 /**
  * Forgot password request schema

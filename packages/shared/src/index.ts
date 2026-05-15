@@ -121,6 +121,22 @@ export {
   tokenSchema,
 } from './domain/auth/schemas.js';
 
+export {
+  PASSWORD_POLICY,
+  normalizePassword,
+  getPasswordLength,
+  validatePasswordPolicy,
+  getPasswordRequirementStatus,
+  getPasswordStrength,
+  getPrimaryPasswordPolicyMessage,
+  type PasswordIssueCode,
+  type PasswordValidationIssue,
+  type PasswordValidationContext,
+  type PasswordRequirementStatus,
+  type PasswordStrength,
+  type PasswordValidationResult,
+} from './domain/auth/password-policy.js';
+
 // Error codes
 export { AuthErrorCodes, CommonErrorCodes, ValidationErrorCodes } from './domain/auth/errors.js';
 

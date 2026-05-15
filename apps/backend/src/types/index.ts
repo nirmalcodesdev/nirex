@@ -47,6 +47,8 @@ export {
   type TerminateDevicesRequest,
   type AuthErrorCode,
   type AuthApiError,
+  type PasswordValidationContext,
+  type PasswordValidationIssue,
 } from '@nirex/shared';
 
 // Re-export validation schemas from shared package
@@ -61,6 +63,11 @@ export {
   terminateDevicesSchema,
   emailSchema,
   passwordSchema,
+  validatePasswordPolicy,
+  normalizePassword,
+  PASSWORD_POLICY,
+  getPasswordRequirementStatus,
+  getPasswordStrength,
   uuidSchema,
   objectIdSchema,
   tokenSchema,
