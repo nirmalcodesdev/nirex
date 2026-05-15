@@ -50,13 +50,14 @@ export function notificationsQueryKey(options: NormalizedNotificationsQueryOptio
   return [...notificationsBaseQueryKey, options] as const;
 }
 
-export function useNotificationsQuery(options: NotificationsQueryOptions = {}) {
+export function useNotificationsQuery(options: NotificationsQueryOptions = {}, queryOptions?: { refetchInterval?: number | false }) {
   const normalized = normalizeOptions(options);
 
   return useQuery({
     queryKey: notificationsQueryKey(normalized),
     queryFn: () => notificationsApi.list(toApiQuery(normalized)),
     staleTime: 15_000,
+    ...queryOptions,
   });
 }
 
