@@ -17,6 +17,9 @@ pnpm-debug.log*
 
 # Testing
 coverage/
+tests/*
+!tests/
+!tests/password-policy.test.ts
 
 # IDE
 .vscode/
@@ -27,7 +30,5 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
-
-tests
 
 scripts

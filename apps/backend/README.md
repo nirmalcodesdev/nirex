@@ -80,7 +80,7 @@ Register a new user account.
 {
   "email": "user@example.com",
   "fullName": "John Doe",
-  "password": "SecurePassword123"
+  "password": "quiet-river-station-47"
 }
 ```
 
@@ -97,7 +97,7 @@ Register a new user account.
 
 **Errors:**
 - `400` - Email already exists
-- `422` - Validation error (invalid email, short password, etc.)
+- `422` - Validation error (invalid email, password is too short/common/contextual, etc.)
 
 ---
 
@@ -127,7 +127,7 @@ Sign in with email and password.
 ```json
 {
   "email": "user@example.com",
-  "password": "SecurePassword123"
+  "password": "quiet-river-station-47"
 }
 ```
 
@@ -207,7 +207,7 @@ Reset password with token from email.
 ```json
 {
   "token": "reset-token-from-email",
-  "password": "NewSecurePassword123"
+  "password": "fresh-orbit-window-62"
 }
 ```
 
@@ -419,8 +419,8 @@ Change password (requires current password).
 **Request Body:**
 ```json
 {
-  "currentPassword": "OldPassword123",
-  "newPassword": "NewPassword123"
+  "currentPassword": "quiet-river-station-47",
+  "newPassword": "fresh-orbit-window-62"
 }
 ```
 
@@ -582,7 +582,7 @@ All errors follow this format:
 
 ## Security Features
 
-1. **Password Security**: Argon2id hashing with 64MB memory cost
+1. **Password Security**: 8-128 character policy with common/contextual/pattern checks and Argon2id hashing with 64MB memory cost
 2. **Token Rotation**: Refresh tokens rotated on each use
 3. **Reuse Detection**: Automatic session revocation if token reuse detected
 4. **Account Lockout**: Progressive lockout after failed sign-ins

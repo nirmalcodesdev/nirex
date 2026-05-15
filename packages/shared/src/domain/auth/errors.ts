@@ -189,7 +189,7 @@ export const ValidationErrorCodes = {
   },
   INVALID_PASSWORD: {
     code: 'INVALID_PASSWORD',
-    message: 'Password must be at least 8 characters.',
+    message: 'Password must be at least 8 characters and must not be common or easy to guess.',
   },
   PASSWORDS_DONT_MATCH: {
     code: 'PASSWORDS_DONT_MATCH',

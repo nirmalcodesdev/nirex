@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
-import { AppError, JwtPayload } from '../types/index.js';
+import { AppError, JwtPayload, normalizePassword } from '../types/index.js';
 
 // ─── Password Hashing ────────────────────────────────────────────────────────
 
@@ -18,13 +18,18 @@ const ARGON2_OPTIONS: argon2.Options & { raw?: false } = {
 };
 
 export async function hashPassword(password: string): Promise<string> {
-  return argon2.hash(password, ARGON2_OPTIONS);
+  return argon2.hash(normalizePassword(password), ARGON2_OPTIONS);
 }
 
 // argon2.verify performs constant-time comparison internally, preventing
 // timing attacks that could be used to enumerate valid passwords.
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   try {
+    const normalizedPassword = normalizePassword(password);
+    const verified = await argon2.verify(hash, normalizedPassword, { type: argon2.argon2id });
+    if (verified || normalizedPassword === password) return verified;
+
+    // Backward compatibility for any pre-policy Unicode password hashes.
     return await argon2.verify(hash, password, { type: argon2.argon2id });
   } catch {
     // argon2 throws on malformed hashes — treat as failed verification

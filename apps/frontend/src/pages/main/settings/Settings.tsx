@@ -20,6 +20,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { PageHeader } from "@nirex/ui";
 import {
   changePasswordSchema,
+  PASSWORD_POLICY,
   terminateDevicesSchema,
   updateProfileSchema,
   type BeginTwoFactorSetupResponse,
@@ -34,6 +35,7 @@ import { useAppDispatch, useAppSelector } from "../../../store/hooks";
 import { ROUTES } from "../../../constant/routes";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
 import { ApiKeysSettings } from "./ApiKeysSettings";
+import { PasswordPolicyFeedback } from "../../../components/auth/PasswordPolicyFeedback";
 
 interface NavItem {
   id: string;
@@ -335,9 +337,28 @@ function PasswordSettings() {
       </div>
       <div className="p-5 sm:p-6 flex flex-col gap-4 max-w-xl">
         {error && <InlineError message={error} />}
-        <InputField label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
-        <InputField label="New password" type="password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
-        <InputField label="Confirm new password" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
+        <InputField label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" spellCheck={false} />
+        <InputField
+          label="New password"
+          type="password"
+          value={newPassword}
+          onChange={setNewPassword}
+          autoComplete="new-password"
+          minLength={PASSWORD_POLICY.minLength}
+          maxLength={PASSWORD_POLICY.maxLength}
+          spellCheck={false}
+        />
+        <PasswordPolicyFeedback password={newPassword} compact />
+        <InputField
+          label="Confirm new password"
+          type="password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          autoComplete="new-password"
+          minLength={PASSWORD_POLICY.minLength}
+          maxLength={PASSWORD_POLICY.maxLength}
+          spellCheck={false}
+        />
       </div>
       <div className="p-5 sm:p-6 border-t border-border bg-muted/20 flex justify-end">
         <button
@@ -761,9 +782,23 @@ interface InputFieldProps {
   placeholder?: string;
   autoComplete?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  minLength?: number;
+  maxLength?: number;
+  spellCheck?: boolean;
 }
 
-function InputField({ label, value, onChange, type = "text", placeholder, autoComplete, inputMode }: InputFieldProps) {
+function InputField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  autoComplete,
+  inputMode,
+  minLength,
+  maxLength,
+  spellCheck,
+}: InputFieldProps) {
   return (
     <div className="flex flex-col gap-2">
       <label className="text-sm font-medium">{label}</label>
@@ -773,6 +808,9 @@ function InputField({ label, value, onChange, type = "text", placeholder, autoCo
         placeholder={placeholder}
         autoComplete={autoComplete}
         inputMode={inputMode}
+        minLength={minLength}
+        maxLength={maxLength}
+        spellCheck={spellCheck}
         onChange={(event) => onChange(event.target.value)}
         className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
       />

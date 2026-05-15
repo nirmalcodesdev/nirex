@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Mail, Lock, ArrowRight, User, Check, AlertCircle } from "lucide-react";
-import { APP_NAME, APP_NAME_SUFFIX, signUpSchema } from "@nirex/shared";
+import { APP_NAME, APP_NAME_SUFFIX, PASSWORD_POLICY, signUpSchema } from "@nirex/shared";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
 import { authApi } from "../../features/auth/authApi";
 import { ROUTES } from "../../constant/routes";
+import { PasswordPolicyFeedback } from "../../components/auth/PasswordPolicyFeedback";
 
 export function Signup() {
     const [formData, setFormData] = useState({
@@ -27,26 +28,6 @@ export function Signup() {
         form?: string;
     }>({});
     const navigate = useNavigate();
-
-    const passwordStrength = (password: string) => {
-        let strength = 0;
-        if (password.length >= 8) strength++;
-        if (/[A-Z]/.test(password)) strength++;
-        if (/[0-9]/.test(password)) strength++;
-        if (/[^A-Za-z0-9]/.test(password)) strength++;
-        return strength;
-    };
-
-    const strength = passwordStrength(formData.password);
-    const strengthLabels = ["Weak", "Fair", "Good", "Strong"];
-    const strengthColors = ["bg-destructive", "bg-warning", "bg-success", "bg-nirex-accent"];
-
-    const requirements = [
-        { label: "At least 8 characters", met: formData.password.length >= 8 },
-        { label: "One uppercase letter", met: /[A-Z]/.test(formData.password) },
-        { label: "One number", met: /[0-9]/.test(formData.password) },
-        { label: "One special character", met: /[^A-Za-z0-9]/.test(formData.password) },
-    ];
 
     const validateForm = () => {
         const newErrors: {
@@ -272,6 +253,10 @@ export function Signup() {
                                     type={showPassword ? "text" : "password"}
                                     value={formData.password}
                                     onChange={(e) => updateField("password", e.target.value)}
+                                    autoComplete="new-password"
+                                    minLength={PASSWORD_POLICY.minLength}
+                                    maxLength={PASSWORD_POLICY.maxLength}
+                                    spellCheck={false}
                                     placeholder="••••••••"
                                     className={`w-full h-10 pl-10 pr-10 rounded-lg border bg-nirex-base text-sm text-nirex-text-primary placeholder:text-nirex-text-muted focus:outline-none focus:ring-2 focus:ring-nirex-accent focus:border-transparent transition-all ${errors.password ? "border-destructive focus:ring-destructive/20" : "border-border"}
                                         }`}
@@ -285,23 +270,10 @@ export function Signup() {
                                 </button>
                             </div>
 
-                            {/* Password Strength */}
-                            {formData.password && (
-                                <div className="mt-2 space-y-2">
-                                    <div className="flex gap-1 h-1">
-                                        {[1, 2, 3, 4].map((level) => (
-                                            <div
-                                                key={level}
-                                                className={`flex-1 rounded-full transition-colors ${level <= strength ? strengthColors[strength - 1] : "bg-nirex-surface"
-                                                    }`}
-                                            />
-                                        ))}
-                                    </div>
-                                    <p className={`text-xs ${strength > 1 ? "text-nirex-accent" : "text-nirex-text-muted"}`}>
-                                        {strength > 0 ? strengthLabels[strength - 1] : "Enter a password"}
-                                    </p>
-                                </div>
-                            )}
+                            <PasswordPolicyFeedback
+                                password={formData.password}
+                                context={{ email: formData.email, fullName: formData.name }}
+                            />
                             {errors.password && (
                                 <p className="mt-1.5 text-sm text-destructive flex items-center gap-1">
                                     <AlertCircle className="h-3 w-3" />
@@ -321,6 +293,10 @@ export function Signup() {
                                     type={showPassword ? "text" : "password"}
                                     value={formData.confirmPassword}
                                     onChange={(e) => updateField("confirmPassword", e.target.value)}
+                                    autoComplete="new-password"
+                                    minLength={PASSWORD_POLICY.minLength}
+                                    maxLength={PASSWORD_POLICY.maxLength}
+                                    spellCheck={false}
                                     placeholder="••••••••"
                                     className={`w-full h-10 pl-10 pr-4 rounded-lg border bg-nirex-base text-sm text-nirex-text-primary placeholder:text-nirex-text-muted focus:outline-none focus:ring-2 focus:ring-nirex-accent focus:border-transparent transition-all ${errors.confirmPassword ? "border-destructive focus:ring-destructive/20" : "border-border"}
                                         }`}
@@ -338,22 +314,6 @@ export function Signup() {
                                 </p>
                             )}
                         </div>
-
-                        {/* Password Requirements */}
-                        {formData.password && (
-                            <div className="space-y-1.5 p-3 bg-nirex-surface rounded-lg">
-                                {requirements.map((req) => (
-                                    <div
-                                        key={req.label}
-                                        className={`flex items-center gap-2 text-xs ${req.met ? "text-nirex-accent" : "text-nirex-text-muted"
-                                            }`}
-                                    >
-                                        <Check className={`h-3 w-3 ${req.met ? "opacity-100" : "opacity-0"}`} />
-                                        {req.label}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
 
                         <div className="flex items-start">
                             <input
