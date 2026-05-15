@@ -17,6 +17,9 @@ import {
   chatSessionCache,
   MAX_CACHED_MESSAGES,
 } from './chat-session.cache.js';
+import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
+import { assertWithinQuota } from '../usage/quota.guard.js';
+import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import {
   assertValidMessageContent,
   assertValidMetadata,
@@ -189,6 +192,13 @@ function isSequenceNumberDuplicateKeyError(error: unknown): boolean {
     (hasDuplicateKeyField(error, 'sequence_number') ||
       !hasDuplicateKeyField(error, 'client_message_id'))
   );
+}
+
+async function invalidateUsageRelatedCaches(userId: Types.ObjectId): Promise<void> {
+  await Promise.all([
+    invalidateUsageOverviewCache(userId),
+    invalidateDashboardOverviewCache(userId),
+  ]);
 }
 
 function mergeAndSortMessages(...messageSets: ChatMessage[][]): ChatMessage[] {
@@ -647,6 +657,10 @@ export class ChatSessionService {
       }
     }
 
+    if (role === 'user') {
+      await assertWithinQuota(userId);
+    }
+
     // Check if we need auto-compaction before adding message
     const currentTokens = existing.token_usage?.total_tokens || 0;
     const autoCheckpointThreshold = Math.ceil(getContextLimit(existing.aiModel) * 0.8);
@@ -790,6 +804,7 @@ export class ChatSessionService {
         chatSessionCache.setSession(sessionDTO),
         chatSessionCache.invalidateUserSessions(userId.toString()),
         chatSessionCache.addMessage(messageDTO),
+        invalidateUsageRelatedCaches(userId),
       ]);
 
       // Notify via SSE
@@ -865,6 +880,7 @@ export class ChatSessionService {
       await Promise.all([
         chatSessionCache.setSession(toSessionDTO(updated)),
         chatSessionCache.invalidateUserSessions(userId.toString()),
+        invalidateUsageRelatedCaches(userId),
       ]);
 
       // Notify via SSE

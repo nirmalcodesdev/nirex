@@ -16,5 +16,11 @@ export {
 } from './usage.repository.js';
 
 export { usageService, UsageService } from './usage.service.js';
+export {
+  assertWithinQuota,
+  getQuotaStatus,
+  quotaGuard,
+  type QuotaStatus,
+} from './quota.guard.js';
 export * as usageController from './usage.controller.js';
 export { default as usageRoutes } from './usage.routes.js';

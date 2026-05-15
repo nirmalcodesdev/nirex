@@ -3,6 +3,8 @@ import {
   type IMessage,
   type MessageDeliveryStatus,
 } from '@nirex/shared';
+import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
+import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 
 /**
  * Message Document interface
@@ -193,6 +195,17 @@ MessageSchema.virtual('display_content').get(function(this: IMessageDocument) {
     return '[deleted]';
   }
   return this.content;
+});
+
+MessageSchema.post('save', async (doc: IMessageDocument) => {
+  if (doc.is_deleted) {
+    return;
+  }
+
+  await Promise.all([
+    invalidateUsageOverviewCache(doc.user_id),
+    invalidateDashboardOverviewCache(doc.user_id),
+  ]);
 });
 
 // ============================================================================

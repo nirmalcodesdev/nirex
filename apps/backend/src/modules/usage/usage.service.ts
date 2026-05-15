@@ -7,11 +7,15 @@ import type {
 } from '@nirex/shared';
 import { tokenPricingService } from '../chat-session/token-pricing.service.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
-import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
 import { billingRepository } from '../billing/billing.repository.js';
 import { getBillingPlan, getPlanPrice } from '../billing/billing.catalog.js';
 import type { BillingPlanId } from '../billing/billing.types.js';
 import type { BillingSubscriptionStatus } from '../billing/billing.model.js';
+import {
+  getCachedUsageOverview,
+  invalidateUsageOverviewCache,
+  setCachedUsageOverview,
+} from './usage.cache.js';
 
 const CREDIT_UNIT_PRICE_USD = 0.05;
 const DEFAULT_CREDITS_LIMIT = 10000;
@@ -48,11 +52,6 @@ interface ResolvedCurrentPlan {
   subscriptionPeriodStart: Date | null;
   subscriptionPeriodEnd: Date | null;
 }
-
-const inMemoryCache = new Map<
-  string,
-  { expiresAt: number; value: UsageOverviewResponse }
->();
 
 function round(value: number, precision: number = 4): number {
   return Number(value.toFixed(precision));
@@ -171,61 +170,8 @@ function normalizePlanId(value: string | undefined): BillingPlanId {
 }
 
 export class UsageService {
-  private readonly overviewCachePrefix = 'usage:overview';
-  private readonly overviewCacheTtlSeconds = 120;
-  private readonly overviewInMemoryCacheMaxEntries = 5000;
-
-  private pruneInMemoryCache(nowMs: number = Date.now()): void {
-    for (const [key, item] of inMemoryCache) {
-      if (item.expiresAt < nowMs) {
-        inMemoryCache.delete(key);
-      }
-    }
-
-    while (inMemoryCache.size >= this.overviewInMemoryCacheMaxEntries) {
-      const oldestKey = inMemoryCache.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      inMemoryCache.delete(oldestKey);
-    }
-  }
-
-  private async getCachedOverview(cacheKey: string): Promise<UsageOverviewResponse | null> {
-    if (isRedisAvailable()) {
-      try {
-        const redis = getRedisClient();
-        const raw = await redis.get(cacheKey);
-        if (raw) {
-          return JSON.parse(raw) as UsageOverviewResponse;
-        }
-      } catch {
-        // Continue with in-memory cache fallback
-      }
-    }
-
-    const item = inMemoryCache.get(cacheKey);
-    if (!item) return null;
-    if (item.expiresAt < Date.now()) {
-      inMemoryCache.delete(cacheKey);
-      return null;
-    }
-    return item.value;
-  }
-
-  private async setCachedOverview(cacheKey: string, data: UsageOverviewResponse): Promise<void> {
-    if (isRedisAvailable()) {
-      try {
-        const redis = getRedisClient();
-        await redis.setex(cacheKey, this.overviewCacheTtlSeconds, JSON.stringify(data));
-      } catch {
-        // Fall back to in-memory cache
-      }
-    }
-
-    this.pruneInMemoryCache();
-    inMemoryCache.set(cacheKey, {
-      value: data,
-      expiresAt: Date.now() + this.overviewCacheTtlSeconds * 1000,
-    });
+  async invalidateOverviewCache(userId: Types.ObjectId | string): Promise<void> {
+    await invalidateUsageOverviewCache(userId);
   }
 
   private async resolveCurrentPlan(userId: Types.ObjectId): Promise<ResolvedCurrentPlan> {
@@ -449,8 +395,7 @@ export class UsageService {
     userId: Types.ObjectId,
     range: UsageRange = '30d'
   ): Promise<UsageOverviewResponse> {
-    const cacheKey = `${this.overviewCachePrefix}:${userId.toString()}:${range}`;
-    const cached = await this.getCachedOverview(cacheKey);
+    const cached = await getCachedUsageOverview(userId, range);
     if (cached) {
       return cached;
     }
@@ -571,7 +516,7 @@ export class UsageService {
       },
     };
 
-    await this.setCachedOverview(cacheKey, result);
+    await setCachedUsageOverview(userId, range, result);
     return result;
   }
 
