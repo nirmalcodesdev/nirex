@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
+import { invalidateUsageOverviewCache } from './usage.cache.js';
 
 export type UsageEventType =
   | 'credits'
@@ -59,6 +61,13 @@ const UsageEventSchema = new Schema<IUsageEventDocument>(
 UsageEventSchema.index({ user_id: 1, timestamp: -1 });
 UsageEventSchema.index({ user_id: 1, event_type: 1, timestamp: -1 });
 UsageEventSchema.index({ user_id: 1, project_id: 1, event_type: 1, timestamp: -1 });
+
+UsageEventSchema.post('save', async (doc: IUsageEventDocument) => {
+  await Promise.all([
+    invalidateUsageOverviewCache(doc.user_id),
+    invalidateDashboardOverviewCache(doc.user_id),
+  ]);
+});
 
 export const UsageEventModel =
   (mongoose.models.UsageEvent as mongoose.Model<IUsageEventDocument>) ||

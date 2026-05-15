@@ -3,86 +3,28 @@ import type {
   DashboardOverviewResponse,
   NotificationItem,
 } from '@nirex/shared';
-import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
 import { billingService } from '../billing/billing.service.js';
 import { notificationsService } from '../notifications/notifications.service.js';
 import { usageService } from '../usage/usage.service.js';
 import type { DashboardOverviewInput } from './dashboard.types.js';
-
-const inMemoryCache = new Map<
-  string,
-  { expiresAt: number; value: DashboardOverviewResponse }
->();
+import {
+  dashboardOverviewCacheKey,
+  getCachedDashboardOverview,
+  invalidateDashboardOverviewCache,
+  setCachedDashboardOverview,
+} from './dashboard.cache.js';
 
 export class DashboardService {
-  private readonly cachePrefix = 'dashboard:overview';
-  private readonly cacheTtlSeconds = 60;
-  private readonly inMemoryMaxEntries = 3000;
-
-  private pruneInMemoryCache(nowMs: number = Date.now()): void {
-    for (const [key, item] of inMemoryCache) {
-      if (item.expiresAt < nowMs) inMemoryCache.delete(key);
-    }
-    while (inMemoryCache.size >= this.inMemoryMaxEntries) {
-      const oldestKey = inMemoryCache.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      inMemoryCache.delete(oldestKey);
-    }
-  }
-
-  private cacheKey(userId: Types.ObjectId, input: DashboardOverviewInput): string {
-    return [
-      this.cachePrefix,
-      userId.toString(),
-      input.usageRange,
-      input.includeRecentNotifications ? '1' : '0',
-      input.notificationsLimit,
-    ].join(':');
-  }
-
-  private async getCached(cacheKey: string): Promise<DashboardOverviewResponse | null> {
-    if (isRedisAvailable()) {
-      try {
-        const redis = getRedisClient();
-        const raw = await redis.get(cacheKey);
-        if (raw) return JSON.parse(raw) as DashboardOverviewResponse;
-      } catch {
-        // Continue with in-memory cache.
-      }
-    }
-
-    const cached = inMemoryCache.get(cacheKey);
-    if (!cached) return null;
-    if (cached.expiresAt < Date.now()) {
-      inMemoryCache.delete(cacheKey);
-      return null;
-    }
-    return cached.value;
-  }
-
-  private async setCached(cacheKey: string, value: DashboardOverviewResponse): Promise<void> {
-    if (isRedisAvailable()) {
-      try {
-        const redis = getRedisClient();
-        await redis.setex(cacheKey, this.cacheTtlSeconds, JSON.stringify(value));
-      } catch {
-        // Fall through to in-memory.
-      }
-    }
-
-    this.pruneInMemoryCache();
-    inMemoryCache.set(cacheKey, {
-      value,
-      expiresAt: Date.now() + this.cacheTtlSeconds * 1000,
-    });
+  async invalidateOverviewCache(userId: Types.ObjectId | string): Promise<void> {
+    await invalidateDashboardOverviewCache(userId);
   }
 
   async getOverview(
     userId: Types.ObjectId,
     input: DashboardOverviewInput,
   ): Promise<DashboardOverviewResponse> {
-    const cacheKey = this.cacheKey(userId, input);
-    const cached = await this.getCached(cacheKey);
+    const cacheKey = dashboardOverviewCacheKey(userId, input);
+    const cached = await getCachedDashboardOverview(cacheKey);
     if (cached) return cached;
 
     const errors: string[] = [];
@@ -163,7 +105,7 @@ export class DashboardService {
       },
     };
 
-    await this.setCached(cacheKey, result);
+    await setCachedDashboardOverview(cacheKey, result);
     return result;
   }
 }
