@@ -19,6 +19,7 @@ import {
   type BillingReconciliationAlertItem,
   type BillingSubscription,
   type BillingSubscriptionStatus,
+  type CreateNotificationRequest,
   type JsonObject,
   type MoneyAmount,
 } from '@nirex/shared';
@@ -414,6 +415,101 @@ function createBillingLogBase(operation: string, startedAt: number, error?: unkn
   };
 }
 
+async function createBillingNotificationSafely(
+  userId: Types.ObjectId,
+  input: CreateNotificationRequest,
+  context: JsonObject = {},
+): Promise<void> {
+  try {
+    await notificationsService.createNotification(userId, input);
+  } catch (error) {
+    logger.warn('Failed to create billing notification.', {
+      service: 'billing',
+      operation: 'billing.notification',
+      userId: userId.toString(),
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function sendBillingEmailSafely(
+  notificationType: string,
+  userId: Types.ObjectId,
+  sendEmail: () => Promise<void>,
+  context: JsonObject = {},
+): Promise<void> {
+  if (!env.BILLING_EMAIL_NOTIFICATIONS_ENABLED) {
+    return;
+  }
+  try {
+    await sendEmail();
+  } catch (error) {
+    logger.error('Billing email notification failed', {
+      service: 'billing',
+      operation: 'billing.email_notification',
+      notificationType,
+      userId: userId.toString(),
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function notifyBillingSubscriptionStarted(input: {
+  userId: Types.ObjectId;
+  user: { email?: string | null; fullName?: string | null } | null;
+  planName: string;
+  status: ActiveSubscriptionStatus;
+  providerSubscriptionId?: string;
+  source: string;
+  providerEventId?: string;
+}): Promise<void> {
+  if (input.status !== 'ACTIVE' && input.status !== 'TRIALING') {
+    return;
+  }
+
+  const isTrialing = input.status === 'TRIALING';
+  const metadata: Record<string, unknown> = {
+    source: input.source,
+    providerSubscriptionId: input.providerSubscriptionId ?? null,
+    providerEventId: input.providerEventId ?? null,
+    status: input.status,
+  };
+  const dedupeKey = input.providerSubscriptionId
+    ? `billing:subscription-started:${input.providerSubscriptionId}`
+    : undefined;
+
+  await createBillingNotificationSafely(
+    input.userId,
+    {
+      kind: 'billing',
+      severity: 'info',
+      title: isTrialing ? 'Trial started' : 'Subscription activated',
+      message: isTrialing
+        ? `Your ${input.planName} trial has started! You won't be charged until the trial ends.`
+        : `Your ${input.planName} subscription is now active!`,
+      dedupe_key: dedupeKey,
+      metadata,
+    },
+    metadata as JsonObject,
+  );
+
+  if (input.user?.email) {
+    await sendBillingEmailSafely(
+      isTrialing ? 'trial_started' : 'checkout_completed',
+      input.userId,
+      () => sendBillingCheckoutCompletedEmail({
+        to: input.user?.email ?? '',
+        customerName: input.user?.fullName,
+        planName: input.planName,
+        billingPortalUrl: `${env.APP_URL}/billing`,
+      }),
+      metadata as JsonObject,
+    );
+  }
+}
+
 export class BillingAuditService {
   async record(
     input: {
@@ -728,23 +824,17 @@ export class WebhookService {
     );
 
     const user = await userRepository.findById(customer.userId);
-    const planName = mappedPlan?.name ?? (existing ? getBillingPlan(existing.planCode)?.name : 'Nirex Subscription');
+    const planName = mappedPlan?.name ?? (existing ? getBillingPlan(existing.planCode)?.name : undefined) ?? 'Nirex Subscription';
 
-    if (!existing && status === 'ACTIVE') {
-      // New subscription
-      if (user?.email) {
-        await sendBillingCheckoutCompletedEmail({
-          to: user.email,
-          customerName: user.fullName,
-          planName,
-          billingPortalUrl: `${env.APP_URL}/billing`,
-        });
-      }
-      await notificationsService.createNotification(customer.userId, {
-        kind: 'billing',
-        severity: 'info',
-        title: 'Subscription activated',
-        message: `Your ${planName} subscription is now active!`,
+    if (!existing && (status === 'ACTIVE' || status === 'TRIALING')) {
+      await notifyBillingSubscriptionStarted({
+        userId: customer.userId,
+        user,
+        planName,
+        status,
+        providerSubscriptionId,
+        source: 'webhook.subscription',
+        providerEventId: event.id,
       });
     }
 
@@ -767,14 +857,19 @@ export class WebhookService {
       // Notify of status changes
       if (status === 'CANCELED') {
         if (user?.email) {
-          await sendBillingSubscriptionStateEmail({
-            to: user.email,
-            customerName: user.fullName,
-            planName,
-            statusLabel: 'Canceled',
-            detail: 'Your subscription has been canceled and your access will end at the end of the current billing period.',
-            billingPortalUrl: `${env.APP_URL}/billing`,
-          });
+          await sendBillingEmailSafely(
+            'subscription_state_changed',
+            customer.userId,
+            () => sendBillingSubscriptionStateEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName,
+              statusLabel: 'Canceled',
+              detail: 'Your subscription has been canceled and your access will end at the end of the current billing period.',
+              billingPortalUrl: `${env.APP_URL}/billing`,
+            }),
+            { providerEventId: event.id, providerSubscriptionId },
+          );
         }
         await notificationsService.createNotification(customer.userId, {
           kind: 'billing',
@@ -864,18 +959,23 @@ export class WebhookService {
 
     if (paid) {
       if (user?.email) {
-        await sendBillingPaymentSucceededEmail({
-          to: user.email,
-          customerName: user.fullName,
-          planName,
-          amountCents: totalMinor,
-          currency: normalizeCurrency(readString(data, 'currency')),
-          invoiceNumber: readString(data, 'number'),
-          invoicePdfUrl: readString(data, 'invoice_pdf'),
-          hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
-          paidAt: new Date(),
-          billingPortalUrl: `${env.APP_URL}/billing`,
-        });
+        await sendBillingEmailSafely(
+          'payment_succeeded',
+          customer.userId,
+          () => sendBillingPaymentSucceededEmail({
+            to: user.email,
+            customerName: user.fullName,
+            planName,
+            amountCents: totalMinor,
+            currency: normalizeCurrency(readString(data, 'currency')),
+            invoiceNumber: readString(data, 'number'),
+            invoicePdfUrl: readString(data, 'invoice_pdf'),
+            hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+            paidAt: new Date(),
+            billingPortalUrl: `${env.APP_URL}/billing`,
+          }),
+          { providerEventId: event.id, providerSubscriptionId: providerSubscriptionId ?? null },
+        );
       }
       await notificationsService.createNotification(customer.userId, {
         kind: 'billing',
@@ -885,17 +985,22 @@ export class WebhookService {
       });
     } else {
       if (user?.email) {
-        await sendBillingPaymentFailedEmail({
-          to: user.email,
-          customerName: user.fullName,
-          planName,
-          amountCents: totalMinor,
-          currency: normalizeCurrency(readString(data, 'currency')),
-          invoiceNumber: readString(data, 'number'),
-          dueDate: toDate(readNumber(data, 'due_date')),
-          hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
-          billingPortalUrl: `${env.APP_URL}/billing`,
-        });
+        await sendBillingEmailSafely(
+          'payment_failed',
+          customer.userId,
+          () => sendBillingPaymentFailedEmail({
+            to: user.email,
+            customerName: user.fullName,
+            planName,
+            amountCents: totalMinor,
+            currency: normalizeCurrency(readString(data, 'currency')),
+            invoiceNumber: readString(data, 'number'),
+            dueDate: toDate(readNumber(data, 'due_date')),
+            hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+            billingPortalUrl: `${env.APP_URL}/billing`,
+          }),
+          { providerEventId: event.id, providerSubscriptionId: providerSubscriptionId ?? null },
+        );
       }
       await notificationsService.createNotification(customer.userId, {
         kind: 'billing',
@@ -958,6 +1063,7 @@ export class WebhookService {
       session,
     );
   }
+
 }
 
 function toDate(unixTimestamp: number | undefined): Date | undefined {
@@ -1412,6 +1518,11 @@ export class BillingService {
       throw new GatewayUnavailableError('Billing provider sync failed.');
     }
 
+    const startedSubscriptionNotifications: Array<{
+      planName: string;
+      status: ActiveSubscriptionStatus;
+      providerSubscriptionId?: string;
+    }> = [];
     const sortedSubscriptions = [...gatewaySubscriptions].sort(
       (a, b) => (b.currentPeriodEnd?.getTime() ?? 0) - (a.currentPeriodEnd?.getTime() ?? 0),
     );
@@ -1463,6 +1574,7 @@ export class BillingService {
         const planCode = mappedPlan?.planId ?? existing?.planCode ?? 'custom';
         const billingCycle = mappedPlan?.billingCycle ?? existing?.billingCycle ?? 'month';
         const planPrice = mappedPlan ? getPlanPrice(mappedPlan.planId, mappedPlan.billingCycle) : null;
+        const status = mapProviderSubscriptionStatus(targetSubscription.status);
 
         syncedSubscription = await billingRepository.upsertSubscription(
           {
@@ -1470,7 +1582,7 @@ export class BillingService {
             userId,
             planCode,
             billingCycle,
-            status: mapProviderSubscriptionStatus(targetSubscription.status),
+            status,
             providerSubscriptionId: targetSubscription.id,
             providerPriceId: targetSubscription.providerPriceId,
             currency: planPrice?.currency ?? targetSubscription.currency ?? existing?.currency ?? DEFAULT_BILLING_CURRENCY,
@@ -1484,6 +1596,14 @@ export class BillingService {
           },
           session,
         );
+
+        if (!existing && (status === 'ACTIVE' || status === 'TRIALING')) {
+          startedSubscriptionNotifications.push({
+            planName: mappedPlan?.name ?? getBillingPlan(planCode)?.name ?? 'Nirex Subscription',
+            status,
+            providerSubscriptionId: targetSubscription.id,
+          });
+        }
       }
 
       for (const invoice of gatewayInvoices) {
@@ -1531,6 +1651,19 @@ export class BillingService {
       }
       return { ok: true };
     });
+
+    const startedSubscriptionNotification = startedSubscriptionNotifications[0];
+    if (startedSubscriptionNotification) {
+      const user = await userRepository.findById(userId);
+      await notifyBillingSubscriptionStarted({
+        userId,
+        user,
+        planName: startedSubscriptionNotification.planName,
+        status: startedSubscriptionNotification.status,
+        providerSubscriptionId: startedSubscriptionNotification.providerSubscriptionId,
+        source: 'provider.sync',
+      });
+    }
   }
 
   async getBillingOverview(
@@ -1872,6 +2005,7 @@ export class BillingService {
             trialDays,
             metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
           });
+        const subscriptionStatus = mapProviderSubscriptionStatus(gatewaySubscription.status);
 
         const saved = await billingRepository.withTransaction(async (session) => {
           const subscription = await billingRepository.upsertSubscription(
@@ -1880,7 +2014,7 @@ export class BillingService {
               userId,
               planCode: input.planId,
               billingCycle: input.billingCycle,
-              status: mapProviderSubscriptionStatus(gatewaySubscription.status),
+              status: subscriptionStatus,
               providerSubscriptionId: gatewaySubscription.id,
               providerPriceId,
               currency: price.currency,
@@ -1911,6 +2045,17 @@ export class BillingService {
           );
           return subscription;
         });
+        if (!existing && (subscriptionStatus === 'ACTIVE' || subscriptionStatus === 'TRIALING')) {
+          const user = await userRepository.findById(userId);
+          await notifyBillingSubscriptionStarted({
+            userId,
+            user,
+            planName: plan.name,
+            status: subscriptionStatus,
+            providerSubscriptionId: gatewaySubscription.id,
+            source: 'changePlan',
+          });
+        }
         const response = mapOverviewSubscription(saved);
         return {
           value: response,

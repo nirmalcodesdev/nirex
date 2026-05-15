@@ -105,23 +105,60 @@ function SearchModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void
 function NotificationsDropdown() {
     const [isOpen, setIsOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
+    const lastToastedIdRef = useRef<string | null>(null);
     const { toast } = useToast();
     const navigate = useNavigate();
     const {
         data: notifications,
         isFetching,
         refetch,
-    } = useNotificationsQuery({
-        limit: 4,
-        includeRead: true,
-        includeArchived: false,
-    });
+    } = useNotificationsQuery(
+        {
+            limit: 4,
+            includeRead: true,
+            includeArchived: false,
+        },
+        {
+            refetchInterval: 30_000, // Poll every 30 seconds for new notifications
+        },
+    );
     const markAllReadMutation = useMarkAllNotificationsReadMutation();
 
     useClickOutside(ref, () => setIsOpen(false));
 
     const unreadCount = notifications?.unread_count ?? 0;
     const recentNotifications = notifications?.items ?? [];
+
+    // Effect to show Toast for new unread notifications
+    useEffect(() => {
+        const items = notifications?.items;
+        if (!items || items.length === 0) return;
+
+        const latest = items[0];
+        if (!latest) return;
+
+        // Only toast if it's unread and we haven't toasted it in this session yet
+        if (!latest.read_at && latest.id !== lastToastedIdRef.current) {
+            // Check if the notification was created very recently (within the last minute)
+            // to avoid toasting old unread notifications on page load.
+            const createdTime = new Date(latest.created_at).getTime();
+            const now = Date.now();
+            const isFresh = now - createdTime < 60_000;
+
+            if (isFresh) {
+                const toastType =
+                    latest.severity === "error"
+                        ? "error"
+                        : latest.severity === "warning"
+                          ? "warning"
+                          : "success";
+
+                // Since our toast provider doesn't support titles, we combine title and message
+                toast(`${latest.title}: ${latest.message}`, toastType);
+            }
+            lastToastedIdRef.current = latest.id;
+        }
+    }, [notifications, toast]);
 
     const formatTime = (value: string) =>
         new Intl.DateTimeFormat(undefined, {
