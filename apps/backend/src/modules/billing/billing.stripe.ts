@@ -625,6 +625,11 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
         success_url: params.successUrl,
         cancel_url: params.cancelUrl,
         payment_method_collection: 'always',
+        // Billing Portal-created cards can have allow_redisplay=unspecified, which
+        // Checkout filters out by default unless the session opts into displaying it.
+        saved_payment_method_options: {
+          allow_redisplay_filters: ['always', 'limited', 'unspecified'],
+        },
         subscription_data: {
           trial_period_days: params.trialDays && params.trialDays > 0 ? params.trialDays : undefined,
           metadata: toStripeMetadata(params.metadata),
