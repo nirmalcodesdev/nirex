@@ -12,7 +12,8 @@ import {
   verifyPassword,
   signAccessToken,
 } from '../../utils/crypto.js';
-import { sendVerificationEmail, sendPasswordResetEmail, sendSuspiciousSigninAlert } from '../../utils/mailer.js';
+import { logger } from '../../utils/logger.js';
+import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordResetSuccessEmail, sendSuspiciousSigninAlert } from '../../utils/mailer.js';
 import { userRepository } from '../user/user.repository.js';
 import { tokenService } from '../token/token.service.js';
 import { sessionService } from '../session/session.service.js';
@@ -202,17 +203,35 @@ export async function signoutAll(userId: string): Promise<void> {
 }
 
 // ── Forgot Password ───────────────────────────────────────────────────────────
-export async function forgotPassword(email: string): Promise<void> {
+export async function forgotPassword(
+  email: string,
+  requestContext: { ipAddress?: string; deviceInfo?: string } = {},
+): Promise<void> {
   const user = await userRepository.findByEmail(email);
   // Always resolve successfully to prevent user enumeration
   if (!user) return;
 
   const rawToken = await tokenService.createToken(user._id, 'reset');
-  await sendPasswordResetEmail(user.email, rawToken);
+  try {
+    await sendPasswordResetEmail(user.email, rawToken, {
+      requestedAt: new Date(),
+      ipAddress: requestContext.ipAddress,
+      deviceInfo: requestContext.deviceInfo,
+    });
+  } catch (err) {
+    logger.error('Password reset email send failed', {
+      userId: user._id.toString(),
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ── Reset Password ────────────────────────────────────────────────────────────
-export async function resetPassword(rawToken: string, newPassword: string): Promise<void> {
+export async function resetPassword(
+  rawToken: string,
+  newPassword: string,
+  requestContext: { ipAddress?: string; deviceInfo?: string } = {},
+): Promise<void> {
   const tokenDoc = await tokenService.verifyToken(rawToken, 'reset');
   const user = (await userRepository.findById(tokenDoc.userId)) as IUserDocument | null;
   if (!user) throw new AppError('Token is invalid or has expired', 400, 'TOKEN_INVALID');
@@ -238,6 +257,19 @@ export async function resetPassword(rawToken: string, newPassword: string): Prom
   await userService.updatePassword(tokenDoc.userId, passwordHash);
   // Revoke all active sessions so existing refresh tokens are invalidated
   await sessionService.revokeAllSessions(tokenDoc.userId);
+  try {
+    await sendPasswordResetSuccessEmail({
+      to: user.email,
+      completedAt: new Date(),
+      ipAddress: requestContext.ipAddress,
+      deviceInfo: requestContext.deviceInfo,
+    });
+  } catch (err) {
+    logger.error('Password reset success email send failed', {
+      userId: user._id.toString(),
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ── Change Password ───────────────────────────────────────────────────────────
