@@ -38,12 +38,34 @@ export interface DailyEventAggregate {
 
 export interface EventTotals {
   credits: number;
+  requests: number;
+}
+
+export interface ProjectEventAggregate {
+  project_id: string;
+  project_name: string;
+  credits: number;
+  requests: number;
+}
+
+export interface SessionEventTotals {
+  credits: number;
+  requests: number;
 }
 
 function projectNameFromPath(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
   const parts = normalized.split('/').filter(Boolean);
   return parts[parts.length - 1] || 'project';
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: unknown }).code === 11000
+  );
 }
 
 export class UsageRepository {
@@ -175,7 +197,7 @@ export class UsageRepository {
         $match: {
           user_id: userId,
           event_type: {
-            $in: ['credits'],
+            $in: ['credits', 'requests'],
           },
           timestamp: { $gte: range.start, $lte: range.end },
         },
@@ -190,6 +212,7 @@ export class UsageRepository {
 
     const totals: EventTotals = {
       credits: 0,
+      requests: 0,
     };
 
     for (const doc of docs) {
@@ -199,6 +222,150 @@ export class UsageRepository {
     }
 
     return totals;
+  }
+
+  async getProjectEventTotals(
+    userId: Types.ObjectId,
+    range: DateRange
+  ): Promise<ProjectEventAggregate[]> {
+    const docs = await UsageEventModel.aggregate<{
+      _id: string | null;
+      project_name: string | null;
+      credits: number;
+      requests: number;
+    }>([
+      {
+        $match: {
+          user_id: userId,
+          event_type: { $in: ['credits', 'requests'] },
+          timestamp: { $gte: range.start, $lte: range.end },
+        },
+      },
+      {
+        $group: {
+          _id: '$project_id',
+          project_name: { $first: '$metadata.project_name' },
+          credits: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'credits'] }, '$quantity', 0],
+            },
+          },
+          requests: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'requests'] }, '$quantity', 0],
+            },
+          },
+        },
+      },
+    ]).exec();
+
+    return docs.map((doc) => {
+      const projectId = doc._id || 'unknown';
+      return {
+        project_id: projectId,
+        project_name: doc.project_name || projectId,
+        credits: doc.credits || 0,
+        requests: doc.requests || 0,
+      };
+    });
+  }
+
+  async getSessionEventTotals(
+    userId: Types.ObjectId,
+    range: DateRange,
+    sessionIds: Types.ObjectId[]
+  ): Promise<Map<string, SessionEventTotals>> {
+    if (sessionIds.length === 0) {
+      return new Map();
+    }
+
+    const docs = await UsageEventModel.aggregate<{
+      _id: Types.ObjectId;
+      credits: number;
+      requests: number;
+    }>([
+      {
+        $match: {
+          user_id: userId,
+          session_id: { $in: sessionIds },
+          event_type: { $in: ['credits', 'requests'] },
+          timestamp: { $gte: range.start, $lte: range.end },
+        },
+      },
+      {
+        $group: {
+          _id: '$session_id',
+          credits: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'credits'] }, '$quantity', 0],
+            },
+          },
+          requests: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'requests'] }, '$quantity', 0],
+            },
+          },
+        },
+      },
+    ]).exec();
+
+    return new Map(
+      docs.map((doc) => [
+        doc._id.toString(),
+        {
+          credits: doc.credits || 0,
+          requests: doc.requests || 0,
+        },
+      ])
+    );
+  }
+
+  async getExistingEventTotalsForSessions(
+    userId: Types.ObjectId,
+    sessionIds: Types.ObjectId[]
+  ): Promise<Map<string, SessionEventTotals>> {
+    if (sessionIds.length === 0) {
+      return new Map();
+    }
+
+    const docs = await UsageEventModel.aggregate<{
+      _id: Types.ObjectId;
+      credits: number;
+      requests: number;
+    }>([
+      {
+        $match: {
+          user_id: userId,
+          session_id: { $in: sessionIds },
+          event_type: { $in: ['credits', 'requests'] },
+        },
+      },
+      {
+        $group: {
+          _id: '$session_id',
+          credits: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'credits'] }, '$quantity', 0],
+            },
+          },
+          requests: {
+            $sum: {
+              $cond: [{ $eq: ['$event_type', 'requests'] }, '$quantity', 0],
+            },
+          },
+        },
+      },
+    ]).exec();
+
+    return new Map(
+      docs.map((doc) => [
+        doc._id.toString(),
+        {
+          credits: doc.credits || 0,
+          requests: doc.requests || 0,
+        },
+      ])
+    );
   }
 
   async getAverageResponseTimeMs(
@@ -232,14 +399,43 @@ export class UsageRepository {
   async createEvent(data: {
     user_id: Types.ObjectId;
     project_id?: string;
+    session_id?: Types.ObjectId;
+    message_id?: string;
     event_type: UsageEventType;
     quantity: number;
     timestamp?: Date;
+    idempotency_key?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<void> {
-    await UsageEventModel.create({
+    const document = {
       ...data,
       timestamp: data.timestamp || new Date(),
-    });
+    };
+
+    try {
+      await UsageEventModel.create(document);
+    } catch (error) {
+      if (data.idempotency_key && isDuplicateKeyError(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async createEvents(
+    events: Array<{
+      user_id: Types.ObjectId;
+      project_id?: string;
+      session_id?: Types.ObjectId;
+      message_id?: string;
+      event_type: UsageEventType;
+      quantity: number;
+      timestamp?: Date;
+      idempotency_key?: string;
+      metadata?: Record<string, unknown>;
+    }>
+  ): Promise<void> {
+    await Promise.all(events.map((event) => this.createEvent(event)));
   }
 }
 

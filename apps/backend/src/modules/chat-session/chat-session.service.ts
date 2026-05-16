@@ -19,6 +19,7 @@ import {
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import { assertWithinQuota } from '../usage/quota.guard.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
+import { usageRepository } from '../usage/usage.repository.js';
 import {
   assertValidCheckpointSnapshot,
   assertValidMessageContent,
@@ -231,6 +232,113 @@ async function invalidateUsageRelatedCaches(userId: Types.ObjectId): Promise<voi
   ]);
 }
 
+interface UsageLedgerMessage {
+  id: string;
+  role: MessageRole;
+  tokenUsage?: Partial<TokenUsage>;
+  timestamp: Date | string;
+  sequenceNumber?: number;
+  clientMessageId?: string;
+}
+
+function projectNameFromWorkingDirectory(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts[parts.length - 1] || 'project';
+}
+
+function safeEventTimestamp(value: Date | string | undefined): Date {
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  return new Date();
+}
+
+function creditsFromTokenUsage(tokenUsage?: Partial<TokenUsage>): number {
+  const normalized = normalizeTokenUsage(tokenUsage);
+  return normalized ? Math.max(0, normalized.total_tokens) / 1000 : 0;
+}
+
+function usageEventMetadata(
+  session: IChatSessionDocument,
+  source: string,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    source,
+    session_id: session._id.toString(),
+    session_name: session.name,
+    model: session.aiModel,
+    project_name: projectNameFromWorkingDirectory(session.working_directory),
+    ...extra,
+  };
+}
+
+async function recordUsageEventsForMessage(
+  session: IChatSessionDocument,
+  userId: Types.ObjectId,
+  message: UsageLedgerMessage,
+  source: string
+): Promise<void> {
+  const normalizedUsage = normalizeTokenUsage(message.tokenUsage);
+  const events: Array<{
+    user_id: Types.ObjectId;
+    project_id: string;
+    session_id: Types.ObjectId;
+    message_id: string;
+    event_type: 'credits' | 'requests';
+    quantity: number;
+    timestamp: Date;
+    idempotency_key: string;
+    metadata: Record<string, unknown>;
+  }> = [
+    {
+      user_id: userId,
+      project_id: session.working_directory_hash || session._id.toString(),
+      session_id: session._id,
+      message_id: message.id,
+      event_type: 'requests' as const,
+      quantity: 1,
+      timestamp: safeEventTimestamp(message.timestamp),
+      idempotency_key: `chat-message:${message.id}:requests`,
+      metadata: usageEventMetadata(session, source, {
+        message_id: message.id,
+        role: message.role,
+        sequence_number: message.sequenceNumber,
+        client_message_id: message.clientMessageId,
+      }),
+    },
+  ];
+
+  if (normalizedUsage && normalizedUsage.total_tokens > 0) {
+    events.push({
+      user_id: userId,
+      project_id: session.working_directory_hash || session._id.toString(),
+      session_id: session._id,
+      message_id: message.id,
+      event_type: 'credits' as const,
+      quantity: normalizedUsage.total_tokens / 1000,
+      timestamp: safeEventTimestamp(message.timestamp),
+      idempotency_key: `chat-message:${message.id}:credits`,
+      metadata: usageEventMetadata(session, source, {
+        message_id: message.id,
+        role: message.role,
+        sequence_number: message.sequenceNumber,
+        client_message_id: message.clientMessageId,
+        token_usage: normalizedUsage,
+      }),
+    });
+  }
+
+  await usageRepository.createEvents(events);
+}
+
 function mergeAndSortMessages(...messageSets: ChatMessage[][]): ChatMessage[] {
   const deduped = new Map<string, ChatMessage>();
 
@@ -330,6 +438,141 @@ export class ChatSessionService {
     if (actualSessionId.toString() !== expectedSessionId) {
       throw new AppError('Message not found', 404, 'MESSAGE_NOT_FOUND');
     }
+  }
+
+  private async collectUsageLedgerMessages(
+    session: IChatSessionDocument
+  ): Promise<UsageLedgerMessage[]> {
+    const messages = new Map<string, UsageLedgerMessage>();
+    const addMessage = (message: UsageLedgerMessage): void => {
+      messages.set(message.id, message);
+    };
+
+    for (const [index, message] of (session.messages || []).entries()) {
+      addMessage({
+        id: message.id || `embedded:${session._id.toString()}:${index}`,
+        role: message.role,
+        tokenUsage: message.token_usage,
+        timestamp: message.timestamp,
+        sequenceNumber: index + 1,
+      });
+    }
+
+    const archivedDocs = await archivedMessagesRepository.findBySession(session._id);
+    for (const archive of archivedDocs) {
+      for (const [index, message] of archive.messages.entries()) {
+        const sequenceNumber = archive.startIndex + index + 1;
+        addMessage({
+          id: message.id || `archive:${session._id.toString()}:${sequenceNumber}`,
+          role: message.role,
+          tokenUsage: message.token_usage,
+          timestamp: message.timestamp,
+          sequenceNumber,
+        });
+      }
+    }
+
+    if (USE_SEPARATE_MESSAGE_COLLECTION) {
+      const usageRecords = await messageRepository.listUsageForSession(session._id);
+      for (const message of usageRecords) {
+        addMessage({
+          id: message._id.toString(),
+          role: message.role,
+          tokenUsage: message.token_usage,
+          timestamp: message.created_at,
+          sequenceNumber: message.sequence_number,
+          clientMessageId: message.client_message_id,
+        });
+      }
+    }
+
+    return [...messages.values()];
+  }
+
+  private async materializeSessionUsageLedger(
+    session: IChatSessionDocument,
+    userId: Types.ObjectId,
+    source: string
+  ): Promise<void> {
+    const ledgerMessages = await this.collectUsageLedgerMessages(session);
+
+    await Promise.all(
+      ledgerMessages.map((message) =>
+        recordUsageEventsForMessage(session, userId, message, source)
+      )
+    );
+
+    const totalsBySession = await usageRepository.getExistingEventTotalsForSessions(
+      userId,
+      [session._id]
+    );
+    const existingTotals = totalsBySession.get(session._id.toString()) || {
+      credits: 0,
+      requests: 0,
+    };
+    const sessionCredits = creditsFromTokenUsage(session.token_usage);
+    const creditDelta = Math.max(0, sessionCredits - existingTotals.credits);
+    const requestDelta = Math.max(0, ledgerMessages.length - existingTotals.requests);
+    const timestamp = safeEventTimestamp(
+      session.last_message_at || session.updated_at || session.created_at
+    );
+    const events: Array<{
+      user_id: Types.ObjectId;
+      project_id: string;
+      session_id: Types.ObjectId;
+      event_type: 'credits' | 'requests';
+      quantity: number;
+      timestamp: Date;
+      idempotency_key: string;
+      metadata: Record<string, unknown>;
+    }> = [];
+
+    if (creditDelta > 0) {
+      events.push({
+        user_id: userId,
+        project_id: session.working_directory_hash || session._id.toString(),
+        session_id: session._id,
+        event_type: 'credits',
+        quantity: creditDelta,
+        timestamp,
+        idempotency_key: `chat-session:${session._id.toString()}:credits:legacy-remainder`,
+        metadata: usageEventMetadata(session, source, {
+          preservation: 'session_credit_remainder',
+          token_usage: session.token_usage,
+        }),
+      });
+    }
+
+    if (requestDelta > 0) {
+      events.push({
+        user_id: userId,
+        project_id: session.working_directory_hash || session._id.toString(),
+        session_id: session._id,
+        event_type: 'requests',
+        quantity: requestDelta,
+        timestamp,
+        idempotency_key: `chat-session:${session._id.toString()}:requests:legacy-remainder`,
+        metadata: usageEventMetadata(session, source, {
+          preservation: 'session_request_remainder',
+        }),
+      });
+    }
+
+    if (events.length > 0) {
+      await usageRepository.createEvents(events);
+    }
+  }
+
+  private async materializeSessionsUsageLedger(
+    sessions: IChatSessionDocument[],
+    userId: Types.ObjectId,
+    source: string
+  ): Promise<void> {
+    await Promise.all(
+      sessions.map((session) =>
+        this.materializeSessionUsageLedger(session, userId, source)
+      )
+    );
   }
 
   async assertSessionAccess(
@@ -643,7 +886,8 @@ export class ChatSessionService {
     sessionId: string,
     userId: Types.ObjectId
   ): Promise<void> {
-    await this.getOwnedSession(sessionId, userId);
+    const existing = await this.getOwnedSession(sessionId, userId);
+    await this.materializeSessionUsageLedger(existing, userId, 'session_delete');
 
     if (USE_SEPARATE_MESSAGE_COLLECTION) {
       await messageRepository.deleteAllForSession(new Types.ObjectId(sessionId));
@@ -692,7 +936,10 @@ export class ChatSessionService {
    * Delete all sessions for a user
    */
   async deleteAllSessions(userId: Types.ObjectId): Promise<number> {
-    const sessionIds = await chatSessionRepository.findIdsForUser(userId);
+    const sessions = await chatSessionRepository.findAllForUser(userId);
+    const sessionIds = sessions.map((session) => session._id);
+
+    await this.materializeSessionsUsageLedger(sessions, userId, 'all_sessions_delete');
 
     // Delete checkpoints and archives for all sessions
     await Promise.all(
@@ -761,6 +1008,19 @@ export class ChatSessionService {
 
       if (existingMessage) {
         logger.debug('Duplicate message detected', { sessionId, clientMessageId });
+        await recordUsageEventsForMessage(
+          existing,
+          userId,
+          {
+            id: existingMessage._id.toString(),
+            role: existingMessage.role,
+            tokenUsage: existingMessage.token_usage,
+            timestamp: existingMessage.created_at,
+            sequenceNumber: existingMessage.sequence_number,
+            clientMessageId: existingMessage.client_message_id,
+          },
+          'message_duplicate_replay'
+        );
         const messageCount = await messageRepository.countForSession(new Types.ObjectId(sessionId));
         const currentSession = await this.getOwnedSession(sessionId, userId);
         return {
@@ -843,6 +1103,19 @@ export class ChatSessionService {
               clientMessageId
             );
             if (existingMessage) {
+              await recordUsageEventsForMessage(
+                existing,
+                userId,
+                {
+                  id: existingMessage._id.toString(),
+                  role: existingMessage.role,
+                  tokenUsage: existingMessage.token_usage,
+                  timestamp: existingMessage.created_at,
+                  sequenceNumber: existingMessage.sequence_number,
+                  clientMessageId: existingMessage.client_message_id,
+                },
+                'message_duplicate_replay'
+              );
               const messageCount = await messageRepository.countForSession(
                 sessionObjectId
               );
@@ -925,6 +1198,19 @@ export class ChatSessionService {
 
       // Cache the new message
       const messageDTO = toMessageDTO(deliveredMessage);
+      await recordUsageEventsForMessage(
+        updatedSession,
+        userId,
+        {
+          id: deliveredMessage._id.toString(),
+          role: deliveredMessage.role,
+          tokenUsage: deliveredMessage.token_usage,
+          timestamp: messageCreatedAt,
+          sequenceNumber: deliveredMessage.sequence_number,
+          clientMessageId: deliveredMessage.client_message_id,
+        },
+        'message_create'
+      );
       await Promise.all([
         chatSessionCache.setSession(sessionDTO),
         chatSessionCache.invalidateUserSessions(userId.toString()),
@@ -1012,6 +1298,19 @@ export class ChatSessionService {
       const summarizedSession =
         (await chatSessionRepository.updateMessageSummary(sessionId, {}, updatedSummary)) ||
         updated;
+
+      await recordUsageEventsForMessage(
+        summarizedSession,
+        userId,
+        {
+          id: message.id,
+          role: message.role,
+          tokenUsage: message.token_usage,
+          timestamp: message.timestamp,
+          sequenceNumber: legacySequenceNumber,
+        },
+        'message_create'
+      );
 
       await Promise.all([
         chatSessionCache.setSession(toSessionDTO(summarizedSession)),
@@ -1493,6 +1792,8 @@ export class ChatSessionService {
           )
         : undefined;
 
+    await this.materializeSessionUsageLedger(existing, userId, 'session_clear');
+
     if (USE_SEPARATE_MESSAGE_COLLECTION) {
       await messageRepository.deleteAllForSession(existing._id);
     }
@@ -1863,20 +2164,34 @@ export class ChatSessionService {
    * Get session stats for a user
    */
   async getStats(userId: Types.ObjectId): Promise<SessionStatsResponse> {
-    const [sessionCounts, totalTokens, totalMessages] = await Promise.all([
-      chatSessionRepository.countForUser(userId, true),
+    const [sessions, totalTokens, totalMessages, eventTotals] = await Promise.all([
+      chatSessionRepository.findAllForUser(userId),
       chatSessionRepository.getTotalTokenUsage(userId),
       USE_SEPARATE_MESSAGE_COLLECTION
         ? messageRepository.countForUser(userId)
         : chatSessionRepository.countTotalMessages(userId),
+      usageRepository.getEventTotals(userId, {
+        start: new Date(0),
+        end: new Date(),
+      }),
     ]);
+    const sessionEventTotals = await usageRepository.getExistingEventTotalsForSessions(
+      userId,
+      sessions.map((session) => session._id)
+    );
+    const unledgeredLiveCredits = sessions.reduce((total, session) => {
+      const existingCredits = sessionEventTotals.get(session._id.toString())?.credits || 0;
+      return total + Math.max(0, creditsFromTokenUsage(session.token_usage) - existingCredits);
+    }, 0);
+    const creditsUsed = eventTotals.credits + unledgeredLiveCredits;
+    const archivedSessions = sessions.filter((session) => session.is_archived).length;
 
     return {
-      total_sessions: sessionCounts.total,
+      total_sessions: sessions.length,
       total_messages: totalMessages,
       total_tokens: totalTokens,
-      credits_used: Number((totalTokens.total_tokens / 1000).toFixed(2)),
-      archived_sessions: sessionCounts.archived,
+      credits_used: Number(creditsUsed.toFixed(2)),
+      archived_sessions: archivedSessions,
     };
   }
 
@@ -2103,6 +2418,20 @@ export class ChatSessionService {
       throw new AppError('Message not found', 404, 'MESSAGE_NOT_FOUND');
     }
     this.assertMessageBelongsToSession(message.session_id, sessionId);
+
+    await recordUsageEventsForMessage(
+      session,
+      userId,
+      {
+        id: message._id.toString(),
+        role: message.role,
+        tokenUsage: message.token_usage,
+        timestamp: message.created_at,
+        sequenceNumber: message.sequence_number,
+        clientMessageId: message.client_message_id,
+      },
+      'message_delete'
+    );
 
     const deleted = await messageRepository.softDelete(message._id);
 

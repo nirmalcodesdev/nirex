@@ -14,6 +14,13 @@ import {
   listSessions,
 } from '../src/modules/chat-session/chat-session.controller.js';
 import { chatSessionService } from '../src/modules/chat-session/chat-session.service.js';
+import { chatSessionRepository } from '../src/modules/chat-session/chat-session.repository.js';
+import { messageRepository } from '../src/modules/chat-session/message.repository.js';
+import { archivedMessagesRepository } from '../src/modules/chat-session/archived-messages.repository.js';
+import { sessionCheckpointRepository } from '../src/modules/chat-session/session-checkpoint.repository.js';
+import { chatSessionCache } from '../src/modules/chat-session/chat-session.cache.js';
+import { sseManager } from '../src/modules/chat-session/sse.manager.js';
+import { usageRepository } from '../src/modules/usage/usage.repository.js';
 import {
   validateCheckpointSnapshot,
   validateMessageContent,
@@ -165,5 +172,122 @@ describe('chat session controller contracts', () => {
         message: 'Session deleted successfully',
       },
     });
+  });
+});
+
+describe('chat session usage accounting', () => {
+  it('materializes legacy session credits before deleting source records', async () => {
+    const userId = new Types.ObjectId();
+    const sessionId = new Types.ObjectId();
+    const now = new Date();
+    const session = {
+      _id: sessionId,
+      userId,
+      name: 'Credit ledger regression',
+      working_directory: 'D:\\nirex',
+      working_directory_hash: 'project-hash',
+      aiModel: 'claude-sonnet',
+      messages: [],
+      token_usage: {
+        input_tokens: 2000,
+        output_tokens: 1500,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 3500,
+      },
+      created_at: now,
+      updated_at: now,
+      is_archived: false,
+    } as never;
+
+    vi.spyOn(chatSessionRepository, 'findById').mockResolvedValue(session);
+    vi.spyOn(messageRepository, 'listUsageForSession').mockResolvedValue([]);
+    vi.spyOn(archivedMessagesRepository, 'findBySession').mockResolvedValue([]);
+    vi.spyOn(usageRepository, 'getExistingEventTotalsForSessions').mockResolvedValue(new Map());
+    const createEventsSpy = vi.spyOn(usageRepository, 'createEvents').mockResolvedValue();
+    const deleteMessagesSpy = vi.spyOn(messageRepository, 'deleteAllForSession').mockResolvedValue(0);
+    vi.spyOn(sessionCheckpointRepository, 'deleteAllForSession').mockResolvedValue(0);
+    vi.spyOn(archivedMessagesRepository, 'deleteAllForSession').mockResolvedValue(0);
+    vi.spyOn(chatSessionRepository, 'findChildren').mockResolvedValue([]);
+    vi.spyOn(chatSessionRepository, 'delete').mockResolvedValue(true);
+    vi.spyOn(chatSessionCache, 'invalidateAllSessionCaches').mockResolvedValue();
+    vi.spyOn(sseManager, 'broadcastToUser').mockResolvedValue();
+
+    await chatSessionService.deleteSession(sessionId.toString(), userId);
+
+    expect(createEventsSpy).toHaveBeenCalledWith([
+      expect.objectContaining({
+        event_type: 'credits',
+        quantity: 3.5,
+        idempotency_key: `chat-session:${sessionId.toString()}:credits:legacy-remainder`,
+      }),
+    ]);
+    expect(createEventsSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteMessagesSpy.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('keeps credits_used from immutable usage events after sessions are deleted', async () => {
+    const userId = new Types.ObjectId();
+    vi.spyOn(chatSessionRepository, 'findAllForUser').mockResolvedValue([]);
+    vi.spyOn(chatSessionRepository, 'getTotalTokenUsage').mockResolvedValue({
+      input_tokens: 0,
+      output_tokens: 0,
+      cached_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 0,
+    });
+    vi.spyOn(messageRepository, 'countForUser').mockResolvedValue(0);
+    vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
+      credits: 12.5,
+      requests: 4,
+    });
+    vi.spyOn(usageRepository, 'getExistingEventTotalsForSessions').mockResolvedValue(new Map());
+
+    const stats = await chatSessionService.getStats(userId);
+
+    expect(stats).toMatchObject({
+      total_sessions: 0,
+      total_messages: 0,
+      credits_used: 12.5,
+      archived_sessions: 0,
+    });
+  });
+
+  it('adds only unledgered live session credits to immutable stats credits', async () => {
+    const userId = new Types.ObjectId();
+    const sessionId = new Types.ObjectId();
+    vi.spyOn(chatSessionRepository, 'findAllForUser').mockResolvedValue([
+      {
+        _id: sessionId,
+        is_archived: false,
+        token_usage: {
+          input_tokens: 1200,
+          output_tokens: 800,
+          cached_tokens: 0,
+          reasoning_tokens: 0,
+          total_tokens: 2000,
+        },
+      } as never,
+    ]);
+    vi.spyOn(chatSessionRepository, 'getTotalTokenUsage').mockResolvedValue({
+      input_tokens: 1200,
+      output_tokens: 800,
+      cached_tokens: 0,
+      reasoning_tokens: 0,
+      total_tokens: 2000,
+    });
+    vi.spyOn(messageRepository, 'countForUser').mockResolvedValue(1);
+    vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
+      credits: 10,
+      requests: 5,
+    });
+    vi.spyOn(usageRepository, 'getExistingEventTotalsForSessions').mockResolvedValue(
+      new Map([[sessionId.toString(), { credits: 0.75, requests: 1 }]])
+    );
+
+    const stats = await chatSessionService.getStats(userId);
+
+    expect(stats.credits_used).toBe(11.25);
   });
 });

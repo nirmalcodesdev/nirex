@@ -13,6 +13,8 @@ export {
   type DailyMessageTokens,
   type DailyEventAggregate,
   type EventTotals,
+  type ProjectEventAggregate,
+  type SessionEventTotals,
 } from './usage.repository.js';
 
 export { usageService, UsageService } from './usage.service.js';

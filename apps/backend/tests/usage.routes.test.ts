@@ -8,6 +8,8 @@ import {
   getQuotaStatus,
 } from '../src/modules/usage/quota.guard.js';
 import { usageService } from '../src/modules/usage/usage.service.js';
+import { usageRepository } from '../src/modules/usage/usage.repository.js';
+import { billingRepository } from '../src/modules/billing/billing.repository.js';
 import {
   clearUsageOverviewMemoryCache,
   getCachedUsageOverview,
@@ -111,5 +113,49 @@ describe('usage routes', () => {
     await expect(getCachedUsageOverview(userId, '30d')).resolves.toBeNull();
     await expect(getCachedUsageOverview(userId, 'month_to_date')).resolves.toBeNull();
     await expect(getCachedUsageOverview(otherUserId, '30d')).resolves.toBe(otherOverview);
+  });
+
+  it('keeps overview credits from usage events after sessions have been deleted', async () => {
+    const userId = new Types.ObjectId();
+    const today = new Date().toISOString().slice(0, 10);
+
+    vi.spyOn(billingRepository, 'findLatestSubscriptionByUserId').mockResolvedValue(null);
+    vi.spyOn(usageRepository, 'listSessionProjectMeta').mockResolvedValue([]);
+    vi.spyOn(usageRepository, 'getSessionUsageFromMessages').mockResolvedValue([]);
+    vi.spyOn(usageRepository, 'getEventTotals').mockResolvedValue({
+      credits: 8.75,
+      requests: 3,
+    });
+    vi.spyOn(usageRepository, 'getProjectEventTotals').mockResolvedValue([
+      {
+        project_id: 'project-hash',
+        project_name: 'nirex',
+        credits: 8.75,
+        requests: 3,
+      },
+    ]);
+    vi.spyOn(usageRepository, 'getSessionEventTotals').mockResolvedValue(new Map());
+    vi.spyOn(usageRepository, 'getAverageResponseTimeMs').mockResolvedValue(null);
+    vi.spyOn(usageRepository, 'getDailyTokenTotals').mockResolvedValue([]);
+    vi.spyOn(usageRepository, 'getDailyEventTotals').mockResolvedValue([
+      {
+        date: today,
+        event_type: 'credits',
+        total: 8.75,
+      },
+    ]);
+
+    const overview = await usageService.getOverview(userId, '30d');
+
+    expect(overview.summary.credits_used).toBe(8.75);
+    expect(overview.summary.total_requests).toBe(3);
+    expect(overview.top_projects).toEqual([
+      expect.objectContaining({
+        project_id: 'project-hash',
+        project_name: 'nirex',
+        credits: 8.75,
+        requests: 3,
+      }),
+    ]);
   });
 });
