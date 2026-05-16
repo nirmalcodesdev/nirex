@@ -14,6 +14,14 @@ interface SendEmailOptions {
   html: string;
 }
 
+interface PasswordSecurityEmailOptions {
+  to: string;
+  requestedAt?: Date | undefined;
+  completedAt?: Date | undefined;
+  ipAddress?: string | undefined;
+  deviceInfo?: string | undefined;
+}
+
 interface BillingEmailBase {
   to: string;
   customerName?: string | null;
@@ -133,6 +141,13 @@ function escapeHtml(input: string | null | undefined): string {
     .replace(/'/g, '&#39;');
 }
 
+function truncateForEmail(input: string | null | undefined, maxLength = 180): string {
+  if (!input) return '';
+  const normalized = input.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}...`;
+}
+
 function formatMoney(amountCents: number, currency: string): string {
   const safeCurrency = (currency || 'usd').toUpperCase();
   return new Intl.NumberFormat('en-US', {
@@ -148,6 +163,45 @@ function formatDate(date: Date | null | undefined): string {
     month: 'short',
     day: '2-digit',
   }).format(date);
+}
+
+function formatDateTime(date: Date | null | undefined): string {
+  if (!date) return 'N/A';
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(date);
+}
+
+function requestMetadataBox(input: {
+  eventTime?: Date | undefined;
+  eventLabel: string;
+  ipAddress?: string | undefined;
+  deviceInfo?: string | undefined;
+}): string {
+  const ipAddress = escapeHtml(truncateForEmail(input.ipAddress, 64)) || 'Not available';
+  const deviceInfo = escapeHtml(truncateForEmail(input.deviceInfo)) || 'Not available';
+
+  return `
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">${escapeHtml(input.eventLabel)}</div>
+          <div class="info-value">${formatDateTime(input.eventTime)}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">IP Address</div>
+          <div class="info-value">${ipAddress}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Device</div>
+          <div class="info-value">${deviceInfo}</div>
+        </div>
+      </div>
+  `;
 }
 
 function emailShell(content: string, previewText?: string): string {
@@ -417,10 +471,12 @@ export async function sendBillingSubscriptionStateEmail(
 export async function sendVerificationEmail(to: string, rawToken: string): Promise<void> {
   const verifyUrl = `${env.APP_URL}/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
 
-  console.log('\n🔐 EMAIL VERIFICATION TOKEN (for testing):');
-  console.log(`   Token: ${rawToken}`);
-  console.log(`   URL: ${verifyUrl}`);
-  console.log(`   Email would be sent to: ${to}\n`);
+  if (env.NODE_ENV !== 'production') {
+    console.log('\nEMAIL VERIFICATION TOKEN (for testing):');
+    console.log(`   Token: ${rawToken}`);
+    console.log(`   URL: ${verifyUrl}`);
+    console.log(`   Email would be sent to: ${to}\n`);
+  }
 
   try {
     await sendEmail({
@@ -463,13 +519,19 @@ export async function sendVerificationEmail(to: string, rawToken: string): Promi
   }
 }
 
-export async function sendPasswordResetEmail(to: string, rawToken: string): Promise<void> {
+export async function sendPasswordResetEmail(
+  to: string,
+  rawToken: string,
+  input: Omit<PasswordSecurityEmailOptions, 'to'> = {},
+): Promise<void> {
   const resetUrl = `${env.APP_URL}/auth/reset-password?token=${encodeURIComponent(rawToken)}`;
 
-  console.log('\n🔐 PASSWORD RESET TOKEN (for testing):');
-  console.log(`   Token: ${rawToken}`);
-  console.log(`   URL: ${resetUrl}`);
-  console.log(`   Email would be sent to: ${to}\n`);
+  if (env.NODE_ENV !== 'production') {
+    console.log('\nPASSWORD RESET TOKEN (for testing):');
+    console.log(`   Token: ${rawToken}`);
+    console.log(`   URL: ${resetUrl}`);
+    console.log(`   Email would be sent to: ${to}\n`);
+  }
 
   try {
     await sendEmail({
@@ -483,6 +545,12 @@ export async function sendPasswordResetEmail(to: string, rawToken: string): Prom
             Reset Password
           </a>
         </div>
+        ${requestMetadataBox({
+          eventTime: input.requestedAt,
+          eventLabel: 'Requested',
+          ipAddress: input.ipAddress,
+          deviceInfo: input.deviceInfo,
+        })}
         <p style="font-size: 14px; color: #64748b;">
           This link will expire in <strong>15 minutes</strong>. If you did not request a password reset, 
           your password will remain unchanged and you can safely ignore this email.
@@ -503,6 +571,33 @@ export async function sendPasswordResetEmail(to: string, rawToken: string): Prom
       'EMAIL_SEND_FAILED'
     );
   }
+}
+
+export async function sendPasswordResetSuccessEmail(
+  input: PasswordSecurityEmailOptions,
+): Promise<void> {
+  await sendEmail({
+    to: input.to,
+    subject: 'Your password was changed',
+    html: emailShell(`
+      <h1>Password changed</h1>
+      <p>Your Nirex account password was changed successfully. For your security, active sessions were terminated and you may need to sign in again.</p>
+      ${requestMetadataBox({
+        eventTime: input.completedAt,
+        eventLabel: 'Changed',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      <p style="font-size: 14px; color: #64748b;">
+        If you made this change, no further action is required. If you did not make this change, reset your password immediately and review your active devices.
+      </p>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${env.APP_URL}/auth/forgot-password" class="btn" style="background-color: #ef4444;">
+          Secure My Account
+        </a>
+      </div>
+    `, 'Your Nirex account password was changed.'),
+  });
 }
 
 export async function sendSuspiciousSigninAlert(

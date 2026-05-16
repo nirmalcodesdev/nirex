@@ -222,7 +222,10 @@ export async function signoutAll(req: Request, res: Response): Promise<void> {
 // POST /api/v1/auth/forgot-password
 export async function forgotPassword(req: Request, res: Response): Promise<void> {
   const { email } = req.body as ForgotPasswordRequest;
-  await authService.forgotPassword(email);
+  await authService.forgotPassword(email, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
   res.json({
     status: 'success',
     message: 'If an account with that email exists, a reset link has been sent.',
@@ -232,7 +235,10 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
 // POST /api/v1/auth/reset-password
 export async function resetPassword(req: Request, res: Response): Promise<void> {
   const { token, password } = req.body as ResetPasswordRequest;
-  await authService.resetPassword(token, password);
+  await authService.resetPassword(token, password, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
   clearAuthCookies(res);
 
   // Note: We don't have userId here since it's a public endpoint
