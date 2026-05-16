@@ -8,6 +8,10 @@ export interface CreateCheckpointData {
   sessionId: Types.ObjectId;
   snapshot: string;
   turn_index: number;
+  reason?: string;
+  message_id?: Types.ObjectId;
+  token_count?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PaginatedResult<T> {
@@ -26,6 +30,16 @@ export class SessionCheckpointRepository {
    */
   async create(data: CreateCheckpointData): Promise<ISessionCheckpointDocument> {
     return SessionCheckpointModel.create(data);
+  }
+
+  async createMany(
+    checkpoints: CreateCheckpointData[]
+  ): Promise<ISessionCheckpointDocument[]> {
+    if (checkpoints.length === 0) {
+      return [];
+    }
+
+    return SessionCheckpointModel.insertMany(checkpoints, { ordered: true });
   }
 
   /**
@@ -108,6 +122,17 @@ export class SessionCheckpointRepository {
       sessionId,
       turn_index: turnIndex,
     }).exec();
+  }
+
+  async deleteAfterTurnIndex(
+    sessionId: string | Types.ObjectId,
+    turnIndex: number
+  ): Promise<number> {
+    const result = await SessionCheckpointModel.deleteMany({
+      sessionId,
+      turn_index: { $gt: turnIndex },
+    }).exec();
+    return result.deletedCount || 0;
   }
 }
 

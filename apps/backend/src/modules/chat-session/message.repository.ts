@@ -14,7 +14,7 @@ const ENABLE_ENCRYPTION = process.env.ENABLE_MESSAGE_ENCRYPTION === 'true';
 export interface CreateMessageData {
   sessionId: Types.ObjectId;
   userId: Types.ObjectId;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   sequenceNumber: number;
   tokenUsage?: Partial<TokenUsage>;
@@ -69,15 +69,17 @@ function normalizeTokenUsage(
   const inputTokens = tokenUsage.input_tokens || 0;
   const outputTokens = tokenUsage.output_tokens || 0;
   const cachedTokens = tokenUsage.cached_tokens || 0;
+  const reasoningTokens = tokenUsage.reasoning_tokens || 0;
 
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     cached_tokens: cachedTokens,
+    reasoning_tokens: reasoningTokens,
     total_tokens:
       tokenUsage.total_tokens !== undefined
         ? tokenUsage.total_tokens
-        : inputTokens + outputTokens,
+        : inputTokens + outputTokens + reasoningTokens,
   };
 }
 
@@ -328,10 +330,12 @@ export class MessageRepository {
     sessionId: Types.ObjectId,
     limit: number = 50
   ): Promise<IMessageDocument[]> {
-    return MessageModel.find({ session_id: sessionId, is_deleted: false })
+    const messages = await MessageModel.find({ session_id: sessionId, is_deleted: false })
       .sort({ sequence_number: -1 })
       .limit(limit)
       .exec();
+
+    return this.decryptMessages(messages);
   }
 
   /**
@@ -342,13 +346,45 @@ export class MessageRepository {
     startSeq: number,
     endSeq: number
   ): Promise<IMessageDocument[]> {
-    return MessageModel.find({
+    const messages = await MessageModel.find({
       session_id: sessionId,
       sequence_number: { $gte: startSeq, $lte: endSeq },
       is_deleted: false,
     })
       .sort({ sequence_number: 1 })
       .exec();
+
+    return this.decryptMessages(messages);
+  }
+
+  async getAfterSequence(
+    sessionId: Types.ObjectId,
+    afterSequence: number,
+    limit: number = DEFAULT_MESSAGE_PAGE_SIZE
+  ): Promise<IMessageDocument[]> {
+    const messages = await MessageModel.find({
+      session_id: sessionId,
+      sequence_number: { $gt: afterSequence },
+      is_deleted: false,
+    })
+      .sort({ sequence_number: 1 })
+      .limit(limit)
+      .exec();
+
+    return this.decryptMessages(messages);
+  }
+
+  async getLatestForSession(
+    sessionId: Types.ObjectId
+  ): Promise<IMessageDocument | null> {
+    const message = await MessageModel.findOne({
+      session_id: sessionId,
+      is_deleted: false,
+    })
+      .sort({ sequence_number: -1 })
+      .exec();
+
+    return this.decryptMessage(message);
   }
 
   /**
@@ -469,6 +505,17 @@ export class MessageRepository {
     return result.deletedCount || 0;
   }
 
+  async deleteAfterSequence(
+    sessionId: Types.ObjectId,
+    afterSequence: number
+  ): Promise<number> {
+    const result = await MessageModel.deleteMany({
+      session_id: sessionId,
+      sequence_number: { $gt: afterSequence },
+    }).exec();
+    return result.deletedCount || 0;
+  }
+
   /**
    * Delete all messages for a user
    */
@@ -544,6 +591,7 @@ export class MessageRepository {
           input_tokens: { $sum: '$token_usage.input_tokens' },
           output_tokens: { $sum: '$token_usage.output_tokens' },
           cached_tokens: { $sum: '$token_usage.cached_tokens' },
+          reasoning_tokens: { $sum: '$token_usage.reasoning_tokens' },
           total_tokens: { $sum: '$token_usage.total_tokens' },
         },
       },
@@ -554,6 +602,7 @@ export class MessageRepository {
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: 0,
+        reasoning_tokens: 0,
         total_tokens: 0,
       };
     }
@@ -562,6 +611,7 @@ export class MessageRepository {
       input_tokens: result[0].input_tokens || 0,
       output_tokens: result[0].output_tokens || 0,
       cached_tokens: result[0].cached_tokens || 0,
+      reasoning_tokens: result[0].reasoning_tokens || 0,
       total_tokens: result[0].total_tokens || 0,
     };
   }
@@ -574,7 +624,12 @@ export class MessageRepository {
     userId: Types.ObjectId,
     sessionId: Types.ObjectId | undefined,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    filters: {
+      role?: string;
+      dateFrom?: Date;
+      dateTo?: Date;
+    } = {}
   ): Promise<PaginatedResult<IMessageDocument>> {
     const skip = (page - 1) * limit;
 
@@ -589,8 +644,25 @@ export class MessageRepository {
       searchCriteria.session_id = sessionId;
     }
 
+    if (filters.role) {
+      searchCriteria.role = filters.role;
+    }
+
+    if (filters.dateFrom || filters.dateTo) {
+      const createdAt: Record<string, Date> = {};
+      if (filters.dateFrom) {
+        createdAt.$gte = filters.dateFrom;
+      }
+      if (filters.dateTo) {
+        createdAt.$lte = filters.dateTo;
+      }
+      searchCriteria.created_at = createdAt;
+    }
+
     const [messages, total] = await Promise.all([
-      MessageModel.find(searchCriteria)
+      MessageModel.find(searchCriteria, {
+        score: { $meta: 'textScore' },
+      })
         .sort({ score: { $meta: 'textScore' } })
         .skip(skip)
         .limit(limit)

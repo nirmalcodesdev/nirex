@@ -25,6 +25,9 @@ import {
   exportSessionQuerySchema,
   importSessionSchema,
   getSessionQuerySchema,
+  resumeSessionSchema,
+  forkSessionSchema,
+  clearSessionSchema,
   downloadAttachmentParamsSchema,
 } from '@nirex/shared';
 import * as chatSessionController from './chat-session.controller.js';
@@ -103,6 +106,71 @@ router.get(
   '/stats',
   apiLimiter,
   asyncWrapper(chatSessionController.getStats)
+);
+
+/**
+ * POST /api/sessions/import
+ * Import a session from JSON
+ * Body: { session_data: IChatSession }
+ */
+router.post(
+  '/import',
+  apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
+  validate(importSessionSchema),
+  asyncWrapper(chatSessionController.importSession)
+);
+
+/**
+ * GET /api/sessions/:id/export
+ * Export session as JSON or Markdown
+ * Query: ?format=json|markdown (default: json)
+ */
+router.get(
+  '/:id/export',
+  apiLimiter,
+  validate(sessionIdParamSchema, 'params'),
+  validate(exportSessionQuerySchema, 'query'),
+  asyncWrapper(chatSessionController.exportSession)
+);
+
+/**
+ * POST /api/sessions/:id/resume
+ * Resume an existing session and return replay messages.
+ */
+router.post(
+  '/:id/resume',
+  apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
+  validate(sessionIdParamSchema, 'params'),
+  validate(resumeSessionSchema),
+  asyncWrapper(chatSessionController.resumeSession)
+);
+
+/**
+ * POST /api/sessions/:id/fork
+ * Create a branched copy of a session up to a message sequence.
+ */
+router.post(
+  '/:id/fork',
+  apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
+  validate(sessionIdParamSchema, 'params'),
+  validate(forkSessionSchema),
+  asyncWrapper(chatSessionController.forkSession)
+);
+
+/**
+ * POST /api/sessions/:id/clear
+ * Clear a session's message transcript.
+ */
+router.post(
+  '/:id/clear',
+  apiLimiter,
+  requireApiKeyScopes(['sessions:write']),
+  validate(sessionIdParamSchema, 'params'),
+  validate(clearSessionSchema),
+  asyncWrapper(chatSessionController.clearSession)
 );
 
 /**
@@ -256,36 +324,6 @@ router.get(
   apiLimiter,
   validate(sessionIdParamSchema, 'params'),
   asyncWrapper(chatSessionController.getArchivedMessages)
-);
-
-// ============================================================================
-// Export / Import
-// ============================================================================
-
-/**
- * GET /api/sessions/:id/export
- * Export session as JSON or Markdown
- * Query: ?format=json|markdown (default: json)
- */
-router.get(
-  '/:id/export',
-  apiLimiter,
-  validate(sessionIdParamSchema, 'params'),
-  validate(exportSessionQuerySchema, 'query'),
-  asyncWrapper(chatSessionController.exportSession)
-);
-
-/**
- * POST /api/sessions/import
- * Import a session from JSON
- * Body: { session_data: IChatSession }
- */
-router.post(
-  '/import',
-  apiLimiter,
-  requireApiKeyScopes(['sessions:write']),
-  validate(importSessionSchema),
-  asyncWrapper(chatSessionController.importSession)
 );
 
 // ============================================================================

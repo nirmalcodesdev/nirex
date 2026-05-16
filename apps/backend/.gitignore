@@ -19,6 +19,7 @@ pnpm-debug.log*
 coverage/
 tests/*
 !tests/
+!tests/chat-session.test.ts
 !tests/password-policy.test.ts
 
 # IDE

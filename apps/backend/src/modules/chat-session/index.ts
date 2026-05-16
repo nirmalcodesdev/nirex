@@ -67,11 +67,14 @@ export { chatSessionCache, CACHE_PREFIXES, CACHE_TTL } from './chat-session.cach
 // Validation
 export {
   validateMessageContent,
+  validateCheckpointSnapshot,
   validateMetadata,
   validateSessionName,
   validateWorkingDirectory,
   assertValidMessageContent,
+  assertValidCheckpointSnapshot,
   assertValidMetadata,
+  assertValidSessionMetadata,
   assertValidWorkingDirectory,
 } from './content-validator.js';
 

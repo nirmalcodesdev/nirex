@@ -21,6 +21,7 @@ export interface SessionUsageAggregate {
   input_tokens: number;
   output_tokens: number;
   cached_tokens: number;
+  reasoning_tokens: number;
   total_tokens: number;
 }
 
@@ -70,6 +71,7 @@ export class UsageRepository {
       input_tokens: number;
       output_tokens: number;
       cached_tokens: number;
+      reasoning_tokens: number;
       total_tokens: number;
     }>([
       {
@@ -86,6 +88,7 @@ export class UsageRepository {
           input_tokens: { $sum: '$token_usage.input_tokens' },
           output_tokens: { $sum: '$token_usage.output_tokens' },
           cached_tokens: { $sum: '$token_usage.cached_tokens' },
+          reasoning_tokens: { $sum: '$token_usage.reasoning_tokens' },
           total_tokens: { $sum: '$token_usage.total_tokens' },
         },
       },
@@ -97,6 +100,7 @@ export class UsageRepository {
       input_tokens: doc.input_tokens || 0,
       output_tokens: doc.output_tokens || 0,
       cached_tokens: doc.cached_tokens || 0,
+      reasoning_tokens: doc.reasoning_tokens || 0,
       total_tokens: doc.total_tokens || 0,
     }));
   }
