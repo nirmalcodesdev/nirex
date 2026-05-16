@@ -27,8 +27,7 @@ const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NO
 
 interface Snapshot {
   total_requests: number;
-  derived_credits: number;
-  event_credits: number;
+  credits: number;
   avg_response_time_ms: number | null;
   projects: UsageTopProject[];
 }
@@ -305,15 +304,26 @@ export class UsageService {
       sessionMeta,
       sessionUsage,
       eventTotals,
+      eventProjects,
       responseAvg,
     ] = await Promise.all([
       usageRepository.listSessionProjectMeta(userId),
       usageRepository.getSessionUsageFromMessages(userId, range),
       usageRepository.getEventTotals(userId, range),
+      usageRepository.getProjectEventTotals(userId, range),
       usageRepository.getAverageResponseTimeMs(userId, range),
     ]);
 
     const usageBySession = mapSessionUsageById(sessionUsage);
+    const liveSessionIds = sessionUsage
+      .map((usage) => usage.session_id)
+      .filter((sessionId) => Types.ObjectId.isValid(sessionId))
+      .map((sessionId) => new Types.ObjectId(sessionId));
+    const eventTotalsBySession = await usageRepository.getSessionEventTotals(
+      userId,
+      range,
+      liveSessionIds
+    );
     const projectMap = new Map<
       string,
       {
@@ -323,8 +333,16 @@ export class UsageService {
       }
     >();
 
-    let totalRequests = 0;
-    let derivedCredits = 0;
+    for (const project of eventProjects) {
+      projectMap.set(project.project_id, {
+        project_name: project.project_name,
+        credits: project.credits || 0,
+        requests: project.requests || 0,
+      });
+    }
+
+    let totalRequests = eventTotals.requests || 0;
+    let credits = eventTotals.credits || 0;
 
     for (const meta of sessionMeta) {
       const usage = usageBySession.get(meta.session_id);
@@ -332,9 +350,16 @@ export class UsageService {
         continue;
       }
 
-      const credits = (usage.total_tokens || 0) / 1000;
-      totalRequests += usage.requests || 0;
-      derivedCredits += credits;
+      const existingSessionEvents = eventTotalsBySession.get(meta.session_id) || {
+        credits: 0,
+        requests: 0,
+      };
+      const derivedCredits = (usage.total_tokens || 0) / 1000;
+      const creditDelta = Math.max(0, derivedCredits - existingSessionEvents.credits);
+      const requestDelta = Math.max(0, (usage.requests || 0) - existingSessionEvents.requests);
+
+      totalRequests += requestDelta;
+      credits += creditDelta;
 
       const existing = projectMap.get(meta.project_id) || {
         project_name: meta.project_name,
@@ -342,8 +367,8 @@ export class UsageService {
         requests: 0,
       };
 
-      existing.credits += credits;
-      existing.requests += usage.requests || 0;
+      existing.credits += creditDelta;
+      existing.requests += requestDelta;
       projectMap.set(meta.project_id, existing);
     }
 
@@ -357,8 +382,7 @@ export class UsageService {
 
     return {
       total_requests: totalRequests,
-      derived_credits: round(derivedCredits, 4),
-      event_credits: round(eventTotals.credits, 4),
+      credits: round(credits, 4),
       avg_response_time_ms: responseAvg === null ? null : round(responseAvg, 2),
       projects,
     };
@@ -395,12 +419,8 @@ export class UsageService {
       this.buildSnapshot(userId, previousCreditRange),
     ]);
 
-    const creditsUsed = creditSnapshot.event_credits > 0
-      ? creditSnapshot.event_credits
-      : creditSnapshot.derived_credits;
-    const previousCreditsUsed = previousCreditSnapshot.event_credits > 0
-      ? previousCreditSnapshot.event_credits
-      : previousCreditSnapshot.derived_credits;
+    const creditsUsed = creditSnapshot.credits;
+    const previousCreditsUsed = previousCreditSnapshot.credits;
 
     const previousProjects = new Map(
       previousSnapshot.projects.map((project) => [project.project_id, project.credits])
@@ -430,7 +450,10 @@ export class UsageService {
       const fallbackCredits = tokenByDate.get(date) || 0;
       return {
         date,
-        credits: round(fromEvents.credits > 0 ? fromEvents.credits : fallbackCredits, 4),
+        credits: round(
+          fromEvents.credits > 0 ? Math.max(fromEvents.credits, fallbackCredits) : fallbackCredits,
+          4
+        ),
       };
     });
 

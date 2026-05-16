@@ -3,6 +3,7 @@ import { MessageModel, IMessageDocument } from './message.model.js';
 import {
   type TokenUsage,
   type MessageDTO,
+  type MessageRole,
   DEFAULT_MESSAGE_PAGE_SIZE,
 } from '@nirex/shared';
 import { logger } from '../../utils/logger.js';
@@ -46,6 +47,15 @@ export interface MessageFilters {
   role?: string;
   deliveryStatus?: string;
   isDeleted?: boolean;
+}
+
+export interface MessageUsageRecord {
+  _id: Types.ObjectId;
+  role: MessageRole;
+  token_usage?: TokenUsage;
+  sequence_number: number;
+  client_message_id?: string;
+  created_at: Date;
 }
 
 export interface PaginatedResult<T> {
@@ -321,6 +331,33 @@ export class MessageRepository {
       .exec();
 
     return this.decryptMessages(messages);
+  }
+
+  async listUsageForSession(sessionId: Types.ObjectId): Promise<MessageUsageRecord[]> {
+    const messages = await MessageModel.find({
+      session_id: sessionId,
+      is_deleted: false,
+    })
+      .select({
+        _id: 1,
+        role: 1,
+        token_usage: 1,
+        sequence_number: 1,
+        client_message_id: 1,
+        created_at: 1,
+      })
+      .sort({ sequence_number: 1 })
+      .lean()
+      .exec();
+
+    return messages.map((message) => ({
+      _id: message._id as Types.ObjectId,
+      role: message.role as MessageRole,
+      token_usage: message.token_usage as TokenUsage | undefined,
+      sequence_number: message.sequence_number as number,
+      client_message_id: message.client_message_id as string | undefined,
+      created_at: message.created_at as Date,
+    }));
   }
 
   /**
