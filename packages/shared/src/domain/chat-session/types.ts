@@ -12,7 +12,7 @@
 /**
  * Role of a message sender in a chat session
  */
-export type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
 /**
  * AI model identifiers supported by the system
@@ -34,6 +34,7 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   cached_tokens?: number;
+  reasoning_tokens?: number;
   total_tokens: number;
 }
 
@@ -103,6 +104,7 @@ export interface MessageDTO {
   is_deleted: boolean;
   edited_at?: Date;
   created_at: Date;
+  session_name?: string;
 }
 
 /**
@@ -114,6 +116,15 @@ export interface MessageSearchResult {
   score: number; // Relevance score
 }
 
+export type CheckpointReason =
+  | 'manual'
+  | 'auto_compaction'
+  | 'resume'
+  | 'fork'
+  | 'import'
+  | 'clear'
+  | string;
+
 /**
  * A conversation checkpoint/snapshot for compaction
  */
@@ -122,6 +133,10 @@ export interface SessionCheckpoint {
   session_id: string;
   snapshot: string; // Compressed summary of conversation
   turn_index: number;
+  reason: CheckpointReason;
+  message_id?: string;
+  token_count?: number;
+  metadata?: Record<string, unknown>;
   created_at: Date;
 }
 
@@ -137,6 +152,23 @@ export interface IChatSession {
   messages: ChatMessage[];
   token_usage: TokenUsage;
   model: AIModel;
+  parent_session_id?: string;
+  root_session_id?: string;
+  branch_point_sequence?: number;
+  forked_from_message_id?: string;
+  branch_depth?: number;
+  source?: 'cli' | 'web' | 'api' | 'import' | 'fork' | string;
+  git_branch?: string;
+  last_message_at?: Date;
+  last_message_preview?: string;
+  last_message_role?: MessageRole;
+  last_message_sequence?: number;
+  last_resumed_at?: Date;
+  resume_count?: number;
+  checkpoint_count?: number;
+  latest_checkpoint_at?: Date;
+  is_pinned?: boolean;
+  metadata?: Record<string, unknown>;
   is_archived: boolean;
   created_at: Date;
   updated_at: Date;
@@ -153,6 +185,23 @@ export interface ChatSessionDTO {
   message_count: number;
   token_usage: TokenUsage;
   model: AIModel;
+  parent_session_id?: string;
+  root_session_id?: string;
+  branch_point_sequence?: number;
+  forked_from_message_id?: string;
+  branch_depth?: number;
+  source?: string;
+  git_branch?: string;
+  last_message_at?: Date;
+  last_message_preview?: string;
+  last_message_role?: MessageRole;
+  last_message_sequence?: number;
+  last_resumed_at?: Date;
+  resume_count?: number;
+  checkpoint_count?: number;
+  latest_checkpoint_at?: Date;
+  is_pinned?: boolean;
+  metadata?: Record<string, unknown>;
   is_archived: boolean;
   created_at: Date;
   updated_at: Date;
@@ -171,6 +220,11 @@ export interface ChatSessionWithMessages extends ChatSessionDTO {
 export interface CheckpointDTO {
   id: string;
   turn_index: number;
+  snapshot?: string;
+  reason: CheckpointReason;
+  message_id?: string;
+  token_count?: number;
+  metadata?: Record<string, unknown>;
   created_at: Date;
 }
 
@@ -229,14 +283,24 @@ export function shouldCompact(model: string, totalTokens: number): boolean {
 export const MAX_MESSAGES_PER_DOCUMENT = 500;
 
 /**
- * Maximum message content size (10KB)
+ * Maximum message content size (256KB)
  */
-export const MAX_MESSAGE_CONTENT_SIZE = 10 * 1024;
+export const MAX_MESSAGE_CONTENT_SIZE = 256 * 1024;
 
 /**
- * Maximum metadata size per message (5KB)
+ * Maximum metadata size per message (32KB)
  */
-export const MAX_MESSAGE_METADATA_SIZE = 5 * 1024;
+export const MAX_MESSAGE_METADATA_SIZE = 32 * 1024;
+
+/**
+ * Maximum checkpoint snapshot size (256KB)
+ */
+export const MAX_CHECKPOINT_SNAPSHOT_SIZE = 256 * 1024;
+
+/**
+ * Maximum session metadata size (32KB)
+ */
+export const MAX_SESSION_METADATA_SIZE = 32 * 1024;
 
 /**
  * Default number of recent messages to return when paginating
@@ -257,6 +321,10 @@ export const MAX_MESSAGE_PAGE_SIZE = 200;
 export interface CreateSessionRequest {
   working_directory: string;
   model: AIModel;
+  name?: string;
+  git_branch?: string;
+  source?: 'cli' | 'web' | 'api' | string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CreateSessionResponse {
@@ -269,7 +337,14 @@ export interface ListSessionsQuery {
   page?: number;
   limit?: number;
   include_archived?: boolean;
+  archived_only?: boolean;
   working_directory_hash?: string;
+  q?: string;
+  model?: AIModel;
+  parent_session_id?: string;
+  root_session_id?: string;
+  sort_by?: 'updated_at' | 'created_at' | 'last_message_at' | 'last_resumed_at' | 'name';
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface ListChatSessionsResponse {
@@ -305,6 +380,9 @@ export interface GetSessionResponse {
 export interface UpdateSessionRequest {
   name?: string;
   is_archived?: boolean;
+  is_pinned?: boolean;
+  git_branch?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateSessionResponse {
@@ -394,6 +472,10 @@ export interface DeleteMessageResponse {
 
 export interface CreateCheckpointRequest {
   snapshot: string;
+  reason?: CheckpointReason;
+  message_id?: string;
+  token_count?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CreateCheckpointResponse {
@@ -402,6 +484,64 @@ export interface CreateCheckpointResponse {
 
 export interface ListCheckpointsResponse {
   checkpoints: CheckpointDTO[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+  };
+}
+
+// ------------------ Resume Session ------------------
+
+export interface ResumeSessionRequest {
+  last_seen_sequence?: number;
+  message_limit?: number;
+  client_session_id?: string;
+  client_metadata?: Record<string, unknown>;
+}
+
+export interface ResumeSessionResponse {
+  session: ChatSessionWithMessages;
+  messages_pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+    has_more: boolean;
+  };
+  latest_checkpoint?: CheckpointDTO;
+  replay_from_sequence?: number;
+  resumed_at: Date;
+}
+
+// ------------------ Fork Session ------------------
+
+export interface ForkSessionRequest {
+  name?: string;
+  branch_after_sequence?: number;
+  forked_from_message_id?: string;
+  include_checkpoints?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ForkSessionResponse {
+  session: ChatSessionDTO;
+  copied_message_count: number;
+  branch_point_sequence: number;
+}
+
+// ------------------ Clear Session ------------------
+
+export interface ClearSessionRequest {
+  create_checkpoint?: boolean;
+  checkpoint_snapshot?: string;
+}
+
+export interface ClearSessionResponse {
+  session: ChatSessionDTO;
+  deleted_message_count: number;
+  checkpoint?: CheckpointDTO;
 }
 
 // ------------------ Export/Import ------------------
@@ -437,11 +577,15 @@ export interface SessionStatsResponse {
 export type ChatSessionErrorCode =
   | 'SESSION_NOT_FOUND'
   | 'SESSION_ACCESS_DENIED'
+  | 'MESSAGE_NOT_FOUND'
   | 'INVALID_MESSAGE_ROLE'
   | 'INVALID_MODEL'
   | 'CHECKPOINT_NOT_FOUND'
   | 'INVALID_EXPORT_FORMAT'
   | 'IMPORT_FAILED'
+  | 'FORK_FAILED'
+  | 'RESUME_FAILED'
+  | 'INVALID_BRANCH_POINT'
   | 'SESSION_LIMIT_REACHED';
 
 // ============================================================================
@@ -463,6 +607,13 @@ export interface SessionFilters {
   include_archived?: boolean;
   working_directory_hash?: string;
   model?: AIModel;
+  q?: string;
+  parent_session_id?: string;
+  root_session_id?: string;
   created_after?: Date;
   created_before?: Date;
+  updated_after?: Date;
+  updated_before?: Date;
+  sort_by?: ListSessionsQuery['sort_by'];
+  sort_order?: ListSessionsQuery['sort_order'];
 }

@@ -20,8 +20,10 @@ import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.j
 import { assertWithinQuota } from '../usage/quota.guard.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import {
+  assertValidCheckpointSnapshot,
   assertValidMessageContent,
   assertValidMetadata,
+  assertValidSessionMetadata,
   assertValidWorkingDirectory,
   validateSessionName,
 } from './content-validator.js';
@@ -37,6 +39,7 @@ import {
   type ExportFormat,
   type MessageDTO,
   type MessageSearchResult,
+  type MessageRole,
   getContextLimit,
   shouldCompact,
   MAX_MESSAGES_PER_DOCUMENT,
@@ -78,6 +81,15 @@ export function generateSessionName(firstMessage: string): string {
   return words.slice(0, 6).join(' ') + '...';
 }
 
+function normalizePreview(content: string, maxLength: number = 240): string {
+  const compact = content.replace(/\s+/g, ' ').trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 3)}...` : compact;
+}
+
+function objectIdToString(value: Types.ObjectId | string | undefined): string | undefined {
+  return value ? value.toString() : undefined;
+}
+
 /**
  * Convert a Mongoose document to ChatSessionDTO
  */
@@ -90,6 +102,23 @@ function toSessionDTO(doc: IChatSessionDocument, messageCount?: number): ChatSes
     message_count: messageCount !== undefined ? messageCount : (doc.messages?.length || 0),
     token_usage: doc.token_usage,
     model: doc.aiModel,
+    parent_session_id: objectIdToString(doc.parent_session_id),
+    root_session_id: objectIdToString(doc.root_session_id),
+    branch_point_sequence: doc.branch_point_sequence,
+    forked_from_message_id: objectIdToString(doc.forked_from_message_id),
+    branch_depth: doc.branch_depth,
+    source: doc.source,
+    git_branch: doc.git_branch,
+    last_message_at: doc.last_message_at,
+    last_message_preview: doc.last_message_preview,
+    last_message_role: doc.last_message_role,
+    last_message_sequence: doc.last_message_sequence,
+    last_resumed_at: doc.last_resumed_at,
+    resume_count: doc.resume_count,
+    checkpoint_count: doc.checkpoint_count,
+    latest_checkpoint_at: doc.latest_checkpoint_at,
+    is_pinned: doc.is_pinned,
+    metadata: doc.metadata,
     is_archived: doc.is_archived,
     created_at: doc.created_at,
     updated_at: doc.updated_at,
@@ -142,15 +171,17 @@ function normalizeTokenUsage(
   const inputTokens = tokenUsage.input_tokens || 0;
   const outputTokens = tokenUsage.output_tokens || 0;
   const cachedTokens = tokenUsage.cached_tokens || 0;
+  const reasoningTokens = tokenUsage.reasoning_tokens || 0;
 
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     cached_tokens: cachedTokens,
+    reasoning_tokens: reasoningTokens,
     total_tokens:
       tokenUsage.total_tokens !== undefined
         ? tokenUsage.total_tokens
-        : inputTokens + outputTokens,
+        : inputTokens + outputTokens + reasoningTokens,
   };
 }
 
@@ -231,13 +262,39 @@ function toSessionWithMessages(
 function toCheckpointDTO(checkpoint: {
   _id: Types.ObjectId;
   turn_index: number;
+  snapshot?: string;
+  reason?: string;
+  message_id?: Types.ObjectId;
+  token_count?: number;
+  metadata?: Record<string, unknown>;
   created_at: Date;
 }): CheckpointDTO {
   return {
     id: checkpoint._id.toString(),
     turn_index: checkpoint.turn_index,
+    snapshot: checkpoint.snapshot,
+    reason: checkpoint.reason || 'manual',
+    message_id: objectIdToString(checkpoint.message_id),
+    token_count: checkpoint.token_count,
+    metadata: checkpoint.metadata,
     created_at: checkpoint.created_at,
   };
+}
+
+async function collectSessionMessages(
+  session: IChatSessionDocument
+): Promise<ChatMessage[]> {
+  const currentMessages = session.messages || [];
+  const archivedDocs = await archivedMessagesRepository.findBySession(session._id);
+  const collectionMessages = USE_SEPARATE_MESSAGE_COLLECTION
+    ? toChatMessages(await messageRepository.listAllForSession(session._id))
+    : [];
+
+  return mergeAndSortMessages(
+    ...archivedDocs.map((doc) => doc.messages),
+    currentMessages,
+    collectionMessages
+  );
 }
 
 // ============================================================================
@@ -288,20 +345,49 @@ export class ChatSessionService {
   async createSession(
     userId: Types.ObjectId,
     workingDirectory: string,
-    model: string
+    model: string,
+    options: {
+      name?: string;
+      gitBranch?: string;
+      source?: string;
+      metadata?: Record<string, unknown>;
+    } = {}
   ): Promise<ChatSessionDTO> {
     const sanitizedWorkingDirectory = assertValidWorkingDirectory(workingDirectory);
     const workingDirectoryHash = hashWorkingDirectory(sanitizedWorkingDirectory);
+    if (options.metadata) {
+      assertValidSessionMetadata(options.metadata);
+    }
+
+    let sessionName = 'New Session';
+    if (options.name !== undefined) {
+      const nameValidation = validateSessionName(options.name);
+      if (!nameValidation.valid) {
+        throw new AppError(nameValidation.error!, 400, 'VALIDATION_ERROR');
+      }
+      sessionName = nameValidation.sanitized!;
+    }
 
     const data: CreateChatSessionData = {
       userId,
-      name: 'New Session',
+      name: sessionName,
       working_directory: sanitizedWorkingDirectory,
       working_directory_hash: workingDirectoryHash,
       aiModel: model,
+      git_branch: options.gitBranch?.trim(),
+      source: options.source?.trim() || 'api',
+      metadata: options.metadata,
     };
 
     const session = await chatSessionRepository.create(data);
+    if (!session.root_session_id) {
+      const rootedSession = await chatSessionRepository.update(session._id, {
+        root_session_id: session._id,
+      });
+      if (rootedSession) {
+        session.root_session_id = rootedSession.root_session_id;
+      }
+    }
     const sessionDTO = toSessionDTO(session);
 
     // Cache the new session
@@ -327,13 +413,33 @@ export class ChatSessionService {
     page: number = 1,
     limit: number = 20,
     includeArchived: boolean = false,
-    workingDirectoryHash?: string
+    workingDirectoryHash?: string,
+    options: {
+      query?: string;
+      model?: string;
+      archivedOnly?: boolean;
+      parentSessionId?: string;
+      rootSessionId?: string;
+      sortBy?: 'updated_at' | 'created_at' | 'last_message_at' | 'last_resumed_at' | 'name';
+      sortOrder?: 'asc' | 'desc';
+    } = {}
   ): Promise<{ sessions: ChatSessionDTO[]; pagination: { page: number; limit: number; total: number; total_pages: number } }> {
     const result = await chatSessionRepository.list(
       {
         userId,
-        includeArchived,
+        includeArchived: includeArchived || options.archivedOnly,
+        archivedOnly: options.archivedOnly,
         workingDirectoryHash,
+        query: options.query,
+        model: options.model,
+        parentSessionId: options.parentSessionId
+          ? new Types.ObjectId(options.parentSessionId)
+          : undefined,
+        rootSessionId: options.rootSessionId
+          ? new Types.ObjectId(options.rootSessionId)
+          : undefined,
+        sortBy: options.sortBy,
+        sortOrder: options.sortOrder,
       },
       page,
       limit
@@ -503,6 +609,9 @@ export class ChatSessionService {
       }
       data.name = nameValidation.sanitized;
     }
+    if (data.metadata !== undefined) {
+      assertValidSessionMetadata(data.metadata);
+    }
 
     const updated = await chatSessionRepository.update(sessionId, data);
 
@@ -548,6 +657,13 @@ export class ChatSessionService {
     // Delete all archived messages
     await archivedMessagesRepository.deleteAllForSession(
       new Types.ObjectId(sessionId)
+    );
+
+    const childSessions = await chatSessionRepository.findChildren(sessionId, userId);
+    await Promise.all(
+      childSessions.map((child) =>
+        chatSessionRepository.detachParent(child._id)
+      )
     );
 
     // Delete the session
@@ -619,7 +735,7 @@ export class ChatSessionService {
   async addMessage(
     sessionId: string,
     userId: Types.ObjectId,
-    role: 'user' | 'assistant' | 'system',
+    role: MessageRole,
     content: string,
     tokenUsage?: Partial<TokenUsage>,
     metadata?: Record<string, unknown>,
@@ -674,7 +790,11 @@ export class ChatSessionService {
       await this.createCheckpoint(
         sessionId,
         userId,
-        `Auto-compaction at ${currentTokens} tokens`
+        `Auto-compaction at ${currentTokens} tokens`,
+        {
+          reason: 'auto_compaction',
+          tokenCount: currentTokens,
+        }
       );
       await chatSessionRepository.update(sessionId, {
         last_auto_checkpoint_tokens: currentTokens,
@@ -772,9 +892,15 @@ export class ChatSessionService {
 
       // Mark as delivered immediately for now (in production, this would be done by SSE confirmation)
       const deliveredMessage = (await messageRepository.markDelivered(message._id)) || message;
+      const messageCreatedAt = deliveredMessage.created_at || new Date();
 
       // Auto-generate session name if first user message
-      const summaryUpdates: Partial<UpdateChatSessionData> = {};
+      const summaryUpdates: Partial<UpdateChatSessionData> = {
+        last_message_at: messageCreatedAt,
+        last_message_preview: normalizePreview(sanitizedContent),
+        last_message_role: role,
+        last_message_sequence: sequenceNumber,
+      };
       if (
         role === 'user' &&
         existing.name === 'New Session' &&
@@ -846,6 +972,7 @@ export class ChatSessionService {
       }
 
       // Create the message
+      const legacySequenceNumber = currentMessageCount + 1;
       const message: ChatMessage = {
         id: randomUUID(),
         role,
@@ -853,6 +980,12 @@ export class ChatSessionService {
         timestamp: new Date(),
         token_usage: normalizedTokenUsage,
         metadata,
+      };
+      const updatedSummary: Partial<UpdateChatSessionData> = {
+        last_message_at: message.timestamp,
+        last_message_preview: normalizePreview(sanitizedContent),
+        last_message_role: role,
+        last_message_sequence: legacySequenceNumber,
       };
 
       // Auto-generate name if this is the first user message
@@ -862,7 +995,7 @@ export class ChatSessionService {
         !existing.messages?.some((m) => m.role === 'user')
       ) {
         const newName = generateSessionName(sanitizedContent);
-        await chatSessionRepository.updateName(sessionId, newName);
+        updatedSummary.name = newName;
       }
 
       // Add the message
@@ -876,8 +1009,12 @@ export class ChatSessionService {
         throw new AppError('Failed to add message', 500, 'INTERNAL_ERROR');
       }
 
+      const summarizedSession =
+        (await chatSessionRepository.updateMessageSummary(sessionId, {}, updatedSummary)) ||
+        updated;
+
       await Promise.all([
-        chatSessionCache.setSession(toSessionDTO(updated)),
+        chatSessionCache.setSession(toSessionDTO(summarizedSession)),
         chatSessionCache.invalidateUserSessions(userId.toString()),
         invalidateUsageRelatedCaches(userId),
       ]);
@@ -887,7 +1024,7 @@ export class ChatSessionService {
 
       return {
         message,
-        session: toSessionDTO(updated),
+        session: toSessionDTO(summarizedSession),
         checkpointCreated,
         isDuplicate: false,
       };
@@ -900,12 +1037,31 @@ export class ChatSessionService {
   async createCheckpoint(
     sessionId: string,
     userId: Types.ObjectId,
-    snapshot: string
+    snapshot: string,
+    options: {
+      reason?: string;
+      messageId?: string;
+      tokenCount?: number;
+      metadata?: Record<string, unknown>;
+    } = {}
   ): Promise<CheckpointDTO> {
     const existing = await this.getOwnedSession(sessionId, userId);
 
     // Sanitize snapshot
-    const sanitizedSnapshot = assertValidMessageContent(snapshot);
+    const sanitizedSnapshot = assertValidCheckpointSnapshot(snapshot);
+    if (options.metadata) {
+      assertValidMetadata(options.metadata);
+    }
+    if (options.messageId) {
+      const message = await messageRepository.findById(options.messageId);
+      if (
+        !message ||
+        message.session_id.toString() !== sessionId ||
+        message.user_id.toString() !== userId.toString()
+      ) {
+        throw new AppError('Message not found', 404, 'MESSAGE_NOT_FOUND');
+      }
+    }
 
     const turnIndex = USE_SEPARATE_MESSAGE_COLLECTION
       ? await messageRepository.countForSession(new Types.ObjectId(sessionId))
@@ -915,7 +1071,19 @@ export class ChatSessionService {
       sessionId: new Types.ObjectId(sessionId),
       snapshot: sanitizedSnapshot,
       turn_index: turnIndex,
+      reason: options.reason || 'manual',
+      message_id: options.messageId ? new Types.ObjectId(options.messageId) : undefined,
+      token_count: options.tokenCount ?? existing.token_usage?.total_tokens,
+      metadata: options.metadata,
     });
+    await chatSessionRepository.updateMessageSummary(sessionId, {}, {
+      checkpoint_count: (existing.checkpoint_count || 0) + 1,
+      latest_checkpoint_at: checkpoint.created_at,
+    });
+    await Promise.all([
+      chatSessionCache.invalidateSession(sessionId),
+      chatSessionCache.invalidateUserSessions(userId.toString()),
+    ]);
 
     // Notify via SSE
     await sseManager.notifyCheckpointCreated(sessionId, userId.toString(), toCheckpointDTO(checkpoint));
@@ -959,6 +1127,421 @@ export class ChatSessionService {
     };
   }
 
+  async resumeSession(
+    sessionId: string,
+    userId: Types.ObjectId,
+    options: {
+      lastSeenSequence?: number;
+      messageLimit?: number;
+      clientSessionId?: string;
+      clientMetadata?: Record<string, unknown>;
+    } = {}
+  ): Promise<{
+    session: ChatSessionWithMessages;
+    messages_pagination?: {
+      page: number;
+      limit: number;
+      total: number;
+      total_pages: number;
+      has_more: boolean;
+    };
+    latest_checkpoint?: CheckpointDTO;
+    replay_from_sequence?: number;
+    resumed_at: Date;
+  }> {
+    const existing = await this.getOwnedSession(sessionId, userId);
+    if (options.clientMetadata) {
+      assertValidSessionMetadata(options.clientMetadata);
+    }
+
+    const resumedAt = new Date();
+    const metadata = options.clientSessionId || options.clientMetadata
+      ? {
+          ...(existing.metadata || {}),
+          last_resume_client_session_id: options.clientSessionId,
+          last_resume_client_metadata: options.clientMetadata,
+        }
+      : existing.metadata;
+
+    const resumed =
+      (await chatSessionRepository.markResumed(sessionId, resumedAt, metadata)) ||
+      existing;
+
+    let messages: ChatMessage[] = [];
+    let pagination:
+      | {
+          page: number;
+          limit: number;
+          total: number;
+          total_pages: number;
+          has_more: boolean;
+        }
+      | undefined;
+    let messageCount = resumed.messages?.length || 0;
+    const messageLimit = options.messageLimit || DEFAULT_MESSAGE_PAGE_SIZE;
+
+    if (
+      USE_SEPARATE_MESSAGE_COLLECTION &&
+      options.lastSeenSequence !== undefined
+    ) {
+      const docs = await messageRepository.getAfterSequence(
+        new Types.ObjectId(sessionId),
+        options.lastSeenSequence,
+        messageLimit
+      );
+      messages = toChatMessages(docs);
+      messageCount = await messageRepository.countForSession(
+        new Types.ObjectId(sessionId)
+      );
+      pagination = {
+        page: 1,
+        limit: messageLimit,
+        total: messageCount,
+        total_pages: Math.ceil(messageCount / messageLimit),
+        has_more: docs.length === messageLimit && messageCount > docs.length,
+      };
+    } else {
+      const sessionResult = await this.getSession(
+        sessionId,
+        userId,
+        1,
+        messageLimit
+      );
+      messages = sessionResult.session.messages;
+      pagination = sessionResult.messages_pagination;
+      messageCount = sessionResult.session.message_count;
+    }
+
+    const latestCheckpoint =
+      await sessionCheckpointRepository.getLatestForSession(sessionId);
+    const sessionDTO = toSessionDTO(resumed, messageCount);
+
+    await Promise.all([
+      chatSessionCache.setSession(sessionDTO),
+      chatSessionCache.invalidateUserSessions(userId.toString()),
+    ]);
+
+    await sseManager.notifySessionUpdate(sessionId, userId.toString(), {
+      type: 'resumed',
+      resumedAt,
+    });
+
+    return {
+      session: {
+        ...sessionDTO,
+        messages,
+      },
+      messages_pagination: pagination,
+      latest_checkpoint: latestCheckpoint
+        ? toCheckpointDTO(latestCheckpoint)
+        : undefined,
+      replay_from_sequence: options.lastSeenSequence,
+      resumed_at: resumedAt,
+    };
+  }
+
+  async forkSession(
+    sessionId: string,
+    userId: Types.ObjectId,
+    options: {
+      name?: string;
+      branchAfterSequence?: number;
+      forkedFromMessageId?: string;
+      includeCheckpoints?: boolean;
+      metadata?: Record<string, unknown>;
+    } = {}
+  ): Promise<{
+    session: ChatSessionDTO;
+    copied_message_count: number;
+    branch_point_sequence: number;
+  }> {
+    const sourceSession = await this.getOwnedSession(sessionId, userId);
+    if (options.metadata) {
+      assertValidSessionMetadata(options.metadata);
+    }
+
+    const allMessages = await collectSessionMessages(sourceSession);
+    let branchPointSequence = options.branchAfterSequence;
+    let forkedFromMessageId = options.forkedFromMessageId;
+
+    if (forkedFromMessageId) {
+      const sourceMessage = USE_SEPARATE_MESSAGE_COLLECTION
+        ? await messageRepository.findById(forkedFromMessageId)
+        : null;
+      if (!sourceMessage || sourceMessage.session_id.toString() !== sessionId) {
+        throw new AppError('Message not found', 404, 'MESSAGE_NOT_FOUND');
+      }
+      branchPointSequence = sourceMessage.sequence_number;
+    }
+
+    if (branchPointSequence === undefined) {
+      branchPointSequence =
+        sourceSession.last_message_sequence ||
+        (USE_SEPARATE_MESSAGE_COLLECTION
+          ? await messageRepository.countForSession(sourceSession._id)
+          : allMessages.length);
+    }
+    if (branchPointSequence > allMessages.length) {
+      throw new AppError(
+        'Branch point exceeds available message history',
+        400,
+        'INVALID_BRANCH_POINT'
+      );
+    }
+
+    const messagesToCopy = allMessages.slice(0, branchPointSequence);
+    const forkNameValidation = validateSessionName(
+      options.name || `${sourceSession.name} (Fork)`
+    );
+    if (!forkNameValidation.valid) {
+      throw new AppError(forkNameValidation.error!, 400, 'VALIDATION_ERROR');
+    }
+
+    let forkSession: IChatSessionDocument | null = null;
+
+    try {
+      forkSession = await chatSessionRepository.create({
+        userId,
+        name: forkNameValidation.sanitized!,
+        working_directory: sourceSession.working_directory,
+        working_directory_hash: sourceSession.working_directory_hash,
+        aiModel: sourceSession.aiModel,
+        parent_session_id: sourceSession._id,
+        root_session_id: sourceSession.root_session_id || sourceSession._id,
+        branch_point_sequence: branchPointSequence,
+        forked_from_message_id: forkedFromMessageId
+          ? new Types.ObjectId(forkedFromMessageId)
+          : undefined,
+        branch_depth: (sourceSession.branch_depth || 0) + 1,
+        source: 'fork',
+        git_branch: sourceSession.git_branch,
+        metadata: {
+          ...(sourceSession.metadata || {}),
+          ...(options.metadata || {}),
+          forked_from_session_id: sourceSession._id.toString(),
+        },
+      });
+
+      let copiedCount = 0;
+      let copiedTokenUsage: TokenUsage = {
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 0,
+      };
+
+      if (USE_SEPARATE_MESSAGE_COLLECTION) {
+        for (const message of messagesToCopy) {
+          copiedCount += 1;
+          const createdAt = new Date(message.timestamp);
+          await messageRepository.create({
+            sessionId: forkSession._id,
+            userId,
+            role: message.role,
+            content: message.content,
+            sequenceNumber: copiedCount,
+            tokenUsage: normalizeTokenUsage(message.token_usage),
+            metadata: message.metadata,
+            createdAt,
+            updatedAt: createdAt,
+            deliveryStatus: 'delivered',
+            deliveredAt: createdAt,
+          });
+          const usage = normalizeTokenUsage(message.token_usage);
+          if (usage) {
+            copiedTokenUsage = {
+              input_tokens: copiedTokenUsage.input_tokens + usage.input_tokens,
+              output_tokens: copiedTokenUsage.output_tokens + usage.output_tokens,
+              cached_tokens:
+                (copiedTokenUsage.cached_tokens || 0) + (usage.cached_tokens || 0),
+              reasoning_tokens:
+                (copiedTokenUsage.reasoning_tokens || 0) +
+                (usage.reasoning_tokens || 0),
+              total_tokens: copiedTokenUsage.total_tokens + usage.total_tokens,
+            };
+          }
+        }
+      } else {
+        for (const message of messagesToCopy) {
+          copiedCount += 1;
+          await chatSessionRepository.addMessage(
+            forkSession._id,
+            message,
+            normalizeTokenUsage(message.token_usage) || {}
+          );
+        }
+        copiedTokenUsage = messagesToCopy.reduce<TokenUsage>(
+          (total, message) => {
+            const usage = normalizeTokenUsage(message.token_usage);
+            if (!usage) {
+              return total;
+            }
+            return {
+              input_tokens: total.input_tokens + usage.input_tokens,
+              output_tokens: total.output_tokens + usage.output_tokens,
+              cached_tokens: (total.cached_tokens || 0) + (usage.cached_tokens || 0),
+              reasoning_tokens:
+                (total.reasoning_tokens || 0) + (usage.reasoning_tokens || 0),
+              total_tokens: total.total_tokens + usage.total_tokens,
+            };
+          },
+          {
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: 0,
+            reasoning_tokens: 0,
+            total_tokens: 0,
+          }
+        );
+      }
+
+      if (options.includeCheckpoints) {
+        const sourceCheckpoints =
+          await sessionCheckpointRepository.listForSession(sessionId, 1, 1000);
+        await sessionCheckpointRepository.createMany(
+          sourceCheckpoints.data
+            .filter((checkpoint) => checkpoint.turn_index <= branchPointSequence!)
+            .map((checkpoint) => ({
+              sessionId: forkSession!._id,
+              snapshot: checkpoint.snapshot,
+              turn_index: checkpoint.turn_index,
+              reason: 'fork',
+              token_count: checkpoint.token_count,
+              metadata: checkpoint.metadata,
+            }))
+        );
+      }
+
+      const latestCopiedMessage = messagesToCopy.at(-1);
+      const finalSession = await chatSessionRepository.update(forkSession._id, {
+        token_usage: copiedTokenUsage,
+        next_message_sequence: copiedCount,
+        last_message_at: latestCopiedMessage?.timestamp,
+        last_message_preview: latestCopiedMessage
+          ? normalizePreview(latestCopiedMessage.content)
+          : undefined,
+        last_message_role: latestCopiedMessage?.role,
+        last_message_sequence: copiedCount > 0 ? copiedCount : undefined,
+        checkpoint_count: options.includeCheckpoints
+          ? await sessionCheckpointRepository.countForSession(forkSession._id)
+          : 0,
+      });
+
+      if (!finalSession) {
+        throw new AppError('Failed to fork session', 500, 'FORK_FAILED');
+      }
+
+      const forkDTO = toSessionDTO(finalSession, copiedCount);
+      await Promise.all([
+        chatSessionCache.setSession(forkDTO),
+        chatSessionCache.invalidateUserSessions(userId.toString()),
+      ]);
+
+      await sseManager.broadcastToUser(userId.toString(), {
+        type: 'session_forked',
+        sourceSessionId: sessionId,
+        session: forkDTO,
+      });
+
+      return {
+        session: forkDTO,
+        copied_message_count: copiedCount,
+        branch_point_sequence: branchPointSequence,
+      };
+    } catch (error) {
+      if (forkSession) {
+        await Promise.allSettled([
+          messageRepository.deleteAllForSession(forkSession._id),
+          sessionCheckpointRepository.deleteAllForSession(forkSession._id),
+          archivedMessagesRepository.deleteAllForSession(forkSession._id),
+          chatSessionRepository.delete(forkSession._id),
+          chatSessionCache.invalidateAllSessionCaches(
+            forkSession._id.toString(),
+            userId.toString()
+          ),
+        ]);
+      }
+
+      throw error;
+    }
+  }
+
+  async clearSession(
+    sessionId: string,
+    userId: Types.ObjectId,
+    options: {
+      createCheckpoint?: boolean;
+      checkpointSnapshot?: string;
+    } = {}
+  ): Promise<{
+    session: ChatSessionDTO;
+    deleted_message_count: number;
+    checkpoint?: CheckpointDTO;
+  }> {
+    const existing = await this.getOwnedSession(sessionId, userId);
+    const deletedMessageCount = USE_SEPARATE_MESSAGE_COLLECTION
+      ? await messageRepository.countForSession(existing._id)
+      : existing.messages?.length || 0;
+
+    let checkpoint: CheckpointDTO | undefined;
+    const checkpointSnapshot =
+      options.createCheckpoint || options.checkpointSnapshot
+        ? assertValidCheckpointSnapshot(
+            options.checkpointSnapshot ||
+              `Cleared ${deletedMessageCount} messages at ${new Date().toISOString()}`
+          )
+        : undefined;
+
+    if (USE_SEPARATE_MESSAGE_COLLECTION) {
+      await messageRepository.deleteAllForSession(existing._id);
+    }
+    await Promise.all([
+      archivedMessagesRepository.deleteAllForSession(existing._id),
+      sessionCheckpointRepository.deleteAllForSession(existing._id),
+    ]);
+
+    const cleared = await chatSessionRepository.clearMessageState(existing._id);
+    if (!cleared) {
+      throw new AppError('Failed to clear session', 500, 'INTERNAL_ERROR');
+    }
+
+    let finalSession = cleared;
+    if (checkpointSnapshot) {
+      const checkpointDoc = await sessionCheckpointRepository.create({
+        sessionId: existing._id,
+        snapshot: checkpointSnapshot,
+        turn_index: deletedMessageCount,
+        reason: 'clear',
+        token_count: existing.token_usage?.total_tokens,
+      });
+      checkpoint = toCheckpointDTO(checkpointDoc);
+      finalSession =
+        (await chatSessionRepository.updateMessageSummary(existing._id, {}, {
+          checkpoint_count: 1,
+          latest_checkpoint_at: checkpointDoc.created_at,
+        })) || cleared;
+    }
+
+    const sessionDTO = toSessionDTO(finalSession, 0);
+    await Promise.all([
+      chatSessionCache.invalidateAllSessionCaches(sessionId, userId.toString()),
+      chatSessionCache.setSession(sessionDTO),
+      invalidateUsageRelatedCaches(userId),
+    ]);
+
+    await sseManager.notifySessionUpdate(sessionId, userId.toString(), {
+      type: 'cleared',
+      deletedMessageCount,
+    });
+
+    return {
+      session: sessionDTO,
+      deleted_message_count: deletedMessageCount,
+      checkpoint,
+    };
+  }
+
   /**
    * Export a session to JSON or Markdown format
    * Supports streaming for large sessions
@@ -970,20 +1553,11 @@ export class ChatSessionService {
   ): Promise<string> {
     const session = await this.getOwnedSession(sessionId, userId);
 
-    // Collect messages from both legacy and separate storage during the migration period.
-    const currentMessages = session.messages || [];
-    const archivedDocs = await archivedMessagesRepository.findBySession(sessionId);
-    const collectionMessages = USE_SEPARATE_MESSAGE_COLLECTION
-      ? toChatMessages(
-          await messageRepository.listAllForSession(new Types.ObjectId(sessionId))
-        )
-      : [];
-
-    const allMessages = mergeAndSortMessages(
-      ...archivedDocs.map((doc) => doc.messages),
-      currentMessages,
-      collectionMessages
-    );
+    const [allMessages, archivedDocs, checkpoints] = await Promise.all([
+      collectSessionMessages(session),
+      archivedMessagesRepository.findBySession(sessionId),
+      sessionCheckpointRepository.listForSession(sessionId, 1, 1000),
+    ]);
 
     if (format === 'markdown') {
       // Export as Markdown
@@ -992,7 +1566,11 @@ export class ChatSessionService {
         '',
         `**Model:** ${session.aiModel}`,
         `**Created:** ${session.created_at.toISOString()}`,
+        `**Updated:** ${session.updated_at.toISOString()}`,
         `**Working Directory:** ${session.working_directory}`,
+        `**Root Session:** ${objectIdToString(session.root_session_id) || session._id.toString()}`,
+        `**Parent Session:** ${objectIdToString(session.parent_session_id) || 'none'}`,
+        `**Branch Point:** ${session.branch_point_sequence ?? 'none'}`,
         `**Total Messages:** ${allMessages.length}`,
         '',
         '---',
@@ -1033,13 +1611,32 @@ export class ChatSessionService {
       messages: allMessages,
       token_usage: session.token_usage,
       model: session.aiModel,
+      parent_session_id: objectIdToString(session.parent_session_id),
+      root_session_id: objectIdToString(session.root_session_id),
+      branch_point_sequence: session.branch_point_sequence,
+      forked_from_message_id: objectIdToString(session.forked_from_message_id),
+      branch_depth: session.branch_depth,
+      source: session.source,
+      git_branch: session.git_branch,
+      last_message_at: session.last_message_at,
+      last_message_preview: session.last_message_preview,
+      last_message_role: session.last_message_role,
+      last_message_sequence: session.last_message_sequence,
+      last_resumed_at: session.last_resumed_at,
+      resume_count: session.resume_count,
+      checkpoint_count: session.checkpoint_count,
+      latest_checkpoint_at: session.latest_checkpoint_at,
+      is_pinned: session.is_pinned,
+      metadata: session.metadata,
       is_archived: session.is_archived,
       created_at: session.created_at,
       updated_at: session.updated_at,
+      checkpoints: checkpoints.data.map(toCheckpointDTO),
       exported_at: new Date().toISOString(),
       export_stats: {
         total_messages: allMessages.length,
         archived_batches: archivedDocs.length,
+        checkpoints: checkpoints.pagination.total,
       },
     };
 
@@ -1060,6 +1657,23 @@ export class ChatSessionService {
       messages: ChatMessage[];
       token_usage: TokenUsage;
       model: string;
+      parent_session_id?: string;
+      root_session_id?: string;
+      branch_point_sequence?: number;
+      forked_from_message_id?: string;
+      branch_depth?: number;
+      source?: string;
+      git_branch?: string;
+      last_message_at?: Date;
+      last_message_preview?: string;
+      last_message_role?: MessageRole;
+      last_message_sequence?: number;
+      last_resumed_at?: Date;
+      resume_count?: number;
+      checkpoint_count?: number;
+      latest_checkpoint_at?: Date;
+      is_pinned?: boolean;
+      metadata?: Record<string, unknown>;
       is_archived: boolean;
       created_at: Date;
       updated_at: Date;
@@ -1068,10 +1682,14 @@ export class ChatSessionService {
     const sanitizedWorkingDir = assertValidWorkingDirectory(
       sessionData.working_directory
     );
+    if (sessionData.metadata) {
+      assertValidSessionMetadata(sessionData.metadata);
+    }
     const normalizedSessionTokenUsage = normalizeTokenUsage(sessionData.token_usage) || {
       input_tokens: 0,
       output_tokens: 0,
       cached_tokens: 0,
+      reasoning_tokens: 0,
       total_tokens: 0,
     };
     const importedNameValidation = validateSessionName(`${sessionData.name} (Imported)`);
@@ -1159,10 +1777,32 @@ export class ChatSessionService {
         }
       }
 
+      const latestImportedMessage = messages.at(-1);
+
       const finalSession = await chatSessionRepository.update(newSession._id, {
         is_archived: sessionData.is_archived,
         token_usage: normalizedSessionTokenUsage,
         next_message_sequence: messages.length,
+        root_session_id: newSession._id,
+        branch_point_sequence: sessionData.branch_point_sequence,
+        branch_depth: sessionData.branch_depth || 0,
+        source: 'import',
+        git_branch: sessionData.git_branch,
+        last_message_at: latestImportedMessage
+          ? new Date(latestImportedMessage.timestamp)
+          : sessionData.last_message_at,
+        last_message_preview: latestImportedMessage
+          ? normalizePreview(latestImportedMessage.content)
+          : sessionData.last_message_preview,
+        last_message_role: latestImportedMessage?.role || sessionData.last_message_role,
+        last_message_sequence:
+          messages.length > 0 ? messages.length : sessionData.last_message_sequence,
+        last_resumed_at: sessionData.last_resumed_at,
+        resume_count: sessionData.resume_count || 0,
+        checkpoint_count: sessionData.checkpoint_count || 0,
+        latest_checkpoint_at: sessionData.latest_checkpoint_at,
+        is_pinned: sessionData.is_pinned || false,
+        metadata: sessionData.metadata,
         created_at: sessionData.created_at,
         updated_at: sessionData.updated_at,
       });
@@ -1300,7 +1940,12 @@ export class ChatSessionService {
     query: string,
     sessionId?: string,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    filters: {
+      role?: MessageRole;
+      dateFrom?: Date;
+      dateTo?: Date;
+    } = {}
   ): Promise<{ results: MessageSearchResult[]; total: number; page: number; limit: number; total_pages: number }> {
     if (!USE_SEPARATE_MESSAGE_COLLECTION) {
       throw new AppError('Search requires separate message collection', 501, 'NOT_IMPLEMENTED');
@@ -1319,7 +1964,12 @@ export class ChatSessionService {
       userId,
       sessionId ? new Types.ObjectId(sessionId) : undefined,
       page,
-      limit
+      limit,
+      {
+        role: filters.role,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+      }
     );
 
     // Get session names for context
@@ -1338,7 +1988,10 @@ export class ChatSessionService {
           session_name: sessionNames.get(msg.session_id.toString()) || 'Unknown',
         },
         highlights: [msg.content.substring(0, 200)], // Simple highlight, could be improved
-        score: 1.0, // MongoDB text search doesn't return scores easily
+        score:
+          typeof (msg as unknown as { score?: number }).score === 'number'
+            ? (msg as unknown as { score: number }).score
+            : 1.0,
       })),
       total: searchResult.pagination.total,
       page: searchResult.pagination.page,
@@ -1384,7 +2037,38 @@ export class ChatSessionService {
 
     // Update cache
     const updatedDTO = toMessageDTO(updated);
-    await chatSessionCache.updateMessage(updatedDTO);
+    const latestMessage = await messageRepository.getLatestForSession(
+      new Types.ObjectId(sessionId)
+    );
+    const sessionSummaryUpdates: Partial<UpdateChatSessionData> =
+      latestMessage?._id.toString() === updated._id.toString()
+        ? {
+            last_message_preview: normalizePreview(updated.content),
+            last_message_at: updated.created_at,
+            last_message_role: updated.role,
+            last_message_sequence: updated.sequence_number,
+          }
+        : {};
+    const updatedSession =
+      Object.keys(sessionSummaryUpdates).length > 0
+        ? await chatSessionRepository.updateMessageSummary(
+            sessionId,
+            {},
+            sessionSummaryUpdates
+          )
+        : null;
+    await Promise.all([
+      chatSessionCache.updateMessage(updatedDTO),
+      updatedSession
+        ? chatSessionCache.setSession(
+            toSessionDTO(
+              updatedSession,
+              await messageRepository.countForSession(new Types.ObjectId(sessionId))
+            )
+          )
+        : Promise.resolve(),
+      chatSessionCache.invalidateUserSessions(userId.toString()),
+    ]);
 
     // Notify via SSE
     await sseManager.notifySessionUpdate(message.session_id.toString(), userId.toString(), {
@@ -1424,6 +2108,19 @@ export class ChatSessionService {
 
     if (!deleted) {
       throw new AppError('Failed to delete message', 500, 'INTERNAL_ERROR');
+    }
+    const latestMessage = await messageRepository.getLatestForSession(
+      new Types.ObjectId(sessionId)
+    );
+    if (latestMessage) {
+      await chatSessionRepository.updateMessageSummary(sessionId, {}, {
+        last_message_at: latestMessage.created_at,
+        last_message_preview: normalizePreview(latestMessage.content),
+        last_message_role: latestMessage.role,
+        last_message_sequence: latestMessage.sequence_number,
+      });
+    } else {
+      await chatSessionRepository.clearLastMessageState(sessionId);
     }
 
     await Promise.all([

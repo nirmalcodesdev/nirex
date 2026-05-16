@@ -8,7 +8,10 @@ import {
   type UpdateSessionRequest,
   type AddMessageRequest,
   type CreateCheckpointRequest,
+  type ClearSessionRequest,
+  type ForkSessionRequest,
   type ImportSessionRequest,
+  type ResumeSessionRequest,
   type ExportFormat,
 } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
@@ -150,12 +153,19 @@ export async function createSession(
   res: Response
 ): Promise<void> {
   const userId = getUserId(req);
-  const { working_directory, model } = req.body as CreateSessionRequest;
+  const { working_directory, model, name, git_branch, source, metadata } =
+    req.body as CreateSessionRequest;
 
   const session = await chatSessionService.createSession(
     userId,
     working_directory,
-    model
+    model,
+    {
+      name,
+      gitBranch: git_branch,
+      source,
+      metadata,
+    }
   );
 
   res.status(201).json({
@@ -173,19 +183,50 @@ export async function listSessions(
   res: Response
 ): Promise<void> {
   const userId = getUserId(req);
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
-  const includeArchived = req.query.include_archived === 'true';
-  const workingDirectoryHash = req.query.working_directory_hash as
-    | string
-    | undefined;
+  const {
+    page = 1,
+    limit = 20,
+    include_archived = false,
+    archived_only = false,
+    working_directory_hash,
+    q,
+    model,
+    parent_session_id,
+    root_session_id,
+    sort_by,
+    sort_order,
+  } = req.query as unknown as {
+    page?: number;
+    limit?: number;
+    include_archived?: boolean | string;
+    archived_only?: boolean | string;
+    working_directory_hash?: string;
+    q?: string;
+    model?: string;
+    parent_session_id?: string;
+    root_session_id?: string;
+    sort_by?: 'updated_at' | 'created_at' | 'last_message_at' | 'last_resumed_at' | 'name';
+    sort_order?: 'asc' | 'desc';
+  };
+  const includeArchived = include_archived === true || include_archived === 'true';
+  const archivedOnly = archived_only === true || archived_only === 'true';
+  const workingDirectoryHash = working_directory_hash;
 
   const result = await chatSessionService.listSessions(
     userId,
     page,
     limit,
     includeArchived,
-    workingDirectoryHash
+    workingDirectoryHash,
+    {
+      query: q,
+      model,
+      archivedOnly,
+      parentSessionId: parent_session_id,
+      rootSessionId: root_session_id,
+      sortBy: sort_by,
+      sortOrder: sort_order,
+    }
   );
 
   res.json({
@@ -259,7 +300,93 @@ export async function deleteSession(
 
   res.json({
     status: 'success',
-    message: 'Session deleted successfully',
+    data: { message: 'Session deleted successfully' },
+  });
+}
+
+/**
+ * POST /api/sessions/:id/resume
+ * Mark a session as resumed and return replay data.
+ */
+export async function resumeSession(
+  req: Request,
+  res: Response
+): Promise<void> {
+  const userId = getUserId(req);
+  const sessionId = getSessionId(req);
+  const {
+    last_seen_sequence,
+    message_limit,
+    client_session_id,
+    client_metadata,
+  } = req.body as ResumeSessionRequest;
+
+  const result = await chatSessionService.resumeSession(sessionId, userId, {
+    lastSeenSequence: last_seen_sequence,
+    messageLimit: message_limit,
+    clientSessionId: client_session_id,
+    clientMetadata: client_metadata,
+  });
+
+  res.json({
+    status: 'success',
+    data: result,
+  });
+}
+
+/**
+ * POST /api/sessions/:id/fork
+ * Create a branched session from an existing transcript.
+ */
+export async function forkSession(
+  req: Request,
+  res: Response
+): Promise<void> {
+  const userId = getUserId(req);
+  const sessionId = getSessionId(req);
+  const {
+    name,
+    branch_after_sequence,
+    forked_from_message_id,
+    include_checkpoints,
+    metadata,
+  } = req.body as ForkSessionRequest;
+
+  const result = await chatSessionService.forkSession(sessionId, userId, {
+    name,
+    branchAfterSequence: branch_after_sequence,
+    forkedFromMessageId: forked_from_message_id,
+    includeCheckpoints: include_checkpoints,
+    metadata,
+  });
+
+  res.status(201).json({
+    status: 'success',
+    data: result,
+  });
+}
+
+/**
+ * POST /api/sessions/:id/clear
+ * Clear messages while optionally preserving a checkpoint summary.
+ */
+export async function clearSession(
+  req: Request,
+  res: Response
+): Promise<void> {
+  const userId = getUserId(req);
+  const sessionId = getSessionId(req);
+  const { create_checkpoint, checkpoint_snapshot } =
+    req.body as ClearSessionRequest;
+
+  const result = await chatSessionService.clearSession(sessionId, userId, {
+    createCheckpoint: create_checkpoint,
+    checkpointSnapshot: checkpoint_snapshot,
+  });
+
+  res.json({
+    status: 'success',
+    data: result,
   });
 }
 
@@ -310,6 +437,9 @@ export async function searchMessages(
   const sessionId = req.query.session_id as string | undefined;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
+  const role = req.query.role as 'user' | 'assistant' | 'system' | 'tool' | undefined;
+  const dateFrom = req.query.date_from as Date | undefined;
+  const dateTo = req.query.date_to as Date | undefined;
 
   if (!query || query.trim().length === 0) {
     throw new AppError('Search query is required', 400, 'MISSING_SEARCH_QUERY');
@@ -324,7 +454,12 @@ export async function searchMessages(
     query,
     sessionId,
     page,
-    limit
+    limit,
+    {
+      role,
+      dateFrom,
+      dateTo,
+    }
   );
 
   res.json({
@@ -480,12 +615,19 @@ export async function createCheckpoint(
 ): Promise<void> {
   const userId = getUserId(req);
   const sessionId = getSessionId(req);
-  const { snapshot } = req.body as CreateCheckpointRequest;
+  const { snapshot, reason, message_id, token_count, metadata } =
+    req.body as CreateCheckpointRequest;
 
   const checkpoint = await chatSessionService.createCheckpoint(
     sessionId,
     userId,
-    snapshot
+    snapshot,
+    {
+      reason,
+      messageId: message_id,
+      tokenCount: token_count,
+      metadata,
+    }
   );
 
   res.status(201).json({

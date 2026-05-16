@@ -1,4 +1,9 @@
-import { MAX_MESSAGE_CONTENT_SIZE, MAX_MESSAGE_METADATA_SIZE } from '@nirex/shared';
+import {
+  MAX_CHECKPOINT_SNAPSHOT_SIZE,
+  MAX_MESSAGE_CONTENT_SIZE,
+  MAX_MESSAGE_METADATA_SIZE,
+  MAX_SESSION_METADATA_SIZE,
+} from '@nirex/shared';
 import { AppError } from '../../types/index.js';
 
 /**
@@ -46,27 +51,6 @@ function sanitizeHtml(content: string): string {
 }
 
 /**
- * Check if content contains potentially dangerous patterns
- */
-function containsDangerousContent(content: string): boolean {
-  const dangerousPatterns = [
-    /<script/i,
-    /javascript:/i,
-    /on\w+\s*=/i,
-    /data:text\/html/i,
-    /eval\s*\(/i,
-    /document\.cookie/i,
-    /document\.write/i,
-    /window\.location/i,
-    /<iframe/i,
-    /<object/i,
-    /<embed/i,
-  ];
-
-  return dangerousPatterns.some((pattern) => pattern.test(content));
-}
-
-/**
  * Validate message content
  */
 export function validateMessageContent(content: string): ValidationResult {
@@ -84,26 +68,44 @@ export function validateMessageContent(content: string): ValidationResult {
     };
   }
 
-  // Check for dangerous content
-  if (containsDangerousContent(content)) {
-    return { valid: false, error: 'Message contains potentially dangerous content' };
+  if (content.includes('\0')) {
+    return { valid: false, error: 'Message content contains invalid null bytes' };
   }
 
-  // Sanitize content
-  const sanitized = sanitizeHtml(content);
+  return { valid: true, sanitized: content.replace(/\r\n?/g, '\n') };
+}
 
-  // Check if sanitized content is empty
-  if (sanitized.length === 0) {
-    return { valid: false, error: 'Message content is invalid after sanitization' };
+/**
+ * Validate checkpoint snapshot content. Snapshots are summaries, but they still
+ * need to preserve code paths and identifiers exactly.
+ */
+export function validateCheckpointSnapshot(snapshot: string): ValidationResult {
+  if (!snapshot || snapshot.trim().length === 0) {
+    return { valid: false, error: 'Checkpoint snapshot cannot be empty' };
   }
 
-  return { valid: true, sanitized };
+  const byteLength = new TextEncoder().encode(snapshot).length;
+  if (byteLength > MAX_CHECKPOINT_SNAPSHOT_SIZE) {
+    return {
+      valid: false,
+      error: `Checkpoint snapshot exceeds ${MAX_CHECKPOINT_SNAPSHOT_SIZE / 1024}KB limit`,
+    };
+  }
+
+  if (snapshot.includes('\0')) {
+    return { valid: false, error: 'Checkpoint snapshot contains invalid null bytes' };
+  }
+
+  return { valid: true, sanitized: snapshot.replace(/\r\n?/g, '\n') };
 }
 
 /**
  * Validate metadata
  */
-export function validateMetadata(metadata: Record<string, unknown> | undefined): ValidationResult {
+export function validateMetadata(
+  metadata: Record<string, unknown> | undefined,
+  maxBytes: number = MAX_MESSAGE_METADATA_SIZE
+): ValidationResult {
   if (!metadata) {
     return { valid: true };
   }
@@ -112,10 +114,10 @@ export function validateMetadata(metadata: Record<string, unknown> | undefined):
   const metadataString = JSON.stringify(metadata);
   const byteLength = new TextEncoder().encode(metadataString).length;
 
-  if (byteLength > MAX_MESSAGE_METADATA_SIZE) {
+  if (byteLength > maxBytes) {
     return {
       valid: false,
-      error: `Metadata exceeds ${MAX_MESSAGE_METADATA_SIZE / 1024}KB limit`,
+      error: `Metadata exceeds ${maxBytes / 1024}KB limit`,
     };
   }
 
@@ -182,11 +184,26 @@ export function assertValidMessageContent(content: string): string {
   return result.sanitized!;
 }
 
+export function assertValidCheckpointSnapshot(snapshot: string): string {
+  const result = validateCheckpointSnapshot(snapshot);
+  if (!result.valid) {
+    throw new AppError(result.error!, 400, 'VALIDATION_ERROR');
+  }
+  return result.sanitized!;
+}
+
 /**
  * Throw AppError if metadata validation fails
  */
 export function assertValidMetadata(metadata: Record<string, unknown> | undefined): void {
   const result = validateMetadata(metadata);
+  if (!result.valid) {
+    throw new AppError(result.error!, 400, 'VALIDATION_ERROR');
+  }
+}
+
+export function assertValidSessionMetadata(metadata: Record<string, unknown> | undefined): void {
+  const result = validateMetadata(metadata, MAX_SESSION_METADATA_SIZE);
   if (!result.valid) {
     throw new AppError(result.error!, 400, 'VALIDATION_ERROR');
   }

@@ -14,6 +14,7 @@ export type {
   MessageRole,
   AIModel,
   MessageDeliveryStatus,
+  CheckpointReason,
 
   // Core interfaces
   TokenUsage,
@@ -51,6 +52,12 @@ export type {
   CreateCheckpointRequest,
   CreateCheckpointResponse,
   ListCheckpointsResponse,
+  ResumeSessionRequest,
+  ResumeSessionResponse,
+  ForkSessionRequest,
+  ForkSessionResponse,
+  ClearSessionRequest,
+  ClearSessionResponse,
   ExportFormat,
   ExportSessionQuery,
   ImportSessionRequest,
@@ -70,6 +77,8 @@ export {
   MAX_MESSAGES_PER_DOCUMENT,
   MAX_MESSAGE_CONTENT_SIZE,
   MAX_MESSAGE_METADATA_SIZE,
+  MAX_CHECKPOINT_SNAPSHOT_SIZE,
+  MAX_SESSION_METADATA_SIZE,
   DEFAULT_MESSAGE_PAGE_SIZE,
   MAX_MESSAGE_PAGE_SIZE,
 } from './types.js';
@@ -106,6 +115,9 @@ export {
   sessionIdParamSchema,
   messageIdParamSchema,
   getSessionQuerySchema,
+  resumeSessionSchema,
+  forkSessionSchema,
+  clearSessionSchema,
 
   // Message schemas
   addMessageSchema,
@@ -114,6 +126,9 @@ export {
 
   // Type exports
   type GetSessionQuerySchema,
+  type ResumeSessionSchema,
+  type ForkSessionSchema,
+  type ClearSessionSchema,
 
   // Checkpoint schemas
   createCheckpointSchema,

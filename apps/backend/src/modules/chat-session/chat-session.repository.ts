@@ -15,14 +15,40 @@ export interface CreateChatSessionData {
   working_directory: string;
   working_directory_hash: string;
   aiModel: string;
+  parent_session_id?: Types.ObjectId;
+  root_session_id?: Types.ObjectId;
+  branch_point_sequence?: number;
+  forked_from_message_id?: Types.ObjectId;
+  branch_depth?: number;
+  source?: string;
+  git_branch?: string;
+  metadata?: Record<string, unknown>;
+  is_pinned?: boolean;
 }
 
 export interface UpdateChatSessionData {
   name?: string;
   is_archived?: boolean;
+  is_pinned?: boolean;
+  git_branch?: string;
+  metadata?: Record<string, unknown>;
   token_usage?: TokenUsage;
   next_message_sequence?: number;
   last_auto_checkpoint_tokens?: number;
+  parent_session_id?: Types.ObjectId;
+  root_session_id?: Types.ObjectId;
+  branch_point_sequence?: number;
+  forked_from_message_id?: Types.ObjectId;
+  branch_depth?: number;
+  source?: string;
+  last_message_at?: Date;
+  last_message_preview?: string;
+  last_message_role?: ChatMessage['role'];
+  last_message_sequence?: number;
+  last_resumed_at?: Date;
+  resume_count?: number;
+  checkpoint_count?: number;
+  latest_checkpoint_at?: Date;
   created_at?: Date;
   updated_at?: Date;
 }
@@ -30,7 +56,14 @@ export interface UpdateChatSessionData {
 export interface ListSessionsFilters {
   userId: Types.ObjectId;
   includeArchived?: boolean;
+  archivedOnly?: boolean;
   workingDirectoryHash?: string;
+  model?: string;
+  query?: string;
+  parentSessionId?: Types.ObjectId;
+  rootSessionId?: Types.ObjectId;
+  sortBy?: 'updated_at' | 'created_at' | 'last_message_at' | 'last_resumed_at' | 'name';
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface PaginatedResult<T> {
@@ -183,7 +216,9 @@ export class ChatSessionRepository {
     // Build query
     const query: Record<string, unknown> = { userId: filters.userId };
 
-    if (!filters.includeArchived) {
+    if (filters.archivedOnly) {
+      query.is_archived = true;
+    } else if (!filters.includeArchived) {
       query.is_archived = false;
     }
 
@@ -191,10 +226,37 @@ export class ChatSessionRepository {
       query.working_directory_hash = filters.workingDirectoryHash;
     }
 
+    if (filters.model) {
+      query.aiModel = filters.model;
+    }
+
+    if (filters.parentSessionId) {
+      query.parent_session_id = filters.parentSessionId;
+    }
+
+    if (filters.rootSessionId) {
+      query.root_session_id = filters.rootSessionId;
+    }
+
+    if (filters.query) {
+      query.$text = { $search: filters.query };
+    }
+
+    const sortField = filters.sortBy || 'updated_at';
+    const sortDirection = filters.sortOrder === 'asc' ? 1 : -1;
+    const sort: Record<string, 1 | -1> = {
+      is_pinned: -1,
+      [sortField]: sortDirection,
+    };
+
+    if (sortField !== 'updated_at') {
+      sort.updated_at = -1;
+    }
+
     // Execute queries in parallel
     const [data, total] = await Promise.all([
       ChatSessionModel.find(query)
-        .sort({ updated_at: -1 })
+        .sort(sort)
         .skip(skip)
         .limit(limit)
         .exec(),
@@ -270,6 +332,34 @@ export class ChatSessionRepository {
     return ChatSessionModel.find({ userId }).sort({ updated_at: -1 }).exec();
   }
 
+  async findChildren(
+    sessionId: string | Types.ObjectId,
+    userId: Types.ObjectId
+  ): Promise<IChatSessionDocument[]> {
+    return ChatSessionModel.find({
+      userId,
+      parent_session_id: sessionId,
+    })
+      .sort({ created_at: 1 })
+      .exec();
+  }
+
+  async detachParent(
+    sessionId: string | Types.ObjectId
+  ): Promise<IChatSessionDocument | null> {
+    return ChatSessionModel.findByIdAndUpdate(
+      sessionId,
+      {
+        $unset: {
+          parent_session_id: 1,
+          branch_point_sequence: 1,
+          forked_from_message_id: 1,
+        },
+      },
+      { new: true, runValidators: true }
+    ).exec();
+  }
+
   /**
    * Add a message to a session and update token usage
    */
@@ -293,12 +383,17 @@ export class ChatSessionRepository {
     if (tokenUsageDelta.cached_tokens !== undefined) {
       increment['token_usage.cached_tokens'] = tokenUsageDelta.cached_tokens;
     }
+    if (tokenUsageDelta.reasoning_tokens !== undefined) {
+      increment['token_usage.reasoning_tokens'] = tokenUsageDelta.reasoning_tokens;
+    }
 
     // Calculate total token delta
     const totalDelta =
       tokenUsageDelta.total_tokens !== undefined
         ? tokenUsageDelta.total_tokens
-        : (tokenUsageDelta.input_tokens || 0) + (tokenUsageDelta.output_tokens || 0);
+        : (tokenUsageDelta.input_tokens || 0) +
+          (tokenUsageDelta.output_tokens || 0) +
+          (tokenUsageDelta.reasoning_tokens || 0);
     if (totalDelta > 0) {
       increment['token_usage.total_tokens'] = totalDelta;
     }
@@ -325,6 +420,7 @@ export class ChatSessionRepository {
           input_tokens: { $sum: '$token_usage.input_tokens' },
           output_tokens: { $sum: '$token_usage.output_tokens' },
           cached_tokens: { $sum: '$token_usage.cached_tokens' },
+          reasoning_tokens: { $sum: '$token_usage.reasoning_tokens' },
           total_tokens: { $sum: '$token_usage.total_tokens' },
         },
       },
@@ -335,6 +431,7 @@ export class ChatSessionRepository {
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: 0,
+        reasoning_tokens: 0,
         total_tokens: 0,
       };
     }
@@ -343,6 +440,7 @@ export class ChatSessionRepository {
       input_tokens: result[0].input_tokens || 0,
       output_tokens: result[0].output_tokens || 0,
       cached_tokens: result[0].cached_tokens || 0,
+      reasoning_tokens: result[0].reasoning_tokens || 0,
       total_tokens: result[0].total_tokens || 0,
     };
   }
@@ -448,11 +546,16 @@ export class ChatSessionRepository {
     if (tokenUsageDelta.cached_tokens !== undefined) {
       increment['token_usage.cached_tokens'] = tokenUsageDelta.cached_tokens;
     }
+    if (tokenUsageDelta.reasoning_tokens !== undefined) {
+      increment['token_usage.reasoning_tokens'] = tokenUsageDelta.reasoning_tokens;
+    }
 
     const totalDelta =
       tokenUsageDelta.total_tokens !== undefined
         ? tokenUsageDelta.total_tokens
-        : (tokenUsageDelta.input_tokens || 0) + (tokenUsageDelta.output_tokens || 0);
+        : (tokenUsageDelta.input_tokens || 0) +
+          (tokenUsageDelta.output_tokens || 0) +
+          (tokenUsageDelta.reasoning_tokens || 0);
     if (totalDelta > 0) {
       increment['token_usage.total_tokens'] = totalDelta;
     }
@@ -478,6 +581,74 @@ export class ChatSessionRepository {
       new: true,
       runValidators: true,
     }).exec();
+  }
+
+  async markResumed(
+    id: string | Types.ObjectId,
+    resumedAt: Date,
+    metadata?: Record<string, unknown>
+  ): Promise<IChatSessionDocument | null> {
+    const update: Record<string, unknown> = {
+      $set: {
+        last_resumed_at: resumedAt,
+        is_archived: false,
+        ...(metadata ? { metadata } : {}),
+      },
+      $inc: { resume_count: 1 },
+    };
+
+    return ChatSessionModel.findByIdAndUpdate(id, update, {
+      new: true,
+      runValidators: true,
+    }).exec();
+  }
+
+  async clearMessageState(
+    id: string | Types.ObjectId
+  ): Promise<IChatSessionDocument | null> {
+    return ChatSessionModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          messages: [],
+          token_usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: 0,
+            reasoning_tokens: 0,
+            total_tokens: 0,
+          },
+          next_message_sequence: 0,
+          checkpoint_count: 0,
+        },
+        $unset: {
+          last_message_at: 1,
+          last_message_preview: 1,
+          last_message_role: 1,
+          last_message_sequence: 1,
+          latest_checkpoint_at: 1,
+          last_auto_checkpoint_tokens: 1,
+        },
+      },
+      { new: true, runValidators: true }
+    ).exec();
+  }
+
+  async clearLastMessageState(
+    id: string | Types.ObjectId
+  ): Promise<IChatSessionDocument | null> {
+    return ChatSessionModel.findByIdAndUpdate(
+      id,
+      {
+        $unset: {
+          last_message_at: 1,
+          last_message_preview: 1,
+          last_message_role: 1,
+          last_message_sequence: 1,
+        },
+      },
+      { new: true, runValidators: true }
+    ).exec();
   }
 }
 

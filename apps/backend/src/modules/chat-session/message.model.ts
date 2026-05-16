@@ -23,6 +23,7 @@ const TokenUsageSchema = new Schema(
     input_tokens: { type: Number, default: 0, min: 0 },
     output_tokens: { type: Number, default: 0, min: 0 },
     cached_tokens: { type: Number, default: 0, min: 0 },
+    reasoning_tokens: { type: Number, default: 0, min: 0 },
     total_tokens: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
@@ -54,13 +55,13 @@ const MessageSchema = new Schema<IMessageDocument>(
     role: {
       type: String,
       required: true,
-      enum: ['user', 'assistant', 'system'],
+      enum: ['user', 'assistant', 'system', 'tool'],
       index: true,
     },
     content: {
       type: String,
       required: true,
-      maxlength: 10240, // 10KB limit
+      maxlength: 262144, // 256KB limit
     },
     encrypted: {
       type: Boolean,
@@ -122,7 +123,7 @@ const MessageSchema = new Schema<IMessageDocument>(
     edited_content: {
       type: String,
       required: false,
-      maxlength: 10240,
+      maxlength: 262144,
     },
   },
   {

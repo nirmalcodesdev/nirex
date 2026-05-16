@@ -6,10 +6,11 @@ import { type SessionCheckpoint } from '@nirex/shared';
  * with Mongoose Document properties
  */
 export interface ISessionCheckpointDocument
-  extends Omit<SessionCheckpoint, 'id' | 'session_id'>,
+  extends Omit<SessionCheckpoint, 'id' | 'session_id' | 'message_id'>,
     Document {
   _id: Types.ObjectId;
   sessionId: Types.ObjectId;
+  message_id?: Types.ObjectId;
 }
 
 // ============================================================================
@@ -27,12 +28,32 @@ const SessionCheckpointSchema = new Schema<ISessionCheckpointDocument>(
     snapshot: {
       type: String,
       required: true,
-      maxlength: 50000,
+      maxlength: 262144,
     },
     turn_index: {
       type: Number,
       required: true,
       min: 0,
+    },
+    reason: {
+      type: String,
+      default: 'manual',
+      maxlength: 100,
+      index: true,
+    },
+    message_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Message',
+      required: false,
+    },
+    token_count: {
+      type: Number,
+      required: false,
+      min: 0,
+    },
+    metadata: {
+      type: Schema.Types.Mixed,
+      required: false,
     },
     created_at: {
       type: Date,
@@ -68,6 +89,7 @@ SessionCheckpointSchema.index({ sessionId: 1, turn_index: 1 });
 
 // Index for finding checkpoints by turn index
 SessionCheckpointSchema.index({ sessionId: 1, created_at: -1 });
+SessionCheckpointSchema.index({ sessionId: 1, reason: 1, created_at: -1 });
 
 // ============================================================================
 // Model Export

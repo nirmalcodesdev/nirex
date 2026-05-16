@@ -6,6 +6,10 @@
  */
 
 import { z } from 'zod';
+import {
+  MAX_CHECKPOINT_SNAPSHOT_SIZE,
+  MAX_MESSAGE_CONTENT_SIZE,
+} from './types.js';
 
 // ============================================================================
 // Common Field Schemas
@@ -26,8 +30,8 @@ export const objectIdSchema = z
 /**
  * Message role validation
  */
-export const messageRoleSchema = z.enum(['user', 'assistant', 'system'], {
-  errorMap: () => ({ message: 'Role must be user, assistant, or system' }),
+export const messageRoleSchema = z.enum(['user', 'assistant', 'system', 'tool'], {
+  errorMap: () => ({ message: 'Role must be user, assistant, system, or tool' }),
 });
 
 /**
@@ -42,6 +46,7 @@ export const tokenUsageSchema = z.object({
   input_tokens: z.number().int().min(0).default(0),
   output_tokens: z.number().int().min(0).default(0),
   cached_tokens: z.number().int().min(0).optional(),
+  reasoning_tokens: z.number().int().min(0).optional(),
   total_tokens: z.number().int().min(0).default(0),
 });
 
@@ -51,7 +56,10 @@ export const tokenUsageSchema = z.object({
 export const chatMessageSchema = z.object({
   id: uuidSchema,
   role: messageRoleSchema,
-  content: z.string().min(1, 'Message content is required').max(100000),
+  content: z
+    .string()
+    .min(1, 'Message content is required')
+    .max(MAX_MESSAGE_CONTENT_SIZE),
   token_usage: tokenUsageSchema.optional(),
   timestamp: z.coerce.date(),
   metadata: z.record(z.unknown()).optional(),
@@ -79,6 +87,14 @@ export const createSessionSchema = z.object({
     .min(1, 'Working directory is required')
     .max(1000, 'Working directory path too long'),
   model: aiModelSchema,
+  name: z
+    .string()
+    .min(1, 'Name must be at least 1 character')
+    .max(200, 'Name must be at most 200 characters')
+    .optional(),
+  git_branch: z.string().min(1).max(200).optional(),
+  source: z.string().min(1).max(50).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 /**
@@ -91,6 +107,9 @@ export const updateSessionSchema = z.object({
     .max(200, 'Name must be at most 200 characters')
     .optional(),
   is_archived: z.boolean().optional(),
+  is_pinned: z.boolean().optional(),
+  git_branch: z.string().min(1).max(200).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 /**
@@ -138,7 +157,10 @@ export const addMessageSchema = z.object({
   content: z
     .string()
     .min(1, 'Message content is required')
-    .max(10240, 'Message content exceeds 10KB limit'),
+    .max(
+      MAX_MESSAGE_CONTENT_SIZE,
+      `Message content exceeds ${MAX_MESSAGE_CONTENT_SIZE / 1024}KB limit`
+    ),
   client_message_id: z
     .string()
     .min(1, 'client_message_id cannot be empty')
@@ -149,6 +171,8 @@ export const addMessageSchema = z.object({
       input_tokens: z.number().int().min(0).optional(),
       output_tokens: z.number().int().min(0).optional(),
       cached_tokens: z.number().int().min(0).optional(),
+      reasoning_tokens: z.number().int().min(0).optional(),
+      total_tokens: z.number().int().min(0).optional(),
     })
     .optional(),
   metadata: z.record(z.unknown()).optional(),
@@ -161,7 +185,10 @@ export const editMessageSchema = z.object({
   content: z
     .string()
     .min(1, 'Message content is required')
-    .max(10240, 'Message content exceeds 10KB limit'),
+    .max(
+      MAX_MESSAGE_CONTENT_SIZE,
+      `Message content exceeds ${MAX_MESSAGE_CONTENT_SIZE / 1024}KB limit`
+    ),
 });
 
 // ============================================================================
@@ -175,7 +202,14 @@ export const createCheckpointSchema = z.object({
   snapshot: z
     .string()
     .min(1, 'Snapshot is required')
-    .max(50000, 'Snapshot too long'),
+    .max(
+      MAX_CHECKPOINT_SNAPSHOT_SIZE,
+      `Snapshot exceeds ${MAX_CHECKPOINT_SNAPSHOT_SIZE / 1024}KB limit`
+    ),
+  reason: z.string().min(1).max(100).optional(),
+  message_id: objectIdSchema.optional(),
+  token_count: z.number().int().min(0).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 // ============================================================================
@@ -200,7 +234,19 @@ export const listSessionsQuerySchema = z.object({
     .string()
     .optional()
     .transform((val) => val === 'true'),
+  archived_only: z
+    .string()
+    .optional()
+    .transform((val) => val === 'true'),
   working_directory_hash: z.string().optional(),
+  q: z.string().min(1).max(200).optional(),
+  model: aiModelSchema.optional(),
+  parent_session_id: objectIdSchema.optional(),
+  root_session_id: objectIdSchema.optional(),
+  sort_by: z
+    .enum(['updated_at', 'created_at', 'last_message_at', 'last_resumed_at', 'name'])
+    .optional(),
+  sort_order: z.enum(['asc', 'desc']).optional(),
 });
 
 /**
@@ -222,6 +268,17 @@ export const searchMessagesQuerySchema = z.object({
     .optional()
     .transform((val) => (val ? parseInt(val, 10) : 20))
     .pipe(z.number().int().min(1).max(100)),
+  role: messageRoleSchema.optional(),
+  date_from: z
+    .string()
+    .optional()
+    .transform((val) => (val ? new Date(val) : undefined))
+    .pipe(z.date().optional()),
+  date_to: z
+    .string()
+    .optional()
+    .transform((val) => (val ? new Date(val) : undefined))
+    .pipe(z.date().optional()),
 });
 
 /**
@@ -256,6 +313,23 @@ export const importSessionSchema = z.object({
     messages: z.array(importChatMessageSchema),
     token_usage: tokenUsageSchema,
     model: aiModelSchema,
+    parent_session_id: z.string().optional(),
+    root_session_id: z.string().optional(),
+    branch_point_sequence: z.number().int().min(0).optional(),
+    forked_from_message_id: z.string().optional(),
+    branch_depth: z.number().int().min(0).optional(),
+    source: z.string().optional(),
+    git_branch: z.string().optional(),
+    last_message_at: z.coerce.date().optional(),
+    last_message_preview: z.string().optional(),
+    last_message_role: messageRoleSchema.optional(),
+    last_message_sequence: z.number().int().min(0).optional(),
+    last_resumed_at: z.coerce.date().optional(),
+    resume_count: z.number().int().min(0).optional(),
+    checkpoint_count: z.number().int().min(0).optional(),
+    latest_checkpoint_at: z.coerce.date().optional(),
+    is_pinned: z.boolean().optional(),
+    metadata: z.record(z.unknown()).optional(),
     is_archived: z.boolean(),
     created_at: z.coerce.date(),
     updated_at: z.coerce.date(),
@@ -284,6 +358,56 @@ export const downloadAttachmentParamsSchema = z.object({
     .regex(/^[^\\/]+$/, 'Invalid file name'),
 });
 
+/**
+ * Resume session request schema
+ */
+export const resumeSessionSchema = z.object({
+  last_seen_sequence: z.number().int().min(0).optional(),
+  message_limit: z.number().int().min(1).max(200).optional(),
+  client_session_id: z.string().min(1).max(200).optional(),
+  client_metadata: z.record(z.unknown()).optional(),
+});
+
+/**
+ * Fork session request schema
+ */
+export const forkSessionSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1, 'Name must be at least 1 character')
+      .max(200, 'Name must be at most 200 characters')
+      .optional(),
+    branch_after_sequence: z.number().int().min(0).optional(),
+    forked_from_message_id: objectIdSchema.optional(),
+    include_checkpoints: z.boolean().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  })
+  .refine(
+    (value) =>
+      value.branch_after_sequence === undefined ||
+      value.forked_from_message_id === undefined,
+    {
+      message: 'Use either branch_after_sequence or forked_from_message_id, not both',
+      path: ['branch_after_sequence'],
+    }
+  );
+
+/**
+ * Clear session request schema
+ */
+export const clearSessionSchema = z.object({
+  create_checkpoint: z.boolean().optional(),
+  checkpoint_snapshot: z
+    .string()
+    .min(1)
+    .max(
+      MAX_CHECKPOINT_SNAPSHOT_SIZE,
+      `Snapshot exceeds ${MAX_CHECKPOINT_SNAPSHOT_SIZE / 1024}KB limit`
+    )
+    .optional(),
+});
+
 // ============================================================================
 // Type Exports (for TypeScript inference)
 // ============================================================================
@@ -305,3 +429,6 @@ export type AcknowledgeMessagesSchema = z.infer<typeof acknowledgeMessagesSchema
 export type DownloadAttachmentParamsSchema = z.infer<
   typeof downloadAttachmentParamsSchema
 >;
+export type ResumeSessionSchema = z.infer<typeof resumeSessionSchema>;
+export type ForkSessionSchema = z.infer<typeof forkSessionSchema>;
+export type ClearSessionSchema = z.infer<typeof clearSessionSchema>;
