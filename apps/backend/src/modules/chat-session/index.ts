@@ -61,7 +61,6 @@ export {
   generateSessionName,
 } from './chat-session.service.js';
 
-export { tokenPricingService } from './token-pricing.service.js';
 export { sseManager } from './sse.manager.js';
 export { chatSessionCache, CACHE_PREFIXES, CACHE_TTL } from './chat-session.cache.js';
 

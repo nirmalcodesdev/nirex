@@ -147,8 +147,8 @@ export function Sessions() {
           variant="compact"
         />
         <KpiCard
-          title="Estimated Cost"
-          value={`$${stats?.estimated_cost_usd.toFixed(2) || "0.00"}`}
+          title="Credits Used"
+          value={stats?.credits_used.toLocaleString() || "0"}
           change=""
           changeType="neutral"
           icon={Clock}

@@ -5,10 +5,9 @@ import type {
   UsageRange,
   UsageTopProject,
 } from '@nirex/shared';
-import { tokenPricingService } from '../chat-session/token-pricing.service.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
 import { billingRepository } from '../billing/billing.repository.js';
-import { getBillingPlan, getPlanPrice } from '../billing/billing.catalog.js';
+import { getBillingPlan } from '../billing/billing.catalog.js';
 import type { BillingPlanId } from '../billing/billing.types.js';
 import type { BillingSubscriptionStatus } from '../billing/billing.model.js';
 import {
@@ -17,7 +16,6 @@ import {
   setCachedUsageOverview,
 } from './usage.cache.js';
 
-const CREDIT_UNIT_PRICE_USD = 0.05;
 const DEFAULT_CREDITS_LIMIT = 10000;
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
@@ -29,7 +27,6 @@ const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NO
 
 interface Snapshot {
   total_requests: number;
-  total_token_cost_usd: number;
   derived_credits: number;
   event_credits: number;
   avg_response_time_ms: number | null;
@@ -45,7 +42,6 @@ interface ExportPayload {
 interface ResolvedCurrentPlan {
   planId: string;
   planName: string;
-  priceUsdMonthly: number;
   includedCredits: number;
   nextBillingDate: string | null;
   billingCycle: 'month' | 'year' | null;
@@ -151,6 +147,14 @@ function nextBillingDate(now: Date): string {
   return next.toISOString();
 }
 
+function previousRange(range: DateRange): DateRange {
+  const durationMs = range.end.getTime() - range.start.getTime() + 1;
+  return {
+    start: new Date(range.start.getTime() - durationMs),
+    end: new Date(range.start.getTime() - 1),
+  };
+}
+
 function escapeCsv(value: string | number): string {
   const str = String(value);
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -177,7 +181,6 @@ export class UsageService {
   private async resolveCurrentPlan(userId: Types.ObjectId): Promise<ResolvedCurrentPlan> {
     const freePlan = getBillingPlan('free');
     const defaultPlanName = freePlan?.name ?? 'Free';
-    const defaultMonthlyPrice = (getPlanPrice('free', 'month')?.amountMinor ?? 0) / 100;
 
     try {
       const subscription = await billingRepository.findLatestSubscriptionByUserId(
@@ -206,16 +209,9 @@ export class UsageService {
       const planId = normalizePlanId(rawPlanId);
 
       if (planId === 'custom') {
-        const monthlyPrice = subscriptionWindowActive && subscription
-          ? subscription.billingCycle === 'year'
-            ? subscription.amountMinor / 1200
-            : subscription.amountMinor / 100
-          : 0;
-
         return {
           planId: 'custom',
           planName: 'Custom',
-          priceUsdMonthly: round(monthlyPrice, 2),
           includedCredits: DEFAULT_CREDITS_LIMIT,
           nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
           billingCycle:
@@ -228,18 +224,10 @@ export class UsageService {
       }
 
       const plan = getBillingPlan(planId) ?? freePlan;
-      const monthlyPriceCents =
-        getPlanPrice(planId, 'month')?.amountMinor ??
-        (subscriptionWindowActive && subscription
-          ? subscription.billingCycle === 'year'
-            ? Math.round(subscription.amountMinor / 12)
-            : subscription.amountMinor
-          : 0);
 
       return {
         planId: plan?.id ?? 'free',
         planName: plan?.name ?? defaultPlanName,
-        priceUsdMonthly: round(monthlyPriceCents / 100, 2),
         includedCredits:
           plan?.includedCredits ??
           DEFAULT_CREDITS_LIMIT,
@@ -255,7 +243,6 @@ export class UsageService {
       return {
         planId: 'free',
         planName: defaultPlanName,
-        priceUsdMonthly: round(defaultMonthlyPrice, 2),
         includedCredits: freePlan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
         nextBillingDate: null,
         billingCycle: null,
@@ -333,12 +320,10 @@ export class UsageService {
         project_name: string;
         credits: number;
         requests: number;
-        cost_usd: number;
       }
     >();
 
     let totalRequests = 0;
-    let totalTokenCost = 0;
     let derivedCredits = 0;
 
     for (const meta of sessionMeta) {
@@ -347,28 +332,18 @@ export class UsageService {
         continue;
       }
 
-      const cost = await tokenPricingService.calculateCost(
-        meta.model,
-        usage.input_tokens || 0,
-        usage.output_tokens || 0,
-        usage.cached_tokens || 0
-      );
-
       const credits = (usage.total_tokens || 0) / 1000;
       totalRequests += usage.requests || 0;
-      totalTokenCost += cost.cost;
       derivedCredits += credits;
 
       const existing = projectMap.get(meta.project_id) || {
         project_name: meta.project_name,
         credits: 0,
         requests: 0,
-        cost_usd: 0,
       };
 
       existing.credits += credits;
       existing.requests += usage.requests || 0;
-      existing.cost_usd += cost.cost;
       projectMap.set(meta.project_id, existing);
     }
 
@@ -377,13 +352,11 @@ export class UsageService {
       project_name: project.project_name,
       credits: round(project.credits, 2),
       requests: Math.round(project.requests),
-      cost_usd: round(project.cost_usd, 4),
       trend_pct: 0,
     }));
 
     return {
       total_requests: totalRequests,
-      total_token_cost_usd: round(totalTokenCost, 6),
       derived_credits: round(derivedCredits, 4),
       event_credits: round(eventTotals.credits, 4),
       avg_response_time_ms: responseAvg === null ? null : round(responseAvg, 2),
@@ -404,6 +377,7 @@ export class UsageService {
 
     const currentPlan = await this.resolveCurrentPlan(userId);
     const creditRange = this.resolveCreditUsageRange(new Date(), currentPlan);
+    const previousCreditRange = previousRange(creditRange);
 
     const [
       currentSnapshot,
@@ -411,39 +385,36 @@ export class UsageService {
       dailyTokens,
       dailyEvents,
       creditSnapshot,
+      previousCreditSnapshot,
     ] = await Promise.all([
       this.buildSnapshot(userId, current),
       this.buildSnapshot(userId, previous),
       usageRepository.getDailyTokenTotals(userId, current),
       usageRepository.getDailyEventTotals(userId, current, ['credits']),
       this.buildSnapshot(userId, creditRange),
+      this.buildSnapshot(userId, previousCreditRange),
     ]);
 
     const creditsUsed = creditSnapshot.event_credits > 0
       ? creditSnapshot.event_credits
       : creditSnapshot.derived_credits;
-    const creditsCost = currentSnapshot.event_credits > 0
-      ? currentSnapshot.event_credits * CREDIT_UNIT_PRICE_USD
-      : currentSnapshot.total_token_cost_usd;
-    const previousCreditsCost = previousSnapshot.event_credits > 0
-      ? previousSnapshot.event_credits * CREDIT_UNIT_PRICE_USD
-      : previousSnapshot.total_token_cost_usd;
-    const totalCost = creditsCost;
-    const previousTotalCost = previousCreditsCost;
+    const previousCreditsUsed = previousCreditSnapshot.event_credits > 0
+      ? previousCreditSnapshot.event_credits
+      : previousCreditSnapshot.derived_credits;
 
     const previousProjects = new Map(
-      previousSnapshot.projects.map((project) => [project.project_id, project.cost_usd])
+      previousSnapshot.projects.map((project) => [project.project_id, project.credits])
     );
 
     const topProjects = currentSnapshot.projects
       .map((project) => {
-        const prevCost = previousProjects.get(project.project_id) || 0;
+        const previousCredits = previousProjects.get(project.project_id) || 0;
         return {
           ...project,
-          trend_pct: percentageChange(project.cost_usd, prevCost),
+          trend_pct: percentageChange(project.credits, previousCredits),
         };
       })
-      .sort((a, b) => b.cost_usd - a.cost_usd)
+      .sort((a, b) => b.credits - a.credits)
       .slice(0, 10);
 
     const tokenByDate = new Map(dailyTokens.map((d) => [d.date, d.total_tokens / 1000]));
@@ -467,9 +438,8 @@ export class UsageService {
 
     const result: UsageOverviewResponse = {
       summary: {
-        total_usage_cost_usd: round(totalCost, 4),
-        total_usage_cost_trend_pct: percentageChange(totalCost, previousTotalCost),
         credits_used: round(creditsUsed, 2),
+        credits_used_trend_pct: percentageChange(creditsUsed, previousCreditsUsed),
         credits_limit: creditsLimit,
         credits_used_pct: round(
           (creditsUsed / creditsLimit) * 100,
@@ -491,26 +461,10 @@ export class UsageService {
             ),
       },
       chart,
-      cost_breakdown: {
-        items: [
-          {
-            key: 'credits',
-            units: round(creditsUsed, 4),
-            unit_price_usd: round(
-              creditsUsed > 0 ? creditsCost / creditsUsed : CREDIT_UNIT_PRICE_USD,
-              6
-            ),
-            cost_usd: round(creditsCost, 4),
-            description: 'Credits consumed by model execution',
-          },
-        ],
-        total_cost_usd: round(totalCost, 4),
-      },
       top_projects: topProjects,
       current_plan: {
         plan_id: currentPlan.planId,
         plan_name: currentPlan.planName,
-        price_usd_monthly: currentPlan.priceUsdMonthly,
         included_credits: creditsLimit,
         next_billing_date: currentPlan.nextBillingDate,
       },
@@ -544,7 +498,15 @@ export class UsageService {
     );
 
     rows.push(
-      ['summary', 'totals', '', overview.summary.total_usage_cost_usd, overview.summary.total_requests, overview.summary.credits_used, overview.summary.avg_response_time_ms ?? '']
+      [
+        'summary',
+        'totals',
+        '',
+        overview.summary.total_requests,
+        overview.summary.credits_used,
+        overview.summary.credits_limit,
+        overview.summary.avg_response_time_ms ?? '',
+      ]
         .map(escapeCsv)
         .join(',')
     );
@@ -557,17 +519,9 @@ export class UsageService {
       );
     }
 
-    for (const item of overview.cost_breakdown.items) {
-      rows.push(
-        ['cost_breakdown', item.key, item.description, item.units, item.unit_price_usd, item.cost_usd, '']
-          .map(escapeCsv)
-          .join(',')
-      );
-    }
-
     for (const project of overview.top_projects) {
       rows.push(
-        ['top_projects', project.project_id, project.project_name, project.credits, project.requests, project.cost_usd, project.trend_pct]
+        ['top_projects', project.project_id, project.project_name, project.credits, project.requests, project.trend_pct, '']
           .map(escapeCsv)
           .join(',')
       );
