@@ -426,8 +426,8 @@ export interface SessionStatsResponse {
   total_sessions: number;
   total_messages: number;
   total_tokens: TokenUsage;
+  credits_used: number;
   archived_sessions: number;
-  estimated_cost_usd: number;
 }
 
 // ============================================================================

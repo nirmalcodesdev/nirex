@@ -3,7 +3,7 @@ import type { DashboardOverviewResponse, UsageRange } from '@nirex/shared';
 import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
 import type { DashboardOverviewInput } from './dashboard.types.js';
 
-const DASHBOARD_OVERVIEW_CACHE_PREFIX = 'dashboard:overview';
+const DASHBOARD_OVERVIEW_CACHE_PREFIX = 'dashboard:overview:v2';
 const DASHBOARD_OVERVIEW_CACHE_TTL_SECONDS = 60;
 const DASHBOARD_IN_MEMORY_CACHE_MAX_ENTRIES = 3000;
 const DASHBOARD_USAGE_RANGES: UsageRange[] = ['30d', '90d', 'month_to_date'];

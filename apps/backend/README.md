@@ -526,7 +526,7 @@ Bulk terminate multiple devices/sessions.
 Base URL: `/api/usage` (authenticated)
 
 #### GET `/overview?range=30d|90d|month_to_date`
-Returns usage summary, daily chart points, cost breakdown, top projects, and current plan data for the requested window.
+Returns credit usage summary, daily chart points, top projects, and current plan data for the requested window.
 
 #### GET `/export?range=30d|90d|month_to_date&format=json|csv`
 Exports the same overview payload as a downloadable report.
@@ -534,8 +534,8 @@ Exports the same overview payload as a downloadable report.
 **Metric formulas**
 - `total_requests`: non-deleted message count in range
 - `credits_used`: usage event credits, or fallback `total_tokens / 1000`
-- `credits_cost`: token-pricing cost (fallback path) or credit pricing (`$0.05/credit`) when credit events exist
-- `trend_pct`: percentage delta vs immediately preceding window of equal duration
+- `credits_used_trend_pct`: percentage delta vs the previous credit quota window
+- `trend_pct`: project credit percentage delta vs immediately preceding window of equal duration
 
 ---
 

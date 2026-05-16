@@ -21,9 +21,8 @@ function overviewFixture(
 ): UsageOverviewResponse {
   return {
     summary: {
-      total_usage_cost_usd: creditsUsed * 0.9,
-      total_usage_cost_trend_pct: 0,
       credits_used: creditsUsed,
+      credits_used_trend_pct: 0,
       credits_limit: includedCredits,
       credits_used_pct: (creditsUsed / includedCredits) * 100,
       total_requests: 0,
@@ -32,15 +31,10 @@ function overviewFixture(
       avg_response_time_trend_pct: null,
     },
     chart: [],
-    cost_breakdown: {
-      items: [],
-      total_cost_usd: creditsUsed * 0.05,
-    },
     top_projects: [],
     current_plan: {
       plan_id: 'pro',
       plan_name: 'Pro',
-      price_usd_monthly: 20,
       included_credits: includedCredits,
       next_billing_date: null,
     },

@@ -97,7 +97,7 @@ router.get(
 
 /**
  * GET /api/sessions/stats
- * Return total sessions, total tokens used, cost estimate
+ * Return total sessions, total tokens used, and credits consumed
  */
 router.get(
   '/stats',

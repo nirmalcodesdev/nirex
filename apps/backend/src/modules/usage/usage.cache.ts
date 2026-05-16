@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import type { UsageOverviewResponse, UsageRange } from '@nirex/shared';
 import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
 
-export const USAGE_OVERVIEW_CACHE_PREFIX = 'usage:overview';
+export const USAGE_OVERVIEW_CACHE_PREFIX = 'usage:overview:v2';
 export const USAGE_OVERVIEW_CACHE_TTL_SECONDS = 120;
 export const USAGE_OVERVIEW_RANGES: UsageRange[] = ['30d', '90d', 'month_to_date'];
 

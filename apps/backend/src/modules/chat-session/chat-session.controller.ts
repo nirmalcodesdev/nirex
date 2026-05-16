@@ -584,7 +584,7 @@ export async function importSession(
 
 /**
  * GET /api/sessions/stats
- * Return total sessions, total tokens used, cost estimate
+ * Return total sessions, total tokens used, and credits consumed
  */
 export async function getStats(req: Request, res: Response): Promise<void> {
   const userId = getUserId(req);

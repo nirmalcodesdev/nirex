@@ -7,7 +7,7 @@ import {
   Check,
   CheckCircle2,
   CircleAlert,
-  DollarSign,
+  Layers,
   MoreHorizontal,
   RefreshCw,
   XCircle,
@@ -28,14 +28,6 @@ function formatNumber(value: number): string {
   }).format(value);
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
@@ -51,11 +43,6 @@ function formatTrend(value: number | null): string {
   if (value === null) return "No trend";
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(1)}%`;
-}
-
-function usageCostChangeType(value: number | null): "positive" | "negative" | "neutral" {
-  if (value === null || value === 0) return "neutral";
-  return value < 0 ? "positive" : "negative";
 }
 
 function standardChangeType(value: number | null): "positive" | "negative" | "neutral" {
@@ -190,7 +177,7 @@ export function Home() {
   const activeAlerts = overview.kpis.active_alerts ?? 0;
   const creditsUsedPct = usageSummary?.credits_used_pct ?? null;
   const requestsTrend = usageSummary?.total_requests_trend_pct ?? null;
-  const usageCostTrend = usageSummary?.total_usage_cost_trend_pct ?? null;
+  const creditsTrend = usageSummary?.credits_used_trend_pct ?? null;
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-6 px-3 mx-auto">
@@ -243,12 +230,12 @@ export function Home() {
           changeContext={usageRangeLabels[usageRange]}
         />
         <KpiCard
-          title="Usage Cost"
-          value={usageSummary ? formatCurrency(usageSummary.total_usage_cost_usd) : "N/A"}
-          change={formatTrend(usageCostTrend)}
-          changeType={usageCostChangeType(usageCostTrend)}
-          icon={DollarSign}
-          changeContext="current range"
+          title="Credits Used"
+          value={usageSummary ? formatNumber(usageSummary.credits_used) : "N/A"}
+          change={formatTrend(creditsTrend)}
+          changeType={standardChangeType(creditsTrend)}
+          icon={Layers}
+          changeContext="plan quota"
         />
         <KpiCard
           title="Active Alerts"
@@ -361,7 +348,11 @@ export function Home() {
                 value={
                   overview.billing.total_paid_ytd_cents === null
                     ? "N/A"
-                    : formatCurrency(overview.billing.total_paid_ytd_cents / 100)
+                    : new Intl.NumberFormat(undefined, {
+                        style: "currency",
+                        currency: overview.billing.currency ?? "USD",
+                        maximumFractionDigits: 2,
+                      }).format(overview.billing.total_paid_ytd_cents / 100)
                 }
                 detail={overview.billing.currency ?? "USD"}
               />

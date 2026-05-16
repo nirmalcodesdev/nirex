@@ -15,7 +15,6 @@ export type {
   NotificationData,
   InvoiceData,
   ProjectUsageData,
-  CostBreakdownItem,
   PlanFeature,
   PricingPlan,
 } from "./types";

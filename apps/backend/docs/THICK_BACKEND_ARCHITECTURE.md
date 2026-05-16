@@ -305,7 +305,7 @@ GET    /api/exec/:id/files/:path       # Download files
    - Data retention policies
    - Secure deletion
 
-## Cost Optimization
+## Credit Optimization
 
 1. **Caching**
    - Cache common completions
@@ -313,8 +313,8 @@ GET    /api/exec/:id/files/:path       # Download files
    - Cache tool outputs
 
 2. **Model Selection**
-   - Use cheaper models for simple tasks
-   - Upgrade to expensive models only when needed
+   - Use lower-credit models for simple tasks
+   - Upgrade to higher-capability models only when needed
    - Batch requests when possible
 
 3. **Context Management**
@@ -337,7 +337,7 @@ GET    /api/exec/:id/files/:path       # Download files
 - Sandbox creation/destruction rate
 - Cache hit rates
 - Error rates by type
-- Cost per user/session
+- Credits per user/session
 
 // Logging:
 - All AI model interactions

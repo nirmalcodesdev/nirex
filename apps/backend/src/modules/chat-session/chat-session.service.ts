@@ -11,7 +11,6 @@ import {
 } from './message.repository.js';
 import { archivedMessagesRepository } from './archived-messages.repository.js';
 import { sessionCheckpointRepository } from './session-checkpoint.repository.js';
-import { tokenPricingService } from './token-pricing.service.js';
 import { sseManager } from './sse.manager.js';
 import {
   chatSessionCache,
@@ -1222,7 +1221,6 @@ export class ChatSessionService {
 
   /**
    * Get session stats for a user
-   * Uses accurate pricing from token pricing service
    */
   async getStats(userId: Types.ObjectId): Promise<SessionStatsResponse> {
     const [sessionCounts, totalTokens, totalMessages] = await Promise.all([
@@ -1233,26 +1231,12 @@ export class ChatSessionService {
         : chatSessionRepository.countTotalMessages(userId),
     ]);
 
-    // Get all sessions to calculate estimated cost with accurate pricing
-    const sessions = await chatSessionRepository.findAllForUser(userId);
-    let totalCost = 0;
-
-    for (const session of sessions) {
-      const cost = await tokenPricingService.calculateCost(
-        session.aiModel,
-        session.token_usage.input_tokens,
-        session.token_usage.output_tokens,
-        session.token_usage.cached_tokens || 0
-      );
-      totalCost += cost.cost;
-    }
-
     return {
       total_sessions: sessionCounts.total,
       total_messages: totalMessages,
       total_tokens: totalTokens,
+      credits_used: Number((totalTokens.total_tokens / 1000).toFixed(2)),
       archived_sessions: sessionCounts.archived,
-      estimated_cost_usd: Number(totalCost.toFixed(6)),
     };
   }
 

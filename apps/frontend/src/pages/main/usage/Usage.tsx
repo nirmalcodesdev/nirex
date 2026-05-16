@@ -5,8 +5,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Clock,
-  DollarSign,
   Download,
+  Gauge,
   Layers,
   RefreshCw,
 } from "lucide-react";
@@ -32,14 +32,6 @@ const usageRangeLabels: Record<UsageRange, string> = {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
 }
 
 function formatDateLabel(dateValue: string | null | undefined): string {
@@ -93,10 +85,12 @@ export function Usage() {
 
   const overview = usageQuery.data;
 
-  const usageCostChange = toKpiChange(overview?.summary.total_usage_cost_trend_pct, false);
-  const creditsChange = toKpiChange(0, true); // Fallback as credits_used_trend_pct is not in API
+  const creditsChange = toKpiChange(overview?.summary.credits_used_trend_pct, false);
   const requestChange = toKpiChange(overview?.summary.total_requests_trend_pct, true);
   const responseTimeChange = toKpiChange(overview?.summary.avg_response_time_trend_pct, false);
+  const remainingCredits = overview
+    ? Math.max(0, overview.summary.credits_limit - overview.summary.credits_used)
+    : 0;
 
   const handleExport = async (format: UsageExportFormat) => {
     try {
@@ -117,7 +111,7 @@ export function Usage() {
     <div className="space-y-6">
       <PageHeader
         title="Usage"
-        description="Monitor usage trends, costs, and plan utilization."
+        description="Monitor credit usage trends and plan utilization."
         actions={
           <>
             <button
@@ -200,18 +194,18 @@ export function Usage() {
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard
-              title="Total Usage Cost"
-              value={formatCurrency(overview.summary.total_usage_cost_usd)}
-              change={usageCostChange.text}
-              changeType={usageCostChange.type}
-              icon={DollarSign}
-            />
-            <KpiCard
               title="Credits Used"
               value={formatNumber(overview.summary.credits_used)}
               change={creditsChange.text}
               changeType={creditsChange.type}
               icon={Layers}
+            />
+            <KpiCard
+              title="Credits Remaining"
+              value={formatNumber(remainingCredits)}
+              change={`${overview.summary.credits_used_pct.toFixed(1)}% used`}
+              changeType={overview.summary.credits_used_pct >= 90 ? "negative" : "neutral"}
+              icon={Gauge}
             />
             <KpiCard
               title="Total Requests"
@@ -274,7 +268,6 @@ export function Usage() {
                         <div>{formatNumber(project.credits)} credits</div>
                         <div>{formatNumber(project.requests)} reqs</div>
                         <div className="flex items-center justify-end gap-2">
-                          <span>{formatCurrency(project.cost_usd)}</span>
                           <span className={`inline-flex items-center gap-1 text-xs ${trendColorClass(project.trend_pct)}`}>
                             {project.trend_pct >= 0 ? (
                               <ArrowUpRight className="h-3.5 w-3.5" />
