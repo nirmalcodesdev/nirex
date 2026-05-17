@@ -5,9 +5,11 @@
 export type UsageRange = '30d' | '90d' | 'month_to_date';
 export type UsageExportFormat = 'json' | 'csv';
 
+
 export interface UsageSummary {
   credits_used: number;
   credits_used_trend_pct: number;
+  credits_total_used?: number;
   credits_limit: number;
   credits_used_pct: number;
   total_requests: number;
@@ -33,11 +35,17 @@ export interface UsageCurrentPlan {
   plan_id: string;
   plan_name: string;
   included_credits: number;
+  subscription_status: string | null;
   next_billing_date: string | null; // ISO date
+  credit_period_start: string | null; // ISO date
+  credit_period_end: string | null; // ISO date
+  next_credit_reset_at: string | null; // ISO date
+  credits_expire_at: string | null; // ISO date
 }
 
 export interface UsageOverviewResponse {
   summary: UsageSummary;
+  credits_total_used?: number;
   chart: UsageChartPoint[];
   top_projects: UsageTopProject[];
   current_plan: UsageCurrentPlan;

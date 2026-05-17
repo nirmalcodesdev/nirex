@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  BillingCycle,
-  BillingInvoiceItem,
-  BillingInvoiceStatus,
-  BillingPlanId,
-  BillingSubscriptionStatus,
-  ProrationPreviewQuery,
+import {
+  cn,
+  type BillingCycle,
+  type BillingInvoiceItem,
+  type BillingInvoiceStatus,
+  type BillingPlanId,
+  type BillingSubscriptionStatus,
+  type ProrationPreviewQuery,
 } from "@nirex/shared";
 import {
   AlertCircle,
@@ -563,6 +564,13 @@ export function Billing() {
                   <p className="mt-1 text-sm text-muted-foreground">
                     Billing period {formatDate(overview.subscription.currentPeriodStart)} to {formatDate(overview.subscription.currentPeriodEnd)}.
                   </p>
+                  {overview.usage.nextCreditResetAt ? (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {overview.subscription.cancelAtPeriodEnd
+                        ? `Unused credits expire on ${formatDate(overview.usage.nextCreditResetAt)}.`
+                        : `Credits reset ${formatDate(overview.usage.nextCreditResetAt)}. Unused credits expire at reset.`}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button

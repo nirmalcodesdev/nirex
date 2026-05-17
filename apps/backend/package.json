@@ -13,6 +13,7 @@
     "test": "cross-env NODE_ENV=test vitest run",
     "test:watch": "cross-env NODE_ENV=test vitest",
     "test:coverage": "cross-env NODE_ENV=test vitest run --coverage",
+    "test:credit-rollover:e2e": "tsx src/scripts/e2e-credit-rollover.ts",
     "test:load": "artillery run tests/load/load-test.yml",
     "test:security": "cross-env NODE_ENV=test vitest run tests/security",
     "test:penetration": "cross-env NODE_ENV=test vitest run tests/penetration"

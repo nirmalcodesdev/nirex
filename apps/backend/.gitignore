@@ -19,8 +19,10 @@ pnpm-debug.log*
 coverage/
 tests/*
 !tests/
+!tests/credit-period.test.ts
 !tests/chat-session.test.ts
 !tests/password-policy.test.ts
+!tests/usage.service.test.ts
 
 # IDE
 .vscode/
@@ -33,3 +35,6 @@ tests/*
 Thumbs.db
 
 scripts
+!src/scripts/
+src/scripts/*
+!src/scripts/e2e-credit-rollover.ts

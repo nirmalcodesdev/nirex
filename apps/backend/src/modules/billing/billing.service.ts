@@ -62,6 +62,7 @@ import {
   canTransitionSubscription,
 } from './domain/subscription-state-machine.js';
 import { Money } from './domain/money.js';
+import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import type {
   GatewayEvent,
@@ -1687,11 +1688,12 @@ export class BillingService {
         }
       }
 
+      const now = new Date();
       const [subscription, paymentMethods, invoices, totalPaidYtdMinor] = await Promise.all([
         billingRepository.findLatestSubscriptionByUserId(userId, OVERVIEW_SUBSCRIPTION_STATUSES),
         billingRepository.listPaymentMethods(userId),
         this.invoiceService.listForUser(userId, 10),
-        billingRepository.getPaidInvoicesYtdTotalMinor(userId, new Date().getUTCFullYear()),
+        billingRepository.getPaidInvoicesYtdTotalMinor(userId, now.getUTCFullYear()),
       ]);
       const plans = await this.getPlansForUser(userId);
 
@@ -1707,6 +1709,20 @@ export class BillingService {
         currentPlan.prices.month;
       const defaultPaymentMethod = paymentMethods.find((method) => method.isDefault) ?? paymentMethods[0] ?? null;
       const periodEnd = subscription?.currentPeriodEnd ?? null;
+      const hasActiveCreditWindow =
+        subscription !== null &&
+        ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status) &&
+        Boolean(subscription.currentPeriodStart) &&
+        Boolean(subscription.currentPeriodEnd) &&
+        (subscription.currentPeriodEnd?.getTime() ?? 0) > now.getTime();
+      const creditPeriod = hasActiveCreditWindow && subscription
+        ? resolveMonthlyCreditPeriod({
+          now,
+          billingCycle: subscription.billingCycle,
+          subscriptionPeriodStart: subscription.currentPeriodStart ?? null,
+          subscriptionPeriodEnd: subscription.currentPeriodEnd ?? null,
+        })
+        : null;
 
       return {
         billingEnabled: this.billingEnabled(),
@@ -1722,6 +1738,10 @@ export class BillingService {
           creditsUsed: null,
           creditsIncluded: currentPlan.includedCredits,
           creditsUsagePct: null,
+          creditPeriodStart: creditPeriod?.periodStart.toISOString() ?? null,
+          creditPeriodEnd: creditPeriod?.periodEndExclusive.toISOString() ?? null,
+          nextCreditResetAt: creditPeriod?.nextCreditResetAt.toISOString() ?? null,
+          creditsExpireAt: creditPeriod?.creditsExpireAt.toISOString() ?? null,
         },
         kpis: {
           currentPlanAmountMinor: price?.amountMinor ?? 0,
@@ -1744,7 +1764,7 @@ export class BillingService {
               (getPlanPrice(planId, 'month')?.amountMinor ?? 0) * 12 -
               (getPlanPrice(planId, 'year')?.amountMinor ?? 0),
             ),
-          lastFetchedAt: new Date().toISOString(),
+          lastFetchedAt: now.toISOString(),
         },
         invoices: invoices.items,
         plans,

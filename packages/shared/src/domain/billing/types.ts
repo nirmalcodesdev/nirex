@@ -204,6 +204,10 @@ export interface BillingOverviewUsage {
   creditsUsed: number | null;
   creditsIncluded: number | null;
   creditsUsagePct: number | null;
+  creditPeriodStart: string | null;
+  creditPeriodEnd: string | null;
+  nextCreditResetAt: string | null;
+  creditsExpireAt: string | null;
 }
 
 export interface BillingOverviewKpis {

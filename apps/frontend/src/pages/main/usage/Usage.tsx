@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { UsageExportFormat, UsageRange } from "@nirex/shared";
+import { cn, type UsageExportFormat, type UsageRange } from "@nirex/shared";
 import {
   Activity,
   ArrowDownRight,
@@ -27,7 +27,7 @@ import { useUsageExportMutation, useUsageOverviewQuery } from "../../../features
 const usageRangeLabels: Record<UsageRange, string> = {
   "30d": "Last 30 days",
   "90d": "Last 90 days",
-  month_to_date: "Month to date",
+  month_to_date: "Current credit period",
 };
 
 function formatNumber(value: number): string {
@@ -46,7 +46,7 @@ function toKpiChange(value: number | null | undefined, positiveWhenHigher: boole
   const safeValue = value ?? 0;
   const isIncrease = safeValue >= 0;
   let type: KpiChangeType = "neutral";
-  
+
   if (safeValue > 0) {
     type = positiveWhenHigher ? "positive" : "negative";
   } else if (safeValue < 0) {
@@ -91,6 +91,12 @@ export function Usage() {
   const remainingCredits = overview
     ? Math.max(0, overview.summary.credits_limit - overview.summary.credits_used)
     : 0;
+  const nextCreditResetAt = overview?.current_plan.next_credit_reset_at
+    ?? overview?.current_plan.next_billing_date
+    ?? null;
+  const creditPeriodLabel = overview?.current_plan.credit_period_start && overview.current_plan.credit_period_end
+    ? `${formatDateLabel(overview.current_plan.credit_period_start)} - ${formatDateLabel(overview.current_plan.credit_period_end)}`
+    : null;
 
   const handleExport = async (format: UsageExportFormat) => {
     try {
@@ -156,7 +162,7 @@ export function Usage() {
         >
           <DropdownItem onClick={() => setUsageRange("30d")}>Last 30 days</DropdownItem>
           <DropdownItem onClick={() => setUsageRange("90d")}>Last 90 days</DropdownItem>
-          <DropdownItem onClick={() => setUsageRange("month_to_date")}>Month to date</DropdownItem>
+          <DropdownItem onClick={() => setUsageRange("month_to_date")}>Current credit period</DropdownItem>
         </Dropdown>
       </div>
 
@@ -194,10 +200,10 @@ export function Usage() {
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard
-              title="Credits Used"
-              value={formatNumber(overview.summary.credits_used)}
-              change={creditsChange.text}
-              changeType={creditsChange.type}
+              title="Total Credits Used"
+              value={formatNumber(overview.summary.credits_total_used ?? 0)}
+              change="Total consumption"
+              changeType="neutral"
               icon={Layers}
             />
             <KpiCard
@@ -295,11 +301,18 @@ export function Usage() {
                 </div>
 
                 <div>
-                  <p className="text-sm text-muted-foreground">Next billing date</p>
+                  <p className="text-sm text-muted-foreground">Next credit reset</p>
                   <p className="text-sm">
-                    {formatDateLabel(overview.current_plan.next_billing_date)}
+                    {formatDateLabel(nextCreditResetAt)}
                   </p>
                 </div>
+
+                {creditPeriodLabel ? (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Credit period</p>
+                    <p className="text-sm">{creditPeriodLabel}</p>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
@@ -317,7 +330,7 @@ export function Usage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {overview.summary.credits_used_pct.toFixed(1)}% of plan credits consumed.
+                    {overview.summary.credits_used_pct.toFixed(1)}% of plan credits consumed. Unused credits expire at reset.
                   </p>
                 </div>
               </CardContent>

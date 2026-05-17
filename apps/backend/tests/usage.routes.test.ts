@@ -39,6 +39,10 @@ function overviewFixture(
       plan_name: 'Pro',
       included_credits: includedCredits,
       next_billing_date: null,
+      credit_period_start: null,
+      credit_period_end: null,
+      next_credit_reset_at: null,
+      credits_expire_at: null,
     },
   };
 }

@@ -19,7 +19,7 @@ import { useDashboardOverviewQuery } from "../../../features/dashboard/useDashbo
 const usageRangeLabels: Record<UsageRange, string> = {
   "30d": "Last 30 days",
   "90d": "Last 90 days",
-  month_to_date: "Month to date",
+  month_to_date: "Current credit period",
 };
 
 function formatNumber(value: number): string {
@@ -230,12 +230,12 @@ export function Home() {
           changeContext={usageRangeLabels[usageRange]}
         />
         <KpiCard
-          title="Credits Used"
-          value={usageSummary ? formatNumber(usageSummary.credits_used) : "N/A"}
-          change={formatTrend(creditsTrend)}
-          changeType={standardChangeType(creditsTrend)}
+          title="Total Credits Used"
+          value={usageSummary?.credits_total_used ? formatNumber(usageSummary.credits_total_used) : "N/A"}
+          change="Lifetime"
+          changeType="neutral"
           icon={Layers}
-          changeContext="plan quota"
+          changeContext="all time"
         />
         <KpiCard
           title="Active Alerts"
@@ -262,9 +262,9 @@ export function Home() {
             <div className="mt-4 space-y-5">
               <div className="grid grid-cols-1 gap-4">
                 <MetricRow
-                  label="Credits used"
-                  value={`${formatNumber(usageSummary.credits_used)} / ${formatNumber(usageSummary.credits_limit)}`}
-                  detail={`${formatPercent(usageSummary.credits_used_pct)} of quota`}
+                  label="Total credits used"
+                  value={formatNumber(usageSummary.credits_total_used ?? 0)}
+                  detail="Cumulative consumption across all billing periods"
                 />
               </div>
               <div>
@@ -341,7 +341,13 @@ export function Home() {
               <MetricRow
                 label="Subscription status"
                 value={overview.billing.subscription_status ?? "N/A"}
-                detail={overview.billing.next_billing_date ? `Next billing ${formatDateTime(overview.billing.next_billing_date)}` : "No next billing date"}
+                detail={
+                  ["CANCELED", "NONE"].includes(overview.billing.subscription_status ?? "")
+                    ? "Subscription Expired"
+                    : overview.billing.next_billing_date 
+                    ? `Next billing ${formatDateTime(overview.billing.next_billing_date)}` 
+                    : "No next billing date"
+                }
               />
               <MetricRow
                 label="Total paid (YTD)"

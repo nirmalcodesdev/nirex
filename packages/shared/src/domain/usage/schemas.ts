@@ -3,6 +3,9 @@ import { z } from 'zod';
 export const usageRangeSchema = z.enum(['30d', '90d', 'month_to_date']);
 export const usageExportFormatSchema = z.enum(['json', 'csv']);
 
+export const DEFAULT_CREDITS_LIMIT = 10000;
+
+
 export const usageOverviewQuerySchema = z.object({
   range: usageRangeSchema.default('30d'),
 });

@@ -9,14 +9,19 @@ import { usageRepository, type DateRange, type SessionUsageAggregate } from './u
 import { billingRepository } from '../billing/billing.repository.js';
 import { getBillingPlan } from '../billing/billing.catalog.js';
 import type { BillingPlanId } from '../billing/billing.types.js';
+import {
+  creditPeriodUsageRangeEnd,
+  resolveMonthlyCreditPeriod,
+  type CreditPeriod,
+} from '../billing/domain/credit-period.js';
 import type { BillingSubscriptionStatus } from '../billing/billing.model.js';
 import {
   getCachedUsageOverview,
   invalidateUsageOverviewCache,
   setCachedUsageOverview,
 } from './usage.cache.js';
+import { DEFAULT_CREDITS_LIMIT } from '@nirex/shared/domain/usage/schemas';
 
-const DEFAULT_CREDITS_LIMIT = 10000;
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
   'ACTIVE',
@@ -42,10 +47,12 @@ interface ResolvedCurrentPlan {
   planId: string;
   planName: string;
   includedCredits: number;
+  subscriptionStatus: string | null;
   nextBillingDate: string | null;
   billingCycle: 'month' | 'year' | null;
   subscriptionPeriodStart: Date | null;
   subscriptionPeriodEnd: Date | null;
+  creditPeriod: CreditPeriod;
 }
 
 function round(value: number, precision: number = 4): number {
@@ -78,25 +85,6 @@ function addDays(date: Date, days: number): Date {
   return d;
 }
 
-function addMonthsClamped(date: Date, months: number, anchorDay: number): Date {
-  const next = new Date(
-    Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + months,
-      1,
-      date.getUTCHours(),
-      date.getUTCMinutes(),
-      date.getUTCSeconds(),
-      date.getUTCMilliseconds(),
-    ),
-  );
-  const daysInTargetMonth = new Date(
-    Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  next.setUTCDate(Math.min(anchorDay, daysInTargetMonth));
-  return next;
-}
-
 function toISODate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -112,18 +100,26 @@ function dayRange(range: DateRange): string[] {
   return dates;
 }
 
-function resolveRange(range: UsageRange, now: Date): { current: DateRange; previous: DateRange } {
+function resolveRange(
+  range: UsageRange,
+  now: Date,
+  creditRange?: DateRange,
+): { current: DateRange; previous: DateRange } {
   const nowEnd = endOfDay(now);
   let start: Date;
+  let end = nowEnd;
 
-  if (range === 'month_to_date') {
+  if (range === 'month_to_date' && creditRange) {
+    start = creditRange.start;
+    end = creditRange.end;
+  } else if (range === 'month_to_date') {
     start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   } else {
     const days = range === '90d' ? 90 : 30;
     start = startOfDay(addDays(now, -(days - 1)));
   }
 
-  const current: DateRange = { start, end: nowEnd };
+  const current: DateRange = { start, end };
   const durationMs = current.end.getTime() - current.start.getTime() + 1;
   const previous: DateRange = {
     start: new Date(current.start.getTime() - durationMs),
@@ -135,15 +131,6 @@ function resolveRange(range: UsageRange, now: Date): { current: DateRange; previ
 
 function mapSessionUsageById(usages: SessionUsageAggregate[]): Map<string, SessionUsageAggregate> {
   return new Map(usages.map((usage) => [usage.session_id, usage]));
-}
-
-function nextBillingDate(now: Date): string {
-  const month = now.getUTCMonth();
-  const year = now.getUTCFullYear();
-  const next = month === 11
-    ? new Date(Date.UTC(year + 1, 0, 1))
-    : new Date(Date.UTC(year, month + 1, 1));
-  return next.toISOString();
 }
 
 function previousRange(range: DateRange): DateRange {
@@ -201,6 +188,16 @@ export class UsageService {
         : null;
       const effectivePeriodStart = subscriptionPeriodStart;
       const effectivePeriodEnd = subscriptionPeriodEnd;
+      const effectiveBillingCycle =
+        subscriptionWindowActive && subscription
+          ? subscription.billingCycle
+          : null;
+      const creditPeriod = resolveMonthlyCreditPeriod({
+        now,
+        billingCycle: effectiveBillingCycle,
+        subscriptionPeriodStart: effectivePeriodStart,
+        subscriptionPeriodEnd: effectivePeriodEnd,
+      });
 
       const rawPlanId = subscriptionWindowActive
         ? subscription?.planCode
@@ -212,13 +209,12 @@ export class UsageService {
           planId: 'custom',
           planName: 'Custom',
           includedCredits: DEFAULT_CREDITS_LIMIT,
+          subscriptionStatus: subscription?.status ?? null,
           nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
-          billingCycle:
-            subscriptionWindowActive && subscription
-              ? subscription.billingCycle
-              : null,
+          billingCycle: effectiveBillingCycle,
           subscriptionPeriodStart: effectivePeriodStart,
           subscriptionPeriodEnd: effectivePeriodEnd,
+          creditPeriod,
         };
       }
 
@@ -230,23 +226,32 @@ export class UsageService {
         includedCredits:
           plan?.includedCredits ??
           DEFAULT_CREDITS_LIMIT,
+        subscriptionStatus: subscription?.status ?? null,
         nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
-        billingCycle:
-          subscriptionWindowActive && subscription
-            ? subscription.billingCycle
-            : null,
+        billingCycle: effectiveBillingCycle,
         subscriptionPeriodStart: effectivePeriodStart,
         subscriptionPeriodEnd: effectivePeriodEnd,
+        creditPeriod,
       };
     } catch {
+      const now = new Date();
+      const creditPeriod = resolveMonthlyCreditPeriod({
+        now,
+        billingCycle: null,
+        subscriptionPeriodStart: null,
+        subscriptionPeriodEnd: null,
+      });
+
       return {
         planId: 'free',
         planName: defaultPlanName,
         includedCredits: freePlan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
+        subscriptionStatus: null,
         nextBillingDate: null,
         billingCycle: null,
         subscriptionPeriodStart: null,
         subscriptionPeriodEnd: null,
+        creditPeriod,
       };
     }
   }
@@ -256,46 +261,12 @@ export class UsageService {
     plan: ResolvedCurrentPlan,
   ): DateRange {
     const nowEnd = endOfDay(now);
-
-    if (
-      plan.billingCycle === 'month' &&
-      plan.subscriptionPeriodStart &&
-      plan.subscriptionPeriodEnd
-    ) {
-      return {
-        start: plan.subscriptionPeriodStart,
-        end: nowEnd < plan.subscriptionPeriodEnd ? nowEnd : plan.subscriptionPeriodEnd,
-      };
-    }
-
-    if (
-      plan.billingCycle === 'year' &&
-      plan.subscriptionPeriodStart &&
-      plan.subscriptionPeriodEnd
-    ) {
-      const anchorDay = plan.subscriptionPeriodStart.getUTCDate();
-      let windowStart = new Date(plan.subscriptionPeriodStart);
-      let nextWindowStart = addMonthsClamped(windowStart, 1, anchorDay);
-
-      while (nextWindowStart <= now && nextWindowStart < plan.subscriptionPeriodEnd) {
-        windowStart = nextWindowStart;
-        nextWindowStart = addMonthsClamped(windowStart, 1, anchorDay);
-      }
-
-      const maxEnd = nextWindowStart.getTime() - 1;
-      const entitlementEnd = new Date(
-        Math.min(maxEnd, plan.subscriptionPeriodEnd.getTime(), nowEnd.getTime()),
-      );
-
-      return {
-        start: windowStart,
-        end: entitlementEnd,
-      };
-    }
-
+    const end = creditPeriodUsageRangeEnd(plan.creditPeriod, nowEnd);
     return {
-      start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-      end: nowEnd,
+      start: plan.creditPeriod.periodStart,
+      end: end.getTime() < plan.creditPeriod.periodStart.getTime()
+        ? plan.creditPeriod.periodStart
+        : end,
     };
   }
 
@@ -397,10 +368,14 @@ export class UsageService {
       return cached;
     }
 
-    const { current, previous } = resolveRange(range, new Date());
-
+    const now = new Date();
     const currentPlan = await this.resolveCurrentPlan(userId);
-    const creditRange = this.resolveCreditUsageRange(new Date(), currentPlan);
+    const creditRange = this.resolveCreditUsageRange(now, currentPlan);
+    const { current, previous } = resolveRange(
+      range,
+      now,
+      range === 'month_to_date' ? creditRange : undefined,
+    );
     const previousCreditRange = previousRange(creditRange);
 
     const [
@@ -410,6 +385,7 @@ export class UsageService {
       dailyEvents,
       creditSnapshot,
       previousCreditSnapshot,
+      lifetimeSnapshot,
     ] = await Promise.all([
       this.buildSnapshot(userId, current),
       this.buildSnapshot(userId, previous),
@@ -417,10 +393,12 @@ export class UsageService {
       usageRepository.getDailyEventTotals(userId, current, ['credits']),
       this.buildSnapshot(userId, creditRange),
       this.buildSnapshot(userId, previousCreditRange),
+      this.buildSnapshot(userId, { start: new Date(0), end: new Date() }),
     ]);
 
     const creditsUsed = creditSnapshot.credits;
     const previousCreditsUsed = previousCreditSnapshot.credits;
+    const lifetimeCreditsUsed = lifetimeSnapshot.credits;
 
     const previousProjects = new Map(
       previousSnapshot.projects.map((project) => [project.project_id, project.credits])
@@ -463,6 +441,7 @@ export class UsageService {
       summary: {
         credits_used: round(creditsUsed, 2),
         credits_used_trend_pct: percentageChange(creditsUsed, previousCreditsUsed),
+        credits_total_used: round(lifetimeCreditsUsed, 2),
         credits_limit: creditsLimit,
         credits_used_pct: round(
           (creditsUsed / creditsLimit) * 100,
@@ -483,13 +462,19 @@ export class UsageService {
               previousSnapshot.avg_response_time_ms
             ),
       },
+      credits_total_used: round(lifetimeCreditsUsed, 2),
       chart,
       top_projects: topProjects,
       current_plan: {
         plan_id: currentPlan.planId,
         plan_name: currentPlan.planName,
         included_credits: creditsLimit,
+        subscription_status: currentPlan.subscriptionStatus,
         next_billing_date: currentPlan.nextBillingDate,
+        credit_period_start: currentPlan.creditPeriod.periodStart.toISOString(),
+        credit_period_end: currentPlan.creditPeriod.periodEndExclusive.toISOString(),
+        next_credit_reset_at: currentPlan.creditPeriod.nextCreditResetAt.toISOString(),
+        credits_expire_at: currentPlan.creditPeriod.creditsExpireAt.toISOString(),
       },
     };
 
