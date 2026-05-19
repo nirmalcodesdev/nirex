@@ -5,6 +5,7 @@ import type {
   UsageRange,
   UsageTopProject,
 } from '@nirex/shared';
+import { DEFAULT_CREDITS_LIMIT } from '@nirex/shared';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
 import { billingRepository } from '../billing/billing.repository.js';
 import { getBillingPlan } from '../billing/billing.catalog.js';
@@ -20,7 +21,6 @@ import {
   invalidateUsageOverviewCache,
   setCachedUsageOverview,
 } from './usage.cache.js';
-import { DEFAULT_CREDITS_LIMIT } from '@nirex/shared/domain/usage/schemas';
 
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
@@ -48,7 +48,9 @@ interface ResolvedCurrentPlan {
   planName: string;
   includedCredits: number;
   subscriptionStatus: string | null;
+  cancelAtPeriodEnd: boolean;
   nextBillingDate: string | null;
+  trialEnd: string | null;
   billingCycle: 'month' | 'year' | null;
   subscriptionPeriodStart: Date | null;
   subscriptionPeriodEnd: Date | null;
@@ -210,7 +212,9 @@ export class UsageService {
           planName: 'Custom',
           includedCredits: DEFAULT_CREDITS_LIMIT,
           subscriptionStatus: subscription?.status ?? null,
+          cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
           nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
+          trialEnd: subscription?.trialEnd?.toISOString() ?? null,
           billingCycle: effectiveBillingCycle,
           subscriptionPeriodStart: effectivePeriodStart,
           subscriptionPeriodEnd: effectivePeriodEnd,
@@ -227,7 +231,9 @@ export class UsageService {
           plan?.includedCredits ??
           DEFAULT_CREDITS_LIMIT,
         subscriptionStatus: subscription?.status ?? null,
+        cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
         nextBillingDate: effectivePeriodEnd?.toISOString() ?? null,
+        trialEnd: subscription?.trialEnd?.toISOString() ?? null,
         billingCycle: effectiveBillingCycle,
         subscriptionPeriodStart: effectivePeriodStart,
         subscriptionPeriodEnd: effectivePeriodEnd,
@@ -247,7 +253,9 @@ export class UsageService {
         planName: defaultPlanName,
         includedCredits: freePlan?.includedCredits ?? DEFAULT_CREDITS_LIMIT,
         subscriptionStatus: null,
+        cancelAtPeriodEnd: false,
         nextBillingDate: null,
+        trialEnd: null,
         billingCycle: null,
         subscriptionPeriodStart: null,
         subscriptionPeriodEnd: null,
@@ -470,7 +478,9 @@ export class UsageService {
         plan_name: currentPlan.planName,
         included_credits: creditsLimit,
         subscription_status: currentPlan.subscriptionStatus,
+        cancel_at_period_end: currentPlan.cancelAtPeriodEnd,
         next_billing_date: currentPlan.nextBillingDate,
+        trial_end: currentPlan.trialEnd,
         credit_period_start: currentPlan.creditPeriod.periodStart.toISOString(),
         credit_period_end: currentPlan.creditPeriod.periodEndExclusive.toISOString(),
         next_credit_reset_at: currentPlan.creditPeriod.nextCreditResetAt.toISOString(),

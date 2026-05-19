@@ -36,7 +36,9 @@ export interface UsageCurrentPlan {
   plan_name: string;
   included_credits: number;
   subscription_status: string | null;
+  cancel_at_period_end: boolean;
   next_billing_date: string | null; // ISO date
+  trial_end: string | null; // ISO date
   credit_period_start: string | null; // ISO date
   credit_period_end: string | null; // ISO date
   next_credit_reset_at: string | null; // ISO date

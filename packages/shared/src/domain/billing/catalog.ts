@@ -40,7 +40,7 @@ export const BILLING_PLAN_CATALOG: Record<
       'Access to Agentic Team AI',
     ],
     includedCredits: 50_000,
-    trialDays: 14,
+    trialDays: 0,
     active: true,
   },
   enterprise: {
