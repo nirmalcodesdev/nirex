@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Dropdown, DropdownItem, KpiCard, PageHeader, Skeleton, CardSkeleton } from "@nirex/ui";
 import { useToast } from "../../../components/ToastProvider";
+import { getSubscriptionStatusDetail } from "../../../features/billing/billingDisplay";
 import { useDashboardOverviewQuery } from "../../../features/dashboard/useDashboardOverview";
 
 const usageRangeLabels: Record<UsageRange, string> = {
@@ -177,7 +178,6 @@ export function Home() {
   const activeAlerts = overview.kpis.active_alerts ?? 0;
   const creditsUsedPct = usageSummary?.credits_used_pct ?? null;
   const requestsTrend = usageSummary?.total_requests_trend_pct ?? null;
-  const creditsTrend = usageSummary?.credits_used_trend_pct ?? null;
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-6 px-3 mx-auto">
@@ -341,13 +341,16 @@ export function Home() {
               <MetricRow
                 label="Subscription status"
                 value={overview.billing.subscription_status ?? "N/A"}
-                detail={
-                  ["CANCELED", "NONE"].includes(overview.billing.subscription_status ?? "")
-                    ? "Subscription Expired"
-                    : overview.billing.next_billing_date 
-                    ? `Next billing ${formatDateTime(overview.billing.next_billing_date)}` 
-                    : "No next billing date"
-                }
+                detail={getSubscriptionStatusDetail(
+                  {
+                    status: overview.billing.subscription_status,
+                    cancelAtPeriodEnd: overview.billing.cancel_at_period_end,
+                    currentPeriodEnd: overview.billing.current_period_end,
+                    trialEnd: overview.billing.trial_end,
+                    nextBillingDate: overview.billing.next_billing_date,
+                  },
+                  formatDateTime,
+                )}
               />
               <MetricRow
                 label="Total paid (YTD)"

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  cn,
   type BillingCycle,
   type BillingInvoiceItem,
   type BillingInvoiceStatus,
@@ -45,6 +44,10 @@ import {
   useRetryPaymentMutation,
   useSetDefaultPaymentMethodMutation,
 } from "../../../features/billing";
+import {
+  getBillingDateKpi,
+  getCreditPeriodNotice,
+} from "../../../features/billing/billingDisplay";
 import { useToast } from "../../../components/ToastProvider";
 
 type BillingTab = "overview" | "plans" | "payments" | "invoices" | "admin";
@@ -438,6 +441,40 @@ export function Billing() {
     );
   }
 
+  const billingDateKpi = getBillingDateKpi(
+    {
+      status: currentStatus,
+      cancelAtPeriodEnd: overview.subscription.cancelAtPeriodEnd,
+      currentPeriodEnd: overview.subscription.currentPeriodEnd,
+      trialEnd: overview.subscription.trialEnd,
+      nextBillingDate: overview.kpis.nextBillingDate,
+    },
+    formatDate,
+  );
+  const creditPeriodNotice = getCreditPeriodNotice(
+    {
+      status: currentStatus,
+      cancelAtPeriodEnd: overview.subscription.cancelAtPeriodEnd,
+      currentPeriodEnd: overview.subscription.currentPeriodEnd,
+      trialEnd: overview.subscription.trialEnd,
+      nextCreditResetAt: overview.usage.nextCreditResetAt,
+      creditsExpireAt: overview.usage.creditsExpireAt,
+    },
+    formatDate,
+  );
+  const subscriptionPeriodLabel = currentStatus === "TRIALING"
+    ? "Trial period"
+    : overview.subscription.cancelAtPeriodEnd
+      ? "Current access period"
+      : "Billing period";
+  const billingDateKpiChange = currentStatus === "TRIALING"
+    ? "Trial active"
+    : overview.subscription.cancelAtPeriodEnd || currentStatus === "CANCELED"
+      ? "No renewal"
+      : currentStatus === "NONE"
+        ? "No active plan"
+        : formatMoneyMinor(overview.kpis.nextRenewalAmountMinor, overview.kpis.currency);
+
   return (
     <div className="flex flex-col gap-5 px-3 py-4">
       <PageHeader
@@ -526,12 +563,12 @@ export function Billing() {
               changeContext={statusLabel(currentStatus)}
             />
             <KpiCard
-              title="Next Renewal"
-              value={formatDate(overview.kpis.nextBillingDate)}
-              change={formatMoneyMinor(overview.kpis.nextRenewalAmountMinor, overview.kpis.currency)}
+              title={billingDateKpi.title}
+              value={billingDateKpi.value}
+              change={billingDateKpiChange}
               changeType="neutral"
               icon={RefreshCw}
-              changeContext="scheduled"
+              changeContext={billingDateKpi.context}
             />
             <KpiCard
               title="Paid YTD"
@@ -562,13 +599,11 @@ export function Billing() {
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Billing period {formatDate(overview.subscription.currentPeriodStart)} to {formatDate(overview.subscription.currentPeriodEnd)}.
+                    {subscriptionPeriodLabel} {formatDate(overview.subscription.currentPeriodStart)} to {formatDate(overview.subscription.currentPeriodEnd)}.
                   </p>
-                  {overview.usage.nextCreditResetAt ? (
+                  {creditPeriodNotice ? (
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {overview.subscription.cancelAtPeriodEnd
-                        ? `Unused credits expire on ${formatDate(overview.usage.nextCreditResetAt)}.`
-                        : `Credits reset ${formatDate(overview.usage.nextCreditResetAt)}. Unused credits expire at reset.`}
+                      {creditPeriodNotice}
                     </p>
                   ) : null}
                 </div>

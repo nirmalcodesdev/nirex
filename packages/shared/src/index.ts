@@ -330,6 +330,7 @@ export {
   usageExportQuerySchema,
   type UsageOverviewQuerySchema,
   type UsageExportQuerySchema,
+  DEFAULT_CREDITS_LIMIT,
 } from './domain/usage/index.js';
 
 // ============================================================================

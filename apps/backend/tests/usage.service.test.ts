@@ -78,6 +78,8 @@ describe('UsageService', () => {
     expect(overview.current_plan.credit_period_end).toBe('2026-07-17T10:15:00.000Z');
     expect(overview.current_plan.next_credit_reset_at).toBe('2026-07-17T10:15:00.000Z');
     expect(overview.current_plan.credits_expire_at).toBe('2026-07-17T10:15:00.000Z');
+    expect(overview.current_plan.cancel_at_period_end).toBe(false);
+    expect(overview.current_plan.trial_end).toBeNull();
     expect(overview.summary.credits_used).toBe(42);
     expect(overview.chart.map((point) => point.date)).toEqual(['2026-06-17', '2026-06-18']);
     expect(requestedEventRanges).toEqual(

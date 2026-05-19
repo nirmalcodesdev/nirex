@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cn, type UsageExportFormat, type UsageRange } from "@nirex/shared";
+import type { UsageExportFormat, UsageRange } from "@nirex/shared";
 import {
   Activity,
   ArrowDownRight,
@@ -22,6 +22,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, Dropdown, DropdownItem, KpiCard, PageHeader, type KpiChangeType } from "@nirex/ui";
 import { CardSkeleton, ChartSkeleton } from "@nirex/ui/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
+import {
+  getCreditPeriodDateLabel,
+  getCreditUsageFootnote,
+} from "../../../features/billing/billingDisplay";
 import { useUsageExportMutation, useUsageOverviewQuery } from "../../../features/usage";
 
 const usageRangeLabels: Record<UsageRange, string> = {
@@ -85,15 +89,24 @@ export function Usage() {
 
   const overview = usageQuery.data;
 
-  const creditsChange = toKpiChange(overview?.summary.credits_used_trend_pct, false);
   const requestChange = toKpiChange(overview?.summary.total_requests_trend_pct, true);
   const responseTimeChange = toKpiChange(overview?.summary.avg_response_time_trend_pct, false);
   const remainingCredits = overview
     ? Math.max(0, overview.summary.credits_limit - overview.summary.credits_used)
     : 0;
-  const nextCreditResetAt = overview?.current_plan.next_credit_reset_at
-    ?? overview?.current_plan.next_billing_date
+  const creditLifecycle = {
+    status: overview?.current_plan.subscription_status,
+    cancelAtPeriodEnd: overview?.current_plan.cancel_at_period_end,
+    currentPeriodEnd: overview?.current_plan.next_billing_date,
+    trialEnd: overview?.current_plan.trial_end,
+    nextCreditResetAt: overview?.current_plan.next_credit_reset_at,
+    creditsExpireAt: overview?.current_plan.credits_expire_at,
+  };
+  const nextCreditResetAt = creditLifecycle.nextCreditResetAt
+    ?? creditLifecycle.creditsExpireAt
+    ?? creditLifecycle.currentPeriodEnd
     ?? null;
+  const creditDateLabel = getCreditPeriodDateLabel(creditLifecycle);
   const creditPeriodLabel = overview?.current_plan.credit_period_start && overview.current_plan.credit_period_end
     ? `${formatDateLabel(overview.current_plan.credit_period_start)} - ${formatDateLabel(overview.current_plan.credit_period_end)}`
     : null;
@@ -301,7 +314,7 @@ export function Usage() {
                 </div>
 
                 <div>
-                  <p className="text-sm text-muted-foreground">Next credit reset</p>
+                  <p className="text-sm text-muted-foreground">{creditDateLabel}</p>
                   <p className="text-sm">
                     {formatDateLabel(nextCreditResetAt)}
                   </p>
@@ -330,7 +343,13 @@ export function Usage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {overview.summary.credits_used_pct.toFixed(1)}% of plan credits consumed. Unused credits expire at reset.
+                    {getCreditUsageFootnote(
+                      {
+                        ...creditLifecycle,
+                        usagePct: overview.summary.credits_used_pct,
+                      },
+                      formatDateLabel,
+                    )}
                   </p>
                 </div>
               </CardContent>

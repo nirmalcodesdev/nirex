@@ -21,7 +21,10 @@ export interface DashboardBillingOverview {
   current_plan_id: string | null;
   current_plan_name: string | null;
   subscription_status: string | null;
+  cancel_at_period_end: boolean | null;
   next_billing_date: string | null;
+  current_period_end: string | null;
+  trial_end: string | null;
   total_paid_ytd_cents: number | null;
   currency: string | null;
 }
