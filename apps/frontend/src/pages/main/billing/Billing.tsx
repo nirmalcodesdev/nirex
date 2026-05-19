@@ -85,12 +85,6 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-function hasActiveTrial(trialEnd: string | null | undefined): boolean {
-  if (!trialEnd) return false;
-  const end = new Date(trialEnd);
-  if (Number.isNaN(end.getTime())) return false;
-  return end.getTime() > Date.now();
-}
 
 function statusLabel(value: string): string {
   return value
@@ -328,10 +322,7 @@ export function Billing() {
   }, [forceRefreshBillingFromProvider, location.hash, location.key, location.pathname, location.search, navigate]);
 
   const currentStatus = overview?.subscription.status ?? "NONE";
-  const showTrialBanner =
-    currentStatus === "TRIALING" ||
-    (Boolean(overview?.subscription.planId && overview.subscription.planId !== "free") &&
-      hasActiveTrial(overview?.subscription.trialEnd));
+  const showTrialBanner = currentStatus === "TRIALING";
   const showCancellationScheduledBanner = Boolean(
     overview?.subscription.cancelAtPeriodEnd && currentStatus !== "CANCELED",
   );
