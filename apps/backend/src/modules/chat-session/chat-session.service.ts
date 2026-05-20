@@ -17,8 +17,8 @@ import {
   MAX_CACHED_MESSAGES,
 } from './chat-session.cache.js';
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
-import { assertWithinQuota } from '../usage/quota.guard.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
+import { quotaService, type QuotaDebit } from '../usage/quota.service.js';
 import { usageRepository } from '../usage/usage.repository.js';
 import {
   assertValidCheckpointSnapshot,
@@ -263,6 +263,54 @@ function safeEventTimestamp(value: Date | string | undefined): Date {
 function creditsFromTokenUsage(tokenUsage?: Partial<TokenUsage>): number {
   const normalized = normalizeTokenUsage(tokenUsage);
   return normalized ? Math.max(0, normalized.total_tokens) / 1000 : 0;
+}
+
+function quotaIdempotencyKey(
+  sessionId: string,
+  clientMessageId?: string,
+  messageId?: string
+): string {
+  if (clientMessageId) {
+    return `chat-message-client:${sessionId}:${clientMessageId}:credits`;
+  }
+
+  if (messageId) {
+    return `chat-message:${messageId}:credits`;
+  }
+
+  return `chat-message-attempt:${sessionId}:${randomUUID()}:credits`;
+}
+
+async function consumeQuotaForMessage(input: {
+  session: IChatSessionDocument;
+  userId: Types.ObjectId;
+  role: MessageRole;
+  tokenUsage?: Partial<TokenUsage>;
+  clientMessageId?: string;
+  messageId?: string;
+  source: string;
+}): Promise<QuotaDebit | undefined> {
+  const credits = creditsFromTokenUsage(input.tokenUsage);
+
+  if (credits <= 0 && input.role !== 'user') {
+    return undefined;
+  }
+
+  return quotaService.consumeCredits({
+    userId: input.userId,
+    credits,
+    idempotencyKey: quotaIdempotencyKey(
+      input.session._id.toString(),
+      input.clientMessageId,
+      input.messageId
+    ),
+    metadata: usageEventMetadata(input.session, input.source, {
+      role: input.role,
+      message_id: input.messageId,
+      client_message_id: input.clientMessageId,
+      token_usage: normalizeTokenUsage(input.tokenUsage),
+    }),
+  });
 }
 
 function usageEventMetadata(
@@ -1032,43 +1080,52 @@ export class ChatSessionService {
       }
     }
 
-    if (role === 'user') {
-      await assertWithinQuota(userId);
-    }
+    let quotaDebit: QuotaDebit | undefined;
+    let quotaDebitRefundable = true;
 
-    // Check if we need auto-compaction before adding message
-    const currentTokens = existing.token_usage?.total_tokens || 0;
-    const autoCheckpointThreshold = Math.ceil(getContextLimit(existing.aiModel) * 0.8);
-    const needsCompaction = shouldCompact(existing.aiModel, currentTokens);
-    const autoCheckpointAlreadyCreated =
-      existing.last_auto_checkpoint_tokens !== undefined &&
-      existing.last_auto_checkpoint_tokens >= autoCheckpointThreshold;
-    let checkpointCreated = false;
+    quotaDebit = await consumeQuotaForMessage({
+      session: existing,
+      userId,
+      role,
+      tokenUsage: normalizedTokenUsage,
+      clientMessageId,
+      source: 'message_create',
+    });
 
-    // Auto-create checkpoint if needed
-    if (needsCompaction && !autoCheckpointAlreadyCreated) {
-      await this.createCheckpoint(
-        sessionId,
-        userId,
-        `Auto-compaction at ${currentTokens} tokens`,
-        {
-          reason: 'auto_compaction',
+    try {
+      // Check if we need auto-compaction before adding message
+      const currentTokens = existing.token_usage?.total_tokens || 0;
+      const autoCheckpointThreshold = Math.ceil(getContextLimit(existing.aiModel) * 0.8);
+      const needsCompaction = shouldCompact(existing.aiModel, currentTokens);
+      const autoCheckpointAlreadyCreated =
+        existing.last_auto_checkpoint_tokens !== undefined &&
+        existing.last_auto_checkpoint_tokens >= autoCheckpointThreshold;
+      let checkpointCreated = false;
+
+      // Auto-create checkpoint if needed
+      if (needsCompaction && !autoCheckpointAlreadyCreated) {
+        await this.createCheckpoint(
+          sessionId,
+          userId,
+          `Auto-compaction at ${currentTokens} tokens`,
+          {
+            reason: 'auto_compaction',
+            tokenCount: currentTokens,
+          }
+        );
+        await chatSessionRepository.update(sessionId, {
+          last_auto_checkpoint_tokens: currentTokens,
+        });
+        checkpointCreated = true;
+
+        logger.info('Auto-compaction checkpoint created', {
+          sessionId,
+          userId: userId.toString(),
           tokenCount: currentTokens,
-        }
-      );
-      await chatSessionRepository.update(sessionId, {
-        last_auto_checkpoint_tokens: currentTokens,
-      });
-      checkpointCreated = true;
+        });
+      }
 
-      logger.info('Auto-compaction checkpoint created', {
-        sessionId,
-        userId: userId.toString(),
-        tokenCount: currentTokens,
-      });
-    }
-
-    if (USE_SEPARATE_MESSAGE_COLLECTION) {
+      if (USE_SEPARATE_MESSAGE_COLLECTION) {
       // Use new message repository
       let sequenceNumber = await chatSessionRepository.reserveNextMessageSequence(
         new Types.ObjectId(sessionId)
@@ -1103,6 +1160,7 @@ export class ChatSessionService {
               clientMessageId
             );
             if (existingMessage) {
+              quotaDebitRefundable = false;
               await recordUsageEventsForMessage(
                 existing,
                 userId,
@@ -1162,6 +1220,7 @@ export class ChatSessionService {
       if (!message) {
         throw new AppError('Failed to create message', 500, 'INTERNAL_ERROR');
       }
+      quotaDebitRefundable = false;
 
       // Mark as delivered immediately for now (in production, this would be done by SSE confirmation)
       const deliveredMessage = (await messageRepository.markDelivered(message._id)) || message;
@@ -1294,6 +1353,7 @@ export class ChatSessionService {
       if (!updated) {
         throw new AppError('Failed to add message', 500, 'INTERNAL_ERROR');
       }
+      quotaDebitRefundable = false;
 
       const summarizedSession =
         (await chatSessionRepository.updateMessageSummary(sessionId, {}, updatedSummary)) ||
@@ -1327,6 +1387,12 @@ export class ChatSessionService {
         checkpointCreated,
         isDuplicate: false,
       };
+    }
+    } catch (error) {
+      if (quotaDebitRefundable) {
+        await quotaService.refundDebit(quotaDebit, 'message_create_failed');
+      }
+      throw error;
     }
   }
 

@@ -21,6 +21,7 @@ import {
   invalidateUsageOverviewCache,
   setCachedUsageOverview,
 } from './usage.cache.js';
+import { quotaService, type QuotaStatus } from './quota.service.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
@@ -55,6 +56,12 @@ interface ResolvedCurrentPlan {
   subscriptionPeriodStart: Date | null;
   subscriptionPeriodEnd: Date | null;
   creditPeriod: CreditPeriod;
+}
+
+interface SpendableCreditSnapshot {
+  creditsUsed: number;
+  creditsLimit: number;
+  creditsRemaining: number;
 }
 
 function round(value: number, precision: number = 4): number {
@@ -159,6 +166,10 @@ function normalizePlanId(value: string | undefined): BillingPlanId {
   if (value === 'hobby' || value === 'free') return 'free';
   if (isBillingPlanId(value)) return value;
   return 'free';
+}
+
+function isSameInstant(left: Date, right: Date): boolean {
+  return left.getTime() === right.getTime();
 }
 
 export class UsageService {
@@ -275,6 +286,44 @@ export class UsageService {
       end: end.getTime() < plan.creditPeriod.periodStart.getTime()
         ? plan.creditPeriod.periodStart
         : end,
+    };
+  }
+
+  private isQuotaStatusForCurrentPlan(
+    status: QuotaStatus,
+    plan: ResolvedCurrentPlan,
+  ): boolean {
+    return (
+      status.planId === plan.planId &&
+      isSameInstant(status.periodStart, plan.creditPeriod.periodStart) &&
+      isSameInstant(status.periodEnd, plan.creditPeriod.periodEndExclusive)
+    );
+  }
+
+  private async resolveSpendableCredits(
+    userId: Types.ObjectId,
+    plan: ResolvedCurrentPlan,
+    analyticsCreditsUsed: number,
+  ): Promise<SpendableCreditSnapshot> {
+    const fallbackLimit = Math.max(1, plan.includedCredits);
+
+    try {
+      const quotaStatus = await quotaService.getStatus(userId);
+      if (this.isQuotaStatusForCurrentPlan(quotaStatus, plan)) {
+        return {
+          creditsUsed: quotaStatus.creditsUsed,
+          creditsLimit: Math.max(1, quotaStatus.includedCredits),
+          creditsRemaining: quotaStatus.remainingCredits,
+        };
+      }
+    } catch {
+      // Usage analytics should remain available even if quota status cannot be read.
+    }
+
+    return {
+      creditsUsed: analyticsCreditsUsed,
+      creditsLimit: fallbackLimit,
+      creditsRemaining: round(Math.max(0, fallbackLimit - analyticsCreditsUsed), 2),
     };
   }
 
@@ -407,6 +456,11 @@ export class UsageService {
     const creditsUsed = creditSnapshot.credits;
     const previousCreditsUsed = previousCreditSnapshot.credits;
     const lifetimeCreditsUsed = lifetimeSnapshot.credits;
+    const spendableCredits = await this.resolveSpendableCredits(
+      userId,
+      currentPlan,
+      creditsUsed,
+    );
 
     const previousProjects = new Map(
       previousSnapshot.projects.map((project) => [project.project_id, project.credits])
@@ -443,16 +497,15 @@ export class UsageService {
       };
     });
 
-    const creditsLimit = Math.max(1, currentPlan.includedCredits);
-
     const result: UsageOverviewResponse = {
       summary: {
-        credits_used: round(creditsUsed, 2),
-        credits_used_trend_pct: percentageChange(creditsUsed, previousCreditsUsed),
+        credits_used: round(spendableCredits.creditsUsed, 2),
+        credits_used_trend_pct: percentageChange(spendableCredits.creditsUsed, previousCreditsUsed),
         credits_total_used: round(lifetimeCreditsUsed, 2),
-        credits_limit: creditsLimit,
+        credits_limit: spendableCredits.creditsLimit,
+        credits_remaining: round(spendableCredits.creditsRemaining, 2),
         credits_used_pct: round(
-          (creditsUsed / creditsLimit) * 100,
+          (spendableCredits.creditsUsed / spendableCredits.creditsLimit) * 100,
           2
         ),
         total_requests: Math.round(currentSnapshot.total_requests),
@@ -476,7 +529,7 @@ export class UsageService {
       current_plan: {
         plan_id: currentPlan.planId,
         plan_name: currentPlan.planName,
-        included_credits: creditsLimit,
+        included_credits: spendableCredits.creditsLimit,
         subscription_status: currentPlan.subscriptionStatus,
         cancel_at_period_end: currentPlan.cancelAtPeriodEnd,
         next_billing_date: currentPlan.nextBillingDate,

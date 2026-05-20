@@ -63,10 +63,28 @@ function readNumber(value: Record<string, unknown>, key: string): number | undef
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
 }
 
+function readString(value: Record<string, unknown>, key: string): string | undefined {
+  const raw = value[key];
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+}
+
+function readStripeObjectId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  const record = readRecord(value);
+  return record ? readString(record, 'id') : undefined;
+}
+
 function normalizeStripeSubscription(subscription: Stripe.Subscription): GatewaySubscription {
   const firstItem = subscription.items.data[0];
   const price = firstItem?.price;
+  const subscriptionRecord = readRecord(subscription as unknown);
   const itemRecord = readRecord(firstItem);
+  const currentPeriodStart =
+    readNumber(itemRecord ?? {}, 'current_period_start') ??
+    readNumber(subscriptionRecord ?? {}, 'current_period_start');
+  const currentPeriodEnd =
+    readNumber(itemRecord ?? {}, 'current_period_end') ??
+    readNumber(subscriptionRecord ?? {}, 'current_period_end');
 
   return {
     id: subscription.id,
@@ -74,8 +92,8 @@ function normalizeStripeSubscription(subscription: Stripe.Subscription): Gateway
     providerPriceId: price?.id,
     amountMinor: price?.unit_amount ?? 0,
     currency: price?.currency ?? 'usd',
-    currentPeriodStart: toDateFromUnix(readNumber(itemRecord ?? {}, 'current_period_start')),
-    currentPeriodEnd: toDateFromUnix(readNumber(itemRecord ?? {}, 'current_period_end')),
+    currentPeriodStart: toDateFromUnix(currentPeriodStart),
+    currentPeriodEnd: toDateFromUnix(currentPeriodEnd),
     trialStart: toDateFromUnix(subscription.trial_start),
     trialEnd: toDateFromUnix(subscription.trial_end),
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
@@ -157,10 +175,8 @@ function normalizeRefund(refund: Stripe.Refund): GatewayRefund {
 function normalizeStripeInvoice(invoice: StripeInvoiceWithId): GatewayInvoice {
   const invoiceRecord = readRecord(invoice as unknown);
   const parentSubscription = invoice.parent?.subscription_details?.subscription;
-  const subscription =
-    typeof parentSubscription === 'string'
-      ? parentSubscription
-      : parentSubscription?.id;
+  const legacySubscription = readStripeObjectId(invoiceRecord?.subscription);
+  const subscription = readStripeObjectId(parentSubscription) ?? legacySubscription;
   const taxMinor = Array.isArray(invoice.total_taxes)
     ? invoice.total_taxes.reduce((sum, item) => sum + item.amount, 0)
     : 0;

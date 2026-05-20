@@ -64,6 +64,7 @@ import {
 import { Money } from './domain/money.js';
 import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
+import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import type {
   GatewayEvent,
   GatewayInvoice,
@@ -159,6 +160,43 @@ function readBoolean(record: Record<string, unknown> | null, key: string): boole
 
 function readNestedRecord(record: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
   return readRecord(record?.[key]);
+}
+
+function readStripeObjectId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  const record = readRecord(value);
+  return readString(record, 'id');
+}
+
+function readFirstSubscriptionItem(record: Record<string, unknown> | null): Record<string, unknown> | null {
+  const items = readNestedRecord(record, 'items');
+  const itemData = Array.isArray(items?.data) ? items.data : [];
+  return readRecord(itemData[0]);
+}
+
+function readSubscriptionBillingPeriod(
+  subscription: Record<string, unknown> | null,
+  firstItem: Record<string, unknown> | null = readFirstSubscriptionItem(subscription),
+): { currentPeriodStart?: Date; currentPeriodEnd?: Date } {
+  const currentPeriodStart =
+    toDate(readNumber(firstItem, 'current_period_start')) ??
+    toDate(readNumber(subscription, 'current_period_start'));
+  const currentPeriodEnd =
+    toDate(readNumber(firstItem, 'current_period_end')) ??
+    toDate(readNumber(subscription, 'current_period_end'));
+
+  return { currentPeriodStart, currentPeriodEnd };
+}
+
+function readInvoiceProviderSubscriptionId(invoice: Record<string, unknown> | null): string | undefined {
+  const parent = readNestedRecord(invoice, 'parent');
+  const subscriptionDetails = readNestedRecord(parent, 'subscription_details');
+  const parentSubscriptionId =
+    readString(parent, 'type') === 'subscription_details'
+      ? readStripeObjectId(subscriptionDetails?.subscription)
+      : undefined;
+
+  return parentSubscriptionId ?? readStripeObjectId(invoice?.subscription);
 }
 
 function toJsonObject(value: Record<string, unknown> | null | undefined): JsonObject | null {
@@ -450,6 +488,23 @@ async function sendBillingEmailSafely(
       service: 'billing',
       operation: 'billing.email_notification',
       notificationType,
+      userId: userId.toString(),
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function invalidateUsageOverviewCacheSafely(
+  userId: Types.ObjectId,
+  context: JsonObject = {},
+): Promise<void> {
+  try {
+    await invalidateUsageOverviewCache(userId);
+  } catch (error) {
+    logger.warn('Failed to invalidate usage overview cache after billing change.', {
+      service: 'billing',
+      operation: 'billing.usage_cache_invalidation',
       userId: userId.toString(),
       ...context,
       error: error instanceof Error ? error.message : String(error),
@@ -794,14 +849,13 @@ export class WebhookService {
     const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
     if (!customer) return;
 
-    const items = readNestedRecord(data, 'items');
-    const itemData = Array.isArray(items?.data) ? items.data : [];
-    const firstItem = readRecord(itemData[0]);
+    const firstItem = readFirstSubscriptionItem(data);
     const price = readNestedRecord(firstItem, 'price');
     const providerPriceId = readString(price, 'id');
     const mappedPlan = resolvePlanFromStripePriceId(providerPriceId);
     const status = deleted ? 'CANCELED' : mapProviderSubscriptionStatus(readString(data, 'status') ?? 'active');
     const existing = await billingRepository.findSubscriptionByProviderId(providerSubscriptionId, session);
+    const billingPeriod = readSubscriptionBillingPeriod(data, firstItem);
 
     const subscription = await billingRepository.upsertSubscription(
       {
@@ -815,10 +869,10 @@ export class WebhookService {
         currency: normalizeCurrency(readString(price, 'currency') ?? existing?.currency),
         amountMinor: readNumber(price, 'unit_amount') ?? existing?.amountMinor ?? 0,
         cancelAtPeriodEnd: readBoolean(data, 'cancel_at_period_end') ?? false,
-        currentPeriodStart: toDate(readNumber(firstItem, 'current_period_start')),
-        currentPeriodEnd: toDate(readNumber(firstItem, 'current_period_end')),
-        trialStart: toDate(readNumber(data, 'trial_start')),
-        trialEnd: toDate(readNumber(data, 'trial_end')),
+        currentPeriodStart: billingPeriod.currentPeriodStart ?? existing?.currentPeriodStart,
+        currentPeriodEnd: billingPeriod.currentPeriodEnd ?? existing?.currentPeriodEnd,
+        trialStart: toDate(readNumber(data, 'trial_start')) ?? existing?.trialStart,
+        trialEnd: toDate(readNumber(data, 'trial_end')) ?? existing?.trialEnd,
         metadata: { providerEventId: event.id },
       },
       session,
@@ -826,6 +880,13 @@ export class WebhookService {
 
     const user = await userRepository.findById(customer.userId);
     const planName = mappedPlan?.name ?? (existing ? getBillingPlan(existing.planCode)?.name : undefined) ?? 'Nirex Subscription';
+
+    await invalidateUsageOverviewCacheSafely(customer.userId, {
+      source: 'webhook.subscription',
+      providerEventId: event.id,
+      providerSubscriptionId,
+      status,
+    });
 
     if (!existing && (status === 'ACTIVE' || status === 'TRIALING')) {
       await notifyBillingSubscriptionStarted({
@@ -900,12 +961,15 @@ export class WebhookService {
     const customer = await billingRepository.findCustomerByProviderCustomerId(providerCustomerId, session);
     if (!customer) return;
 
-    const providerSubscriptionId = readString(data, 'subscription');
+    const providerSubscriptionId = readInvoiceProviderSubscriptionId(data);
     const subscription = providerSubscriptionId
       ? await billingRepository.findSubscriptionByProviderId(providerSubscriptionId, session)
       : null;
     const totalMinor = readNumber(data, 'total') ?? 0;
     const paid = status === 'PAID';
+    const paidAt = paid
+      ? toDate(readNumber(readNestedRecord(data, 'status_transitions'), 'paid_at')) ?? event.createdAt
+      : undefined;
     const invoice = await billingRepository.upsertInvoice(
       {
         customerId: customer._id,
@@ -925,7 +989,9 @@ export class WebhookService {
         amountRemainingMinor: paid ? 0 : readNumber(data, 'amount_remaining') ?? totalMinor,
         hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
         invoicePdfUrl: readString(data, 'invoice_pdf'),
-        paidAt: paid ? new Date() : undefined,
+        paidAt,
+        periodStart: toDate(readNumber(data, 'period_start')),
+        periodEnd: toDate(readNumber(data, 'period_end')),
         providerCreatedAt: toDate(readNumber(data, 'created')),
       },
       session,
@@ -972,7 +1038,7 @@ export class WebhookService {
             invoiceNumber: readString(data, 'number'),
             invoicePdfUrl: readString(data, 'invoice_pdf'),
             hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
-            paidAt: new Date(),
+            paidAt,
             billingPortalUrl: `${env.APP_URL}/billing`,
           }),
           { providerEventId: event.id, providerSubscriptionId: providerSubscriptionId ?? null },
@@ -1524,6 +1590,7 @@ export class BillingService {
       status: ActiveSubscriptionStatus;
       providerSubscriptionId?: string;
     }> = [];
+    let subscriptionSynced = false;
     const sortedSubscriptions = [...gatewaySubscriptions].sort(
       (a, b) => (b.currentPeriodEnd?.getTime() ?? 0) - (a.currentPeriodEnd?.getTime() ?? 0),
     );
@@ -1597,6 +1664,7 @@ export class BillingService {
           },
           session,
         );
+        subscriptionSynced = true;
 
         if (!existing && (status === 'ACTIVE' || status === 'TRIALING')) {
           startedSubscriptionNotifications.push({
@@ -1652,6 +1720,13 @@ export class BillingService {
       }
       return { ok: true };
     });
+
+    if (subscriptionSynced) {
+      await invalidateUsageOverviewCacheSafely(userId, {
+        source: 'provider.sync',
+        providerCustomerId: customer.providerCustomerId,
+      });
+    }
 
     const startedSubscriptionNotification = startedSubscriptionNotifications[0];
     if (startedSubscriptionNotification) {
@@ -2076,6 +2151,11 @@ export class BillingService {
             source: 'changePlan',
           });
         }
+        await invalidateUsageOverviewCacheSafely(userId, {
+          source: 'changePlan',
+          subscriptionId: saved._id.toString(),
+          status: subscriptionStatus,
+        });
         const response = mapOverviewSubscription(saved);
         return {
           value: response,
@@ -2158,6 +2238,11 @@ export class BillingService {
           });
           return updated;
         });
+        await invalidateUsageOverviewCacheSafely(userId, {
+          source: 'cancelSubscription',
+          subscriptionId: updated._id.toString(),
+          atPeriodEnd,
+        });
         const response = mapOverviewSubscription(updated);
         return {
           value: response,
@@ -2202,6 +2287,11 @@ export class BillingService {
         message: 'Your subscription has been paused. You will not be charged while it is paused.',
       });
       return doc;
+    });
+    await invalidateUsageOverviewCacheSafely(userId, {
+      source: 'pauseSubscription',
+      subscriptionId: updated._id.toString(),
+      status: updated.status,
     });
     return mapOverviewSubscription(updated);
   }
@@ -2260,6 +2350,11 @@ export class BillingService {
         message: 'Your subscription will continue to renew automatically.',
       });
       return doc;
+    });
+    await invalidateUsageOverviewCacheSafely(userId, {
+      source: 'resumeSubscription',
+      subscriptionId: updated._id.toString(),
+      status: updated.status,
     });
     return mapOverviewSubscription(updated);
   }

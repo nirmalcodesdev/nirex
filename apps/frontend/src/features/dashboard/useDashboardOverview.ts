@@ -14,6 +14,8 @@ interface NormalizedDashboardOverviewOptions {
   notificationsLimit: number;
 }
 
+export const dashboardBaseQueryKey = ["dashboard"] as const;
+
 function normalizeOptions(options: DashboardOverviewOptions): NormalizedDashboardOverviewOptions {
   const notificationsLimit = options.notificationsLimit ?? 5;
 
@@ -34,7 +36,7 @@ function toApiQuery(options: NormalizedDashboardOverviewOptions): DashboardOverv
 
 export function dashboardOverviewQueryKey(options: NormalizedDashboardOverviewOptions) {
   return [
-    "dashboard",
+    ...dashboardBaseQueryKey,
     "overview",
     options.usageRange,
     options.includeRecentNotifications,
