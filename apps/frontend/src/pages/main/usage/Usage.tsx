@@ -92,7 +92,7 @@ export function Usage() {
   const requestChange = toKpiChange(overview?.summary.total_requests_trend_pct, true);
   const responseTimeChange = toKpiChange(overview?.summary.avg_response_time_trend_pct, false);
   const remainingCredits = overview
-    ? Math.max(0, overview.summary.credits_limit - overview.summary.credits_used)
+    ? overview.summary.credits_remaining
     : 0;
   const creditLifecycle = {
     status: overview?.current_plan.subscription_status,

@@ -19,6 +19,8 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { billingApi } from "./billingApi";
 import { notificationsBaseQueryKey } from "../notifications/useNotifications";
+import { usageBaseQueryKey } from "../usage";
+import { dashboardBaseQueryKey } from "../dashboard/useDashboardOverview";
 
 type CheckoutPlanId = Exclude<BillingPlanId, "custom">;
 
@@ -88,6 +90,8 @@ function useBillingInvalidation() {
   return async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: billingQueryKeys.all }),
+      queryClient.invalidateQueries({ queryKey: usageBaseQueryKey }),
+      queryClient.invalidateQueries({ queryKey: dashboardBaseQueryKey }),
       queryClient.invalidateQueries({ queryKey: notificationsBaseQueryKey }),
     ]);
   };

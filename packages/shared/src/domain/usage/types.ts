@@ -11,6 +11,7 @@ export interface UsageSummary {
   credits_used_trend_pct: number;
   credits_total_used?: number;
   credits_limit: number;
+  credits_remaining: number;
   credits_used_pct: number;
   total_requests: number;
   total_requests_trend_pct: number;

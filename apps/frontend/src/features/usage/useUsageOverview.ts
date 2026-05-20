@@ -11,11 +11,13 @@ interface UsageExportVariables {
   format: UsageExportFormat;
 }
 
+export const usageBaseQueryKey = ["usage"] as const;
+
 export function useUsageOverviewQuery(options: UseUsageOverviewOptions = {}) {
   const { range = "30d" } = options;
 
   return useQuery({
-    queryKey: ["usage", "overview", range] as const,
+    queryKey: [...usageBaseQueryKey, "overview", range] as const,
     queryFn: () => usageApi.getOverview({ range }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,

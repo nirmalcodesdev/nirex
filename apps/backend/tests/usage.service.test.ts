@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import { UsageService } from '../src/modules/usage/usage.service.js';
 import { usageRepository, type DateRange } from '../src/modules/usage/usage.repository.js';
+import { quotaService } from '../src/modules/usage/quota.service.js';
 import { billingRepository } from '../src/modules/billing/billing.repository.js';
 import { clearUsageOverviewMemoryCache } from '../src/modules/usage/usage.cache.js';
 import type { IBillingSubscriptionDocument } from '../src/modules/billing/billing.model.js';
@@ -63,6 +64,15 @@ describe('UsageService', () => {
       }
       return { credits: 7, requests: 1 };
     });
+    vi.spyOn(quotaService, 'getStatus').mockResolvedValue({
+      planId: 'pro',
+      creditsUsed: 42,
+      includedCredits: 50_000,
+      remainingCredits: 49_958,
+      overQuota: false,
+      periodStart: new Date('2026-06-17T10:15:00.000Z'),
+      periodEnd: new Date('2026-07-17T10:15:00.000Z'),
+    });
   });
 
   afterEach(() => {
@@ -90,5 +100,24 @@ describe('UsageService', () => {
         }),
       ]),
     );
+  });
+
+  it('uses quota bucket status for spendable remaining credits when analytics is stale', async () => {
+    vi.mocked(quotaService.getStatus).mockResolvedValue({
+      planId: 'pro',
+      creditsUsed: 50_000,
+      includedCredits: 50_000,
+      remainingCredits: 0,
+      overQuota: true,
+      periodStart: new Date('2026-06-17T10:15:00.000Z'),
+      periodEnd: new Date('2026-07-17T10:15:00.000Z'),
+    });
+
+    const overview = await service.getOverview(userId, 'month_to_date');
+
+    expect(overview.summary.credits_used).toBe(50_000);
+    expect(overview.summary.credits_limit).toBe(50_000);
+    expect(overview.summary.credits_remaining).toBe(0);
+    expect(overview.summary.credits_used_pct).toBe(100);
   });
 });

@@ -7,6 +7,7 @@ import {
   assertWithinQuota,
   getQuotaStatus,
 } from '../src/modules/usage/quota.guard.js';
+import { quotaService, type QuotaStatus } from '../src/modules/usage/quota.service.js';
 import { usageService } from '../src/modules/usage/usage.service.js';
 import { usageRepository } from '../src/modules/usage/usage.repository.js';
 import { billingRepository } from '../src/modules/billing/billing.repository.js';
@@ -26,6 +27,7 @@ function overviewFixture(
       credits_used: creditsUsed,
       credits_used_trend_pct: 0,
       credits_limit: includedCredits,
+      credits_remaining: Math.max(0, includedCredits - creditsUsed),
       credits_used_pct: (creditsUsed / includedCredits) * 100,
       total_requests: 0,
       total_requests_trend_pct: 0,
@@ -50,6 +52,21 @@ function overviewFixture(
   };
 }
 
+function quotaStatusFixture(
+  creditsUsed: number = 60_000,
+  includedCredits: number = 50_000,
+): QuotaStatus {
+  return {
+    planId: 'pro',
+    creditsUsed,
+    includedCredits,
+    remainingCredits: Math.max(0, includedCredits - creditsUsed),
+    overQuota: creditsUsed >= includedCredits,
+    periodStart: new Date('2026-05-01T00:00:00.000Z'),
+    periodEnd: new Date('2026-06-01T00:00:00.000Z'),
+  };
+}
+
 describe('usage routes', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -68,9 +85,9 @@ describe('usage routes', () => {
 
   it('allows users below their included credit quota', async () => {
     const userId = new Types.ObjectId();
-    const getOverviewSpy = vi
-      .spyOn(usageService, 'getOverview')
-      .mockResolvedValue(overviewFixture(49_999));
+    const assertSpy = vi
+      .spyOn(quotaService, 'assertWithinQuota')
+      .mockResolvedValue(quotaStatusFixture(49_999));
 
     const status = await assertWithinQuota(userId);
 
@@ -80,12 +97,17 @@ describe('usage routes', () => {
       remainingCredits: 1,
       overQuota: false,
     });
-    expect(getOverviewSpy).toHaveBeenCalledWith(userId, 'month_to_date');
+    expect(assertSpy).toHaveBeenCalledWith(userId);
   });
 
   it('blocks users at or above their included credit quota', async () => {
     const userId = new Types.ObjectId();
-    vi.spyOn(usageService, 'getOverview').mockResolvedValue(overviewFixture(50_000));
+    vi.spyOn(quotaService, 'assertWithinQuota').mockRejectedValue(
+      Object.assign(new Error('Credit quota exceeded.'), {
+        statusCode: 402,
+        code: 'QUOTA_EXCEEDED',
+      })
+    );
 
     await expect(assertWithinQuota(userId)).rejects.toMatchObject({
       statusCode: 402,
@@ -95,7 +117,7 @@ describe('usage routes', () => {
 
   it('reports over-quota status without throwing', async () => {
     const userId = new Types.ObjectId();
-    vi.spyOn(usageService, 'getOverview').mockResolvedValue(overviewFixture(65_000));
+    vi.spyOn(quotaService, 'getStatus').mockResolvedValue(quotaStatusFixture(65_000));
 
     await expect(getQuotaStatus(userId)).resolves.toMatchObject({
       creditsUsed: 65_000,
@@ -103,6 +125,19 @@ describe('usage routes', () => {
       remainingCredits: 0,
       overQuota: true,
     });
+  });
+
+  it('does not use cached usage overview data for quota enforcement', async () => {
+    const userId = new Types.ObjectId();
+    await setCachedUsageOverview(userId, 'month_to_date', overviewFixture(0));
+    const overviewSpy = vi.spyOn(usageService, 'getOverview');
+    vi.spyOn(quotaService, 'getStatus').mockResolvedValue(quotaStatusFixture(50_000));
+
+    await expect(getQuotaStatus(userId)).resolves.toMatchObject({
+      creditsUsed: 50_000,
+      overQuota: true,
+    });
+    expect(overviewSpy).not.toHaveBeenCalled();
   });
 
   it('invalidates only the requested user overview ranges', async () => {
