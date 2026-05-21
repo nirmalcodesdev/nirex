@@ -42,6 +42,18 @@ describe('billing routes', () => {
     });
   });
 
+  it('requires authentication for auto-renewal updates', async () => {
+    const response = await request(app)
+      .patch('/api/v1/billing/subscription/auto-renewal')
+      .send({ enabled: false });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      status: 'fail',
+      code: 'UNAUTHENTICATED',
+    });
+  });
+
   it('fails webhook processing when billing is not configured', async () => {
     const response = await request(app)
       .post('/api/v1/billing/webhooks/stripe')

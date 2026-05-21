@@ -18,7 +18,6 @@ import {
   Play,
   RefreshCw,
   ShieldCheck,
-  XCircle,
 } from "lucide-react";
 import { Card, CardContent, KpiCard, PageHeader } from "@nirex/ui";
 import { CardSkeleton, Skeleton } from "@nirex/ui/Skeleton";
@@ -34,7 +33,6 @@ import {
   useApplyDiscountMutation,
   useBillingInvoicesQuery,
   useBillingOverviewQuery,
-  useCancelSubscriptionMutation,
   useChangePlanMutation,
   useCreateCheckoutSessionMutation,
   useCreatePortalSessionMutation,
@@ -45,6 +43,7 @@ import {
   useResumeSubscriptionMutation,
   useRetryPaymentMutation,
   useSetDefaultPaymentMethodMutation,
+  useUpdateAutoRenewalMutation,
 } from "../../../features/billing";
 import {
   getBillingDateKpi,
@@ -58,7 +57,7 @@ type PlanDialogState = {
   billingCycle: BillingCycle;
 } | null;
 
-const ACTIVE_STATUSES: BillingSubscriptionStatus[] = ["TRIALING", "ACTIVE", "PAST_DUE"];
+const AUTO_RENEWAL_STATUSES: BillingSubscriptionStatus[] = ["TRIALING", "ACTIVE", "PAST_DUE", "UNPAID", "PAUSED"];
 let handledCheckoutLocationKey: string | null = null;
 let handledPortalLocationKey: string | null = null;
 const PORTAL_SYNC_PENDING_KEY = "nirex.billing.portalSyncPendingAt";
@@ -87,6 +86,26 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
+function getVisiblePaidYtdMinor(invoices: BillingInvoiceItem[], year: number): number {
+  const now = new Date();
+  return invoices.reduce((total, invoice) => {
+    const isPaid = invoice.status === "PAID";
+    // Also count OPEN invoices where payment was already collected by Stripe but
+    // the status hasn't yet transitioned to PAID (brief post-checkout window).
+    if (!isPaid && invoice.amountPaidMinor <= 0) return total;
+
+    const rawDate = new Date(invoice.paidAt ?? invoice.createdAt);
+    // Cap future dates to now — Stripe test clocks can produce future paidAt values.
+    // In production paidAt is always in the past so this branch is never taken.
+    const paidDate = rawDate > now ? now : rawDate;
+    if (Number.isNaN(paidDate.getTime()) || paidDate.getUTCFullYear() !== year) {
+      return total;
+    }
+
+    const paidAmount = invoice.amountPaidMinor > 0 ? invoice.amountPaidMinor : invoice.totalMinor;
+    return total + paidAmount;
+  }, 0);
+}
 
 function statusLabel(value: string): string {
   return value
@@ -203,7 +222,7 @@ export function Billing() {
   const invoicesQuery = useBillingInvoicesQuery(50);
   const checkoutMutation = useCreateCheckoutSessionMutation();
   const changePlanMutation = useChangePlanMutation();
-  const cancelMutation = useCancelSubscriptionMutation();
+  const autoRenewalMutation = useUpdateAutoRenewalMutation();
   const pauseMutation = usePauseSubscriptionMutation();
   const resumeMutation = useResumeSubscriptionMutation();
   const retryPaymentMutation = useRetryPaymentMutation();
@@ -234,6 +253,11 @@ export function Billing() {
     setIsProviderRefreshing(true);
 
     try {
+      // Cancel any in-flight billing queries so their stale results don't overwrite
+      // the Stripe-synced data we're about to fetch (race: auto-fetch is faster than
+      // force-sync because it skips the Stripe API call).
+      await queryClient.cancelQueries({ queryKey: billingQueryKeys.all });
+
       const overviewData = await billingApi.getOverview({ force: true });
       const invoicesData = await billingApi.listInvoices({ limit: 50 });
 
@@ -332,9 +356,12 @@ export function Billing() {
   const showCancellationScheduledBanner = Boolean(
     overview?.subscription.cancelAtPeriodEnd && currentStatus !== "CANCELED",
   );
+  const autoRenewalEnabled =
+    overview?.subscription.autoRenewalEnabled ??
+    Boolean(overview && AUTO_RENEWAL_STATUSES.includes(currentStatus) && !overview.subscription.cancelAtPeriodEnd);
+  const canUpdateAutoRenewal = AUTO_RENEWAL_STATUSES.includes(currentStatus);
   const canPause = currentStatus === "ACTIVE" && !overview?.subscription.cancelAtPeriodEnd;
-  const canResume = currentStatus === "PAUSED" || Boolean(overview?.subscription.cancelAtPeriodEnd);
-  const canCancel = ACTIVE_STATUSES.includes(currentStatus);
+  const canResume = currentStatus === "PAUSED";
 
   const tabs = useMemo<BillingTab[]>(() => {
     const base: BillingTab[] = ["overview", "plans", "payments", "invoices"];
@@ -412,6 +439,14 @@ export function Billing() {
     }
   }
 
+  function toggleAutoRenewal(): void {
+    const enabled = !autoRenewalEnabled;
+    autoRenewalMutation.mutate({ enabled }, {
+      onSuccess: () => toast(enabled ? "Auto-renewal enabled." : "Auto-renewal disabled.", "success"),
+      onError: (error) => toast(error instanceof Error ? error.message : "Auto-renewal update failed.", "error"),
+    });
+  }
+
   if (overviewQuery.isLoading) return <BillingSkeleton />;
 
   if (overviewQuery.isError || !overview) {
@@ -471,6 +506,17 @@ export function Billing() {
       : currentStatus === "NONE"
         ? "No active plan"
         : formatMoneyMinor(overview.kpis.nextRenewalAmountMinor, overview.kpis.currency);
+  const paidYtdMinor = Math.max(
+    overview.kpis.totalPaidYtdMinor,
+    getVisiblePaidYtdMinor(invoices, new Date().getUTCFullYear()),
+  );
+  const autoRenewalDetail = currentStatus === "NONE"
+    ? "Choose a plan to start recurring billing."
+    : currentStatus === "CANCELED"
+      ? "Plan access has ended."
+      : autoRenewalEnabled
+        ? `Renews on ${formatDate(overview.subscription.currentPeriodEnd)}.`
+        : `Ends on ${formatDate(overview.subscription.currentPeriodEnd)}.`;
 
   return (
     <div className="flex flex-col gap-5 px-3 py-4">
@@ -525,20 +571,15 @@ export function Billing() {
       )}
       {showCancellationScheduledBanner && (
         <div className="flex flex-col gap-3 rounded-lg border border-nirex-warning/30 bg-nirex-warning/10 p-4 text-sm text-nirex-warning sm:flex-row sm:items-center sm:justify-between">
-          <span>Subscription is scheduled to cancel on {formatDate(overview.subscription.currentPeriodEnd)}.</span>
+          <span>Auto-renewal is off. Plan access ends on {formatDate(overview.subscription.currentPeriodEnd)}.</span>
           <button
             type="button"
-            disabled={resumeMutation.isPending}
-            onClick={() => {
-              resumeMutation.mutate({}, {
-                onSuccess: () => toast("Subscription resumed.", "success"),
-                onError: (error) => toast(error instanceof Error ? error.message : "Resume failed.", "error"),
-              });
-            }}
+            disabled={autoRenewalMutation.isPending}
+            onClick={toggleAutoRenewal}
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground disabled:opacity-60"
           >
-            {resumeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Resume
+            {autoRenewalMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Enable Renewal
           </button>
         </div>
       )}
@@ -569,7 +610,7 @@ export function Billing() {
             />
             <KpiCard
               title="Paid YTD"
-              value={formatMoneyMinor(overview.kpis.totalPaidYtdMinor, overview.kpis.currency)}
+              value={formatMoneyMinor(paidYtdMinor, overview.kpis.currency)}
               change="Immutable invoices"
               changeType="neutral"
               icon={FileText}
@@ -633,21 +674,26 @@ export function Billing() {
                     <Play className="h-4 w-4" />
                     Resume
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canCancel || cancelMutation.isPending}
-                    onClick={() => {
-                      cancelMutation.mutate({ atPeriodEnd: true }, {
-                        onSuccess: () => toast("Cancellation scheduled.", "success"),
-                        onError: (error) => toast(error instanceof Error ? error.message : "Cancellation failed.", "error"),
-                      });
-                    }}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-nirex-error/30 px-3 text-sm text-nirex-error hover:bg-nirex-error/10 disabled:opacity-50"
-                  >
-                    <XCircle className="h-4 w-4" />
-                    Cancel
-                  </button>
                 </div>
+              </div>
+              <div className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto renewal</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{autoRenewalDetail}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoRenewalEnabled}
+                  aria-label={autoRenewalEnabled ? "Disable auto renewal" : "Enable auto renewal"}
+                  disabled={!canUpdateAutoRenewal || autoRenewalMutation.isPending}
+                  onClick={toggleAutoRenewal}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${autoRenewalEnabled ? "bg-primary" : "bg-muted-foreground/40"}`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-background shadow transition-transform ${autoRenewalEnabled ? "translate-x-5" : "translate-x-1"}`}
+                  />
+                </button>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {overview.currentPlan.features.map((feature) => (
@@ -687,7 +733,10 @@ export function Billing() {
               {overview.plans.map((plan) => {
                 const planId = checkoutPlanId(plan.id);
                 const price = plan.prices[selectedCycle] ?? plan.prices.month;
-                const isCurrent = plan.id === overview.currentPlan.id;
+                const hasActiveCurrentSubscription =
+                  overview.subscription.status !== "NONE" &&
+                  overview.subscription.status !== "CANCELED";
+                const isCurrent = hasActiveCurrentSubscription && plan.id === overview.currentPlan.id;
                 return (
                   <div key={plan.id} className="flex min-h-[300px] flex-col rounded-lg border border-border p-4">
                     <div className="flex items-start justify-between gap-3">

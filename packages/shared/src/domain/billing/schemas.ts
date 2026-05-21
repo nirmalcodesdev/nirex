@@ -20,6 +20,12 @@ export const billingInvoicesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().min(1).optional(),
   status: billingInvoiceStatusSchema.optional(),
+  force: z.preprocess((value) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (value === true || value === 'true') return true;
+    if (value === false || value === 'false') return false;
+    return value;
+  }, z.boolean().optional()),
 });
 
 export const createCheckoutSessionSchema = z.object({
@@ -55,6 +61,11 @@ export const changePlanSchema = z.object({
 
 export const cancelSubscriptionSchema = z.object({
   atPeriodEnd: z.boolean().optional(),
+  reason: z.string().trim().min(1).max(300).optional(),
+});
+
+export const updateAutoRenewalSchema = z.object({
+  enabled: z.boolean(),
   reason: z.string().trim().min(1).max(300).optional(),
 });
 
@@ -109,3 +120,4 @@ export type CreateCheckoutSessionSchema = z.infer<typeof createCheckoutSessionSc
 export type AttachPaymentMethodSchema = z.infer<typeof attachPaymentMethodSchema>;
 export type ChangePlanSchema = z.infer<typeof changePlanSchema>;
 export type CancelSubscriptionSchema = z.infer<typeof cancelSubscriptionSchema>;
+export type UpdateAutoRenewalSchema = z.infer<typeof updateAutoRenewalSchema>;

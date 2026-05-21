@@ -50,4 +50,6 @@ export type {
   ResumeSubscriptionResponse,
   RetryPaymentRequest,
   StripeWebhookResponse,
+  UpdateAutoRenewalRequest,
+  UpdateAutoRenewalResponse,
 } from '@nirex/shared';

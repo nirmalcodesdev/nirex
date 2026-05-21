@@ -25,6 +25,8 @@ import type {
   ResumeSubscriptionResponse,
   RetryPaymentRequest,
   BillingPayment,
+  UpdateAutoRenewalRequest,
+  UpdateAutoRenewalResponse,
 } from "@nirex/shared";
 import { dataOrThrow, request } from "../../lib/backendApi";
 
@@ -131,6 +133,14 @@ export const billingApi = {
       { method: "POST", body },
     );
     return dataOrThrow(payload, "BILLING_CANCEL_FAILED");
+  },
+
+  async updateAutoRenewal(body: UpdateAutoRenewalRequest): Promise<UpdateAutoRenewalResponse> {
+    const payload = await request<UpdateAutoRenewalResponse>(
+      `${BILLING_BASE}/subscription/auto-renewal`,
+      { method: "PATCH", body },
+    );
+    return dataOrThrow(payload, "BILLING_AUTO_RENEWAL_FAILED");
   },
 
   async pauseSubscription(body: PauseSubscriptionRequest = {}): Promise<ResumeSubscriptionResponse> {

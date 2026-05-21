@@ -65,6 +65,7 @@ import { Money } from './domain/money.js';
 import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
+import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import type {
   GatewayEvent,
   GatewayInvoice,
@@ -91,6 +92,8 @@ import type {
   ResumeSubscriptionResponse,
   RetryPaymentRequest,
   StripeWebhookResponse,
+  UpdateAutoRenewalRequest,
+  UpdateAutoRenewalResponse,
 } from './billing.types.js';
 
 type ActiveSubscriptionStatus = Exclude<BillingSubscriptionStatus, 'NONE'>;
@@ -111,6 +114,14 @@ const ACTIVE_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
 ];
 
 const CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
+];
+
+const AUTO_RENEWAL_SUBSCRIPTION_STATUSES: ActiveSubscriptionStatus[] = [
   'TRIALING',
   'ACTIVE',
   'PAST_DUE',
@@ -273,6 +284,10 @@ function mapOverviewPaymentMethod(doc: IBillingPaymentMethodDocument): BillingOv
   };
 }
 
+function isAutoRenewalEnabled(doc: Pick<IBillingSubscriptionDocument, 'status' | 'cancelAtPeriodEnd'> | null): boolean {
+  return Boolean(doc && doc.status !== 'CANCELED' && !doc.cancelAtPeriodEnd);
+}
+
 function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): BillingOverviewSubscription {
   if (!doc) {
     return {
@@ -281,6 +296,7 @@ function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): Bill
       planId: 'free',
       billingCycle: null,
       cancelAtPeriodEnd: false,
+      autoRenewalEnabled: false,
       currentPeriodStart: null,
       currentPeriodEnd: null,
       trialEnd: null,
@@ -293,6 +309,7 @@ function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): Bill
     planId: doc.planCode,
     billingCycle: doc.billingCycle,
     cancelAtPeriodEnd: doc.cancelAtPeriodEnd,
+    autoRenewalEnabled: isAutoRenewalEnabled(doc),
     currentPeriodStart: iso(doc.currentPeriodStart),
     currentPeriodEnd: iso(doc.currentPeriodEnd),
     trialEnd: iso(doc.trialEnd),
@@ -311,6 +328,7 @@ function mapSubscription(doc: IBillingSubscriptionDocument): BillingSubscription
     trialStart: iso(doc.trialStart),
     trialEnd: iso(doc.trialEnd),
     cancelAtPeriodEnd: doc.cancelAtPeriodEnd,
+    autoRenewalEnabled: isAutoRenewalEnabled(doc),
     canceledAt: iso(doc.canceledAt),
     pausedAt: iso(doc.pausedAt),
     providerSubscriptionId: doc.providerSubscriptionId ?? null,
@@ -505,6 +523,25 @@ async function invalidateUsageOverviewCacheSafely(
     logger.warn('Failed to invalidate usage overview cache after billing change.', {
       service: 'billing',
       operation: 'billing.usage_cache_invalidation',
+      userId: userId.toString(),
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function invalidateBillingDependentCachesSafely(
+  userId: Types.ObjectId,
+  context: JsonObject = {},
+): Promise<void> {
+  await invalidateUsageOverviewCacheSafely(userId, context);
+
+  try {
+    await invalidateDashboardOverviewCache(userId);
+  } catch (error) {
+    logger.warn('Failed to invalidate dashboard overview cache after billing change.', {
+      service: 'billing',
+      operation: 'billing.dashboard_cache_invalidation',
       userId: userId.toString(),
       ...context,
       error: error instanceof Error ? error.message : String(error),
@@ -1706,7 +1743,7 @@ export class BillingService {
             hostedInvoiceUrl: invoice.hostedInvoiceUrl,
             invoicePdfUrl: invoice.invoicePdfUrl,
             dueAt: invoice.dueAt,
-            paidAt: invoice.paidAt,
+            paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? invoice.createdAt : invoice.paidAt,
             periodStart: invoice.periodStart,
             periodEnd: invoice.periodEnd,
             providerCreatedAt: invoice.createdAt,
@@ -2168,6 +2205,7 @@ export class BillingService {
         planId: input.planId,
         billingCycle: input.billingCycle,
         cancelAtPeriodEnd: false,
+        autoRenewalEnabled: true,
         currentPeriodStart: null,
         currentPeriodEnd: null,
         trialEnd: null,
@@ -2255,9 +2293,123 @@ export class BillingService {
         planId: subscription.planCode,
         billingCycle: subscription.billingCycle,
         cancelAtPeriodEnd: true,
+        autoRenewalEnabled: false,
         currentPeriodStart: iso(subscription.currentPeriodStart),
         currentPeriodEnd: iso(subscription.currentPeriodEnd),
         trialEnd: iso(subscription.trialEnd),
+      }),
+    );
+  }
+
+  async updateAutoRenewal(userId: Types.ObjectId, input: UpdateAutoRenewalRequest): Promise<UpdateAutoRenewalResponse['subscription']> {
+    const subscription = await this.requireOwnedSubscription(userId, AUTO_RENEWAL_SUBSCRIPTION_STATUSES);
+    if (!subscription.providerSubscriptionId) {
+      throw new AppError('Subscription is missing provider identity.', 409, 'SUBSCRIPTION_PROVIDER_MISSING');
+    }
+
+    const currentEnabled = isAutoRenewalEnabled(subscription);
+    if (currentEnabled === input.enabled) {
+      return mapOverviewSubscription(subscription);
+    }
+
+    const key = `billing:auto-renewal:${deterministicKey([
+      subscription._id.toString(),
+      subscription.updatedAt?.toISOString() ?? '',
+      String(subscription.cancelAtPeriodEnd),
+      String(input.enabled),
+    ])}`;
+
+    return this.runIdempotent(
+      key,
+      'updateAutoRenewal',
+      {
+        subscriptionId: subscription._id.toString(),
+        enabled: input.enabled,
+      },
+      async () => {
+        const gatewaySubscription = await this.gateway.updateSubscriptionAutoRenewal(subscription.providerSubscriptionId ?? '', {
+          enabled: input.enabled,
+          idempotencyKey: key,
+        });
+        const fields: Partial<Pick<IBillingSubscriptionDocument, 'cancelAtPeriodEnd' | 'currentPeriodStart' | 'currentPeriodEnd'>> = {
+          cancelAtPeriodEnd: gatewaySubscription.cancelAtPeriodEnd,
+        };
+        if (gatewaySubscription.currentPeriodStart) fields.currentPeriodStart = gatewaySubscription.currentPeriodStart;
+        if (gatewaySubscription.currentPeriodEnd) fields.currentPeriodEnd = gatewaySubscription.currentPeriodEnd;
+
+        const updated = await billingRepository.withTransaction(async (session) => {
+          const doc = await billingRepository.updateSubscriptionState(
+            subscription._id,
+            subscription.status,
+            fields,
+            session,
+          );
+          if (!doc) throw new AppError('Subscription not found.', 404, 'SUBSCRIPTION_NOT_FOUND');
+
+          await this.auditService.record(
+            {
+              userId,
+              customerId: subscription.customerId,
+              subscriptionId: subscription._id,
+              action: 'subscription.auto_renewal_updated',
+              outcome: 'SUCCESS',
+              before: {
+                autoRenewalEnabled: currentEnabled,
+                cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+              },
+              after: {
+                autoRenewalEnabled: isAutoRenewalEnabled(doc),
+                cancelAtPeriodEnd: doc.cancelAtPeriodEnd,
+              },
+              metadata: { reason: input.reason ?? null },
+            },
+            { actorType: 'USER', actorId: userId.toString() },
+            session,
+          );
+
+          await notificationsService.createNotification(userId, {
+            kind: 'billing',
+            severity: input.enabled ? 'info' : 'warning',
+            title: input.enabled ? 'Auto-renewal enabled' : 'Auto-renewal disabled',
+            message: input.enabled
+              ? 'Your subscription will renew automatically at the end of the current period.'
+              : `Your plan remains active until ${doc.currentPeriodEnd?.toLocaleDateString() ?? 'the end of the period'}, then it will end.`,
+          });
+          return doc;
+        });
+
+        await invalidateUsageOverviewCacheSafely(userId, {
+          source: 'updateAutoRenewal',
+          subscriptionId: updated._id.toString(),
+          autoRenewalEnabled: isAutoRenewalEnabled(updated),
+        });
+
+        const response = mapOverviewSubscription(updated);
+        return {
+          value: response,
+          response: {
+            subscriptionId: response.subscriptionId,
+            status: response.status,
+            planId: response.planId,
+            billingCycle: response.billingCycle,
+            cancelAtPeriodEnd: response.cancelAtPeriodEnd,
+            autoRenewalEnabled: response.autoRenewalEnabled,
+            currentPeriodStart: response.currentPeriodStart,
+            currentPeriodEnd: response.currentPeriodEnd,
+            trialEnd: response.trialEnd,
+          },
+        };
+      },
+      (response) => ({
+        subscriptionId: readString(response, 'subscriptionId') ?? subscription._id.toString(),
+        status: (readString(response, 'status') as BillingSubscriptionStatus | undefined) ?? subscription.status,
+        planId: (readString(response, 'planId') as BillingPlanId | undefined) ?? subscription.planCode,
+        billingCycle: (readString(response, 'billingCycle') as BillingCycle | undefined) ?? subscription.billingCycle,
+        cancelAtPeriodEnd: readBoolean(response, 'cancelAtPeriodEnd') ?? !input.enabled,
+        autoRenewalEnabled: readBoolean(response, 'autoRenewalEnabled') ?? input.enabled,
+        currentPeriodStart: readString(response, 'currentPeriodStart') ?? iso(subscription.currentPeriodStart),
+        currentPeriodEnd: readString(response, 'currentPeriodEnd') ?? iso(subscription.currentPeriodEnd),
+        trialEnd: readString(response, 'trialEnd') ?? iso(subscription.trialEnd),
       }),
     );
   }

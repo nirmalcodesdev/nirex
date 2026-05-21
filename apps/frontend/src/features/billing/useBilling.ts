@@ -15,6 +15,7 @@ import type {
   ProrationPreviewQuery,
   ResumeSubscriptionRequest,
   RetryPaymentRequest,
+  UpdateAutoRenewalRequest,
 } from "@nirex/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { billingApi } from "./billingApi";
@@ -132,6 +133,14 @@ export function useCancelSubscriptionMutation() {
   const invalidate = useBillingInvalidation();
   return useMutation({
     mutationFn: (input: CancelSubscriptionRequest) => billingApi.cancelSubscription(input),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateAutoRenewalMutation() {
+  const invalidate = useBillingInvalidation();
+  return useMutation({
+    mutationFn: (input: UpdateAutoRenewalRequest) => billingApi.updateAutoRenewal(input),
     onSuccess: invalidate,
   });
 }

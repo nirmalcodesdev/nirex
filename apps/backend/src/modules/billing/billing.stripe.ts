@@ -192,13 +192,18 @@ function normalizeStripeInvoice(invoice: StripeInvoiceWithId): GatewayInvoice {
   const discountMinor = Array.isArray(invoice.total_discount_amounts)
     ? invoice.total_discount_amounts.reduce((sum, item) => sum + (item.amount ?? 0), 0)
     : 0;
+  const status = statusMap[invoice.status ?? 'open'] ?? 'OPEN';
+  const createdAt = toDateFromUnix(invoice.created ?? undefined);
+  const paidAt =
+    toDateFromUnix(invoice.status_transitions?.paid_at ?? undefined) ??
+    (status === 'PAID' ? createdAt : undefined);
 
   return {
     id: invoice.id,
     providerSubscriptionId: subscription ?? undefined,
     invoiceNumber: invoice.number ?? undefined,
     description: invoice.description ?? undefined,
-    status: statusMap[invoice.status ?? 'open'] ?? 'OPEN',
+    status,
     currency: invoice.currency ?? 'usd',
     subtotalMinor: invoice.subtotal ?? 0,
     taxMinor,
@@ -210,10 +215,10 @@ function normalizeStripeInvoice(invoice: StripeInvoiceWithId): GatewayInvoice {
     hostedInvoiceUrl: invoice.hosted_invoice_url ?? undefined,
     invoicePdfUrl: invoice.invoice_pdf ?? undefined,
     dueAt: toDateFromUnix(invoice.due_date ?? undefined),
-    paidAt: toDateFromUnix(invoice.status_transitions?.paid_at ?? undefined),
+    paidAt,
     periodStart: toDateFromUnix(readNumber(invoiceRecord ?? {}, 'period_start')),
     periodEnd: toDateFromUnix(readNumber(invoiceRecord ?? {}, 'period_end')),
-    createdAt: toDateFromUnix(invoice.created ?? undefined),
+    createdAt,
   };
 }
 
@@ -537,6 +542,17 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
       : await this.call('cancelSubscriptionNow', undefined, () =>
         this.stripe.subscriptions.cancel(id, undefined, requestOptions(params.idempotencyKey)),
       );
+    return normalizeStripeSubscription(subscription);
+  }
+
+  async updateSubscriptionAutoRenewal(id: string, params: { enabled: boolean; idempotencyKey: string }): Promise<GatewaySubscription> {
+    const subscription = await this.call('updateSubscriptionAutoRenewal', undefined, () =>
+      this.stripe.subscriptions.update(
+        id,
+        { cancel_at_period_end: !params.enabled },
+        requestOptions(params.idempotencyKey),
+      ),
+    );
     return normalizeStripeSubscription(subscription);
   }
 

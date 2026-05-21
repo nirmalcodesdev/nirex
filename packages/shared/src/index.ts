@@ -393,6 +393,8 @@ export type {
   ResumeSubscriptionResponse,
   RetryPaymentRequest,
   StripeWebhookResponse,
+  UpdateAutoRenewalRequest,
+  UpdateAutoRenewalResponse,
 } from './domain/billing/index.js';
 
 export {
@@ -413,6 +415,7 @@ export {
   invoiceIdParamSchema,
   changePlanSchema,
   cancelSubscriptionSchema,
+  updateAutoRenewalSchema,
   pauseSubscriptionSchema,
   resumeSubscriptionSchema,
   retryPaymentSchema,
@@ -427,6 +430,7 @@ export {
   type AttachPaymentMethodSchema,
   type ChangePlanSchema,
   type CancelSubscriptionSchema,
+  type UpdateAutoRenewalSchema,
   type BillingCatalogPlanId,
   type BillingPlanCatalogEntry,
 } from './domain/billing/index.js';

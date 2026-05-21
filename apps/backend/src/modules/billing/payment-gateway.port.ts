@@ -166,6 +166,7 @@ export interface PaymentGatewayPort {
   createSubscription(params: GatewaySubscriptionParams): Promise<GatewaySubscription>;
   retrieveSubscription(id: string): Promise<GatewaySubscription>;
   updateSubscription(id: string, params: Partial<GatewaySubscriptionParams>): Promise<GatewaySubscription>;
+  updateSubscriptionAutoRenewal(id: string, params: { enabled: boolean; idempotencyKey: string }): Promise<GatewaySubscription>;
   cancelSubscription(id: string, params: { atPeriodEnd: boolean; idempotencyKey: string }): Promise<GatewaySubscription>;
   pauseSubscription(id: string, params: { idempotencyKey: string }): Promise<GatewaySubscription>;
   resumeSubscription(id: string, params: { idempotencyKey: string }): Promise<GatewaySubscription>;

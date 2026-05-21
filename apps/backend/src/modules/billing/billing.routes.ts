@@ -16,6 +16,7 @@ import {
   prorationPreviewQuerySchema,
   resumeSubscriptionSchema,
   retryPaymentSchema,
+  updateAutoRenewalSchema,
 } from '@nirex/shared';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
 import { authenticateUser, requireApiKeyScopes } from '../../middleware/authenticateUser.js';
@@ -123,6 +124,20 @@ protectedRouter.post(
   requireApiKeyScopes(['billing:write']),
   validate(cancelSubscriptionSchema),
   asyncWrapper(billingController.cancelSubscription),
+);
+protectedRouter.patch(
+  '/subscription/auto-renewal',
+  billingMutationLimiter,
+  requireApiKeyScopes(['billing:write']),
+  validate(updateAutoRenewalSchema),
+  asyncWrapper(billingController.updateAutoRenewal),
+);
+protectedRouter.post(
+  '/subscription/auto-renewal',
+  billingMutationLimiter,
+  requireApiKeyScopes(['billing:write']),
+  validate(updateAutoRenewalSchema),
+  asyncWrapper(billingController.updateAutoRenewal),
 );
 protectedRouter.post(
   '/subscription/pause',

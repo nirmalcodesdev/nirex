@@ -114,6 +114,7 @@ export interface BillingSubscription {
   trialStart: string | null;
   trialEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  autoRenewalEnabled: boolean;
   canceledAt: string | null;
   pausedAt: string | null;
   providerSubscriptionId: string | null;
@@ -186,6 +187,7 @@ export interface BillingOverviewSubscription {
   planId: BillingPlanId;
   billingCycle: BillingCycle | null;
   cancelAtPeriodEnd: boolean;
+  autoRenewalEnabled: boolean;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   trialEnd: string | null;
@@ -307,6 +309,15 @@ export interface CancelSubscriptionRequest {
 }
 
 export interface CancelSubscriptionResponse {
+  subscription: BillingOverviewSubscription;
+}
+
+export interface UpdateAutoRenewalRequest {
+  enabled: boolean;
+  reason?: string;
+}
+
+export interface UpdateAutoRenewalResponse {
   subscription: BillingOverviewSubscription;
 }
 

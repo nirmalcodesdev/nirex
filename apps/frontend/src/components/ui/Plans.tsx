@@ -113,11 +113,14 @@ export function Plans() {
     });
 
     const currentPlanId = overviewQuery.data?.currentPlan.id;
+    const hasActiveCurrentSubscription =
+      overviewQuery.data?.subscription.status !== "NONE" &&
+      overviewQuery.data?.subscription.status !== "CANCELED";
 
     return PLAN_ORDER.map((planId) => {
       const apiPlan = apiPlans.get(planId);
       const catalogPlan = BILLING_PLAN_CATALOG[planId];
-      const isCurrent = currentPlanId === planId;
+      const isCurrent = hasActiveCurrentSubscription && currentPlanId === planId;
       const checkoutEnabled = apiPlan?.checkoutEnabled ?? planId === "pro";
       const price = getDisplayPlanPrices(apiPlan, planId);
 

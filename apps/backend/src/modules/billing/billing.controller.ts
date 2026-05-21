@@ -14,6 +14,7 @@ import type {
   ProrationPreviewQuery,
   ResumeSubscriptionRequest,
   RetryPaymentRequest,
+  UpdateAutoRenewalRequest,
 } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
 import { billingService } from './billing.service.js';
@@ -107,6 +108,14 @@ export async function cancelSubscription(req: Request, res: Response): Promise<v
   const subscription = await billingService.cancelSubscription(
     getUserId(req),
     req.body as CancelSubscriptionRequest,
+  );
+  res.json({ status: 'success', data: { subscription } });
+}
+
+export async function updateAutoRenewal(req: Request, res: Response): Promise<void> {
+  const subscription = await billingService.updateAutoRenewal(
+    getUserId(req),
+    req.body as UpdateAutoRenewalRequest,
   );
   res.json({ status: 'success', data: { subscription } });
 }

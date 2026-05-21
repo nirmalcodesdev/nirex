@@ -17,6 +17,8 @@ All endpoints are under `/api/v1/billing` unless noted. Authenticated endpoints 
 - `PATCH /payment-methods/:paymentMethodId/default` - owner-guarded mutation; sets default method.
 - `POST /subscription/change-plan` - authenticated mutation; request `ChangePlanRequest`.
 - `POST /subscription/cancel` - authenticated mutation; request `CancelSubscriptionRequest`.
+- `PATCH /subscription/auto-renewal` - authenticated mutation; request `UpdateAutoRenewalRequest`.
+- `POST /subscription/auto-renewal` - compatibility alias for auto-renewal updates.
 - `POST /subscription/pause` - authenticated mutation; request `PauseSubscriptionRequest`.
 - `POST /subscription/resume` - authenticated mutation; request `ResumeSubscriptionRequest`.
 - `POST /subscription/retry-payment` - authenticated mutation; request `RetryPaymentRequest`.

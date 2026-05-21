@@ -616,9 +616,27 @@ export class BillingRepository {
       {
         $match: {
           userId,
-          status: 'PAID',
-          paidAt: { $gte: start, $lt: end },
+          // Also catch invoices where Stripe collected payment but hasn't yet
+          // transitioned status from 'open' → 'paid' (brief post-checkout window).
+          $or: [{ status: 'PAID' }, { amountPaidMinor: { $gt: 0 } }],
           deletedAt: { $exists: false },
+        },
+      },
+      {
+        $addFields: {
+          effectivePaidAt: {
+            // Cap to $$NOW: Stripe test clocks produce future paidAt values.
+            // In production paidAt is always past, so $min is a no-op there.
+            $min: [
+              { $ifNull: ['$paidAt', { $ifNull: ['$providerCreatedAt', '$createdAt'] }] },
+              '$$NOW',
+            ],
+          },
+        },
+      },
+      {
+        $match: {
+          effectivePaidAt: { $gte: start, $lt: end },
         },
       },
       { $group: { _id: null, totalPaid: { $sum: '$amountPaidMinor' } } },

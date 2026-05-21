@@ -23,6 +23,7 @@ export {
   invoiceIdParamSchema,
   changePlanSchema,
   cancelSubscriptionSchema,
+  updateAutoRenewalSchema,
   pauseSubscriptionSchema,
   resumeSubscriptionSchema,
   retryPaymentSchema,
@@ -37,4 +38,5 @@ export {
   type AttachPaymentMethodSchema,
   type ChangePlanSchema,
   type CancelSubscriptionSchema,
+  type UpdateAutoRenewalSchema,
 } from './schemas.js';
