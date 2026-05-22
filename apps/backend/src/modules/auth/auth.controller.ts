@@ -208,7 +208,10 @@ export async function signoutAll(req: Request, res: Response): Promise<void> {
   // Also blacklist the current access token
   await blacklistCurrentAccessToken(req);
 
-  await authService.signoutAll(req.userId!);
+  await authService.signoutAll(req.userId!, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
   clearAuthCookies(res);
 
   audit.signout(req.userId!, getIp(req), {
@@ -258,7 +261,10 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
 // POST /api/v1/auth/change-password  (requires authentication)
 export async function changePassword(req: Request, res: Response): Promise<void> {
   const { currentPassword, newPassword } = req.body as ChangePasswordRequest;
-  await authService.changePassword(req.userId!, currentPassword, newPassword);
+  await authService.changePassword(req.userId!, currentPassword, newPassword, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
   clearAuthCookies(res);
 
   audit.passwordChange(req.userId!, getIp(req), {
@@ -416,7 +422,10 @@ export async function listSessions(req: Request, res: Response): Promise<void> {
 // DELETE /api/v1/auth/sessions/:sessionId  (requires authentication)
 export async function deleteSession(req: Request, res: Response): Promise<void> {
   const { sessionId } = req.params as { sessionId: string };
-  await authService.revokeSession(sessionId);
+  await authService.revokeSession(sessionId, {
+    actingUserId: req.userId!,
+    requestContext: { ipAddress: getIp(req), deviceInfo: getDeviceInfo(req) },
+  });
 
   audit.sessionRevoked(req.userId!, sessionId, getIp(req), {
     revokedBy: req.sessionId === sessionId ? 'self' : 'other',
@@ -480,7 +489,10 @@ export async function terminateDevices(req: Request, res: Response): Promise<voi
         return { deviceId, status: 'skipped', reason: 'Cannot terminate current session via this endpoint' };
       }
       try {
-        await authService.revokeSession(deviceId);
+        await authService.revokeSession(deviceId, {
+          actingUserId: req.userId!,
+          requestContext: { ipAddress: getIp(req), deviceInfo: getDeviceInfo(req) },
+        });
         return { deviceId, status: 'terminated' };
       } catch (err) {
         return { deviceId, status: 'error', error: (err as Error).message };
@@ -541,7 +553,10 @@ export async function beginTwoFactorSetup(req: Request, res: Response): Promise<
 // POST /api/v1/auth/2fa/verify-setup (requires authentication)
 export async function verifyTwoFactorSetup(req: Request, res: Response): Promise<void> {
   const { code } = req.body as { code: string };
-  const data = await authService.verifyTwoFactorSetup(req.userId!, code);
+  const data = await authService.verifyTwoFactorSetup(req.userId!, code, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
 
   logSecurity({
     type: 'AUTH_SUCCESS',
@@ -560,7 +575,10 @@ export async function verifyTwoFactorSetup(req: Request, res: Response): Promise
 // POST /api/v1/auth/2fa/disable (requires authentication)
 export async function disableTwoFactor(req: Request, res: Response): Promise<void> {
   const { code } = req.body as { code: string };
-  await authService.disableTwoFactor(req.userId!, code);
+  await authService.disableTwoFactor(req.userId!, code, {
+    ipAddress: getIp(req),
+    deviceInfo: getDeviceInfo(req),
+  });
 
   logSecurity({
     type: 'AUTH_SUCCESS',

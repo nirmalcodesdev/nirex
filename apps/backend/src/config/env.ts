@@ -100,6 +100,24 @@ const envSchema = z.object({
     .string()
     .default('true')
     .transform((v) => v.toLowerCase() === 'true'),
+  SECURITY_EMAIL_NOTIFICATIONS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() === 'true'),
+  USAGE_EMAIL_NOTIFICATIONS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() === 'true'),
+  USAGE_QUOTA_WARNING_THRESHOLDS: z
+    .string()
+    .default('0.8,1.0')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => parseFloat(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0 && n <= 1)
+        .sort((a, b) => a - b),
+    ),
   BILLING_DEFAULT_SUCCESS_URL: z.string().url().optional(),
   BILLING_DEFAULT_CANCEL_URL: z.string().url().optional(),
   BILLING_ADMIN_USER_IDS: z

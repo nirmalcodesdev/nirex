@@ -7,12 +7,21 @@ import { hashApiKey, timingSafeEqualHex } from '../../utils/crypto.js';
 import { logger } from '../../utils/logger.js';
 import { apiKeyRepository } from './api-key.repository.js';
 import { notificationsService } from '../notifications/notifications.service.js';
+import { userRepository } from '../user/user.repository.js';
+import {
+  sendApiKeyCreatedEmail,
+  sendApiKeyRevokedEmail,
+  sendApiKeyRotatedEmail,
+} from '../../utils/mailer.js';
+import { sendNotificationEmailSafely } from '../../utils/notify-email.js';
+import type { RequestContext } from '../../utils/request-context.js';
 
 export interface CreateApiKeyInput {
   name: string;
   scopes: ApiKeyScope[];
   expiresAt?: Date;
   createdBySessionId?: string;
+  requestContext?: RequestContext;
 }
 
 export interface ApiKeyAuthResult {
@@ -155,6 +164,29 @@ export class ApiKeyService {
       },
     });
 
+    void this.notifyApiKeyEventByEmail({
+      userId,
+      notificationType: 'api_key_created',
+      keyName: doc.name,
+      keyPrefix: doc.keyPrefix,
+      scopes: doc.scopes,
+      expiresAt: doc.expiresAt ?? null,
+      eventTime: doc.createdAt,
+      requestContext: input.requestContext,
+      send: (params) =>
+        sendApiKeyCreatedEmail({
+          to: params.email,
+          customerName: params.fullName,
+          keyName: doc.name,
+          keyPrefix: doc.keyPrefix,
+          scopes: doc.scopes,
+          expiresAt: doc.expiresAt ?? null,
+          eventTime: doc.createdAt,
+          ipAddress: input.requestContext?.ipAddress,
+          deviceInfo: input.requestContext?.deviceInfo,
+        }),
+    });
+
     return {
       apiKey,
       key: {
@@ -198,7 +230,12 @@ export class ApiKeyService {
     }));
   }
 
-  async revokeApiKey(userId: Types.ObjectId, apiKeyId: string, reason?: string): Promise<void> {
+  async revokeApiKey(
+    userId: Types.ObjectId,
+    apiKeyId: string,
+    reason?: string,
+    requestContext?: RequestContext,
+  ): Promise<void> {
     const existing = await apiKeyRepository.findByIdAndUser(apiKeyId, userId);
     if (!existing) {
       throw new AppError('API key not found', 404, 'API_KEY_NOT_FOUND');
@@ -218,12 +255,32 @@ export class ApiKeyService {
         reason: reason ?? null,
       },
     });
+
+    void this.notifyApiKeyEventByEmail({
+      userId,
+      notificationType: 'api_key_revoked',
+      keyName: existing.name,
+      keyPrefix: existing.keyPrefix,
+      requestContext,
+      send: (params) =>
+        sendApiKeyRevokedEmail({
+          to: params.email,
+          customerName: params.fullName,
+          keyName: existing.name,
+          keyPrefix: existing.keyPrefix,
+          reason: reason ?? null,
+          eventTime: new Date(),
+          ipAddress: requestContext?.ipAddress,
+          deviceInfo: requestContext?.deviceInfo,
+        }),
+    });
   }
 
   async rotateApiKey(
     userId: Types.ObjectId,
     apiKeyId: string,
     sessionId?: string,
+    requestContext?: RequestContext,
   ): Promise<{
     apiKey: string;
     key: {
@@ -254,6 +311,9 @@ export class ApiKeyService {
       scopes: existing.scopes,
       expiresAt: existing.expiresAt,
       createdBySessionId: sessionId,
+      // Suppress the "created" email — the rotation email below is the one
+      // the user should see for this combined revoke+create operation.
+      requestContext: undefined,
     });
     await this.createSecurityNotification(userId, {
       severity: 'info',
@@ -265,7 +325,57 @@ export class ApiKeyService {
         newApiKeyId: created.key.id,
       },
     });
+
+    void this.notifyApiKeyEventByEmail({
+      userId,
+      notificationType: 'api_key_rotated',
+      keyName: existing.name,
+      keyPrefix: created.key.keyPrefix,
+      requestContext,
+      send: (params) =>
+        sendApiKeyRotatedEmail({
+          to: params.email,
+          customerName: params.fullName,
+          keyName: existing.name,
+          keyPrefix: created.key.keyPrefix,
+          eventTime: new Date(),
+          ipAddress: requestContext?.ipAddress,
+          deviceInfo: requestContext?.deviceInfo,
+        }),
+    });
     return created;
+  }
+
+  private async notifyApiKeyEventByEmail(input: {
+    userId: Types.ObjectId;
+    notificationType: string;
+    keyName: string;
+    keyPrefix: string;
+    scopes?: ApiKeyScope[];
+    expiresAt?: Date | null;
+    eventTime?: Date;
+    requestContext?: RequestContext;
+    send: (params: { email: string; fullName: string | null }) => Promise<void>;
+  }): Promise<void> {
+    try {
+      const user = await userRepository.findById(input.userId);
+      if (!user?.email) return;
+      await sendNotificationEmailSafely({
+        category: 'security',
+        notificationType: input.notificationType,
+        send: () => input.send({ email: user.email, fullName: user.fullName ?? null }),
+        context: {
+          userId: input.userId.toHexString(),
+          keyPrefix: input.keyPrefix,
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to dispatch API key email notification.', {
+        userId: input.userId.toHexString(),
+        notificationType: input.notificationType,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async authenticateApiKey(

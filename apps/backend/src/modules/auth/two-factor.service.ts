@@ -4,6 +4,14 @@ import { env } from '../../config/env.js';
 import { AppError } from '../../types/index.js';
 import { hashToken } from '../../utils/crypto.js';
 import { userRepository } from '../user/user.repository.js';
+import { logger } from '../../utils/logger.js';
+import { notificationsService } from '../notifications/notifications.service.js';
+import {
+  sendTwoFactorEnabledEmail,
+  sendTwoFactorDisabledEmail,
+} from '../../utils/mailer.js';
+import { sendNotificationEmailSafely } from '../../utils/notify-email.js';
+import type { RequestContext } from '../../utils/request-context.js';
 
 const TOTP_PERIOD_SECONDS = 30;
 const TOTP_DIGITS = 6;
@@ -247,6 +255,7 @@ export class TwoFactorService {
   async verifyAndEnable(
     userId: Types.ObjectId,
     code: string,
+    requestContext?: RequestContext,
   ): Promise<{ backupCodes: string[] }> {
     const user = await userRepository.findByIdWithTwoFactorSecrets(userId);
     if (!user) {
@@ -284,10 +293,16 @@ export class TwoFactorService {
       new Date(),
     );
 
+    void this.notifyTwoFactorEvent(userId, 'enabled', requestContext);
+
     return { backupCodes };
   }
 
-  async disable(userId: Types.ObjectId, codeOrBackupCode: string): Promise<void> {
+  async disable(
+    userId: Types.ObjectId,
+    codeOrBackupCode: string,
+    requestContext?: RequestContext,
+  ): Promise<void> {
     const user = await userRepository.findByIdWithTwoFactorSecrets(userId);
     if (!user) {
       throw new AppError('User not found', 404, 'USER_NOT_FOUND');
@@ -308,6 +323,71 @@ export class TwoFactorService {
     }
 
     await userRepository.disableTwoFactor(userId);
+
+    void this.notifyTwoFactorEvent(userId, 'disabled', requestContext);
+  }
+
+  private async notifyTwoFactorEvent(
+    userId: Types.ObjectId,
+    event: 'enabled' | 'disabled',
+    requestContext?: RequestContext,
+  ): Promise<void> {
+    const isEnabled = event === 'enabled';
+    const occurredAt = new Date();
+
+    try {
+      await notificationsService.createNotification(userId, {
+        kind: 'security',
+        severity: isEnabled ? 'success' : 'warning',
+        title: isEnabled
+          ? 'Two-factor authentication enabled'
+          : 'Two-factor authentication disabled',
+        message: isEnabled
+          ? 'Two-factor authentication is now required when signing in from new devices.'
+          : 'Two-factor authentication has been turned off. Your account is now protected only by your password.',
+        metadata: {
+          event: `two_factor.${event}`,
+          ipAddress: requestContext?.ipAddress ?? null,
+          deviceInfo: requestContext?.deviceInfo ?? null,
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to create two-factor notification.', {
+        userId: userId.toHexString(),
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    try {
+      const owner = await userRepository.findById(userId);
+      if (!owner?.email) return;
+      await sendNotificationEmailSafely({
+        category: 'security',
+        notificationType: `two_factor_${event}`,
+        send: () => {
+          const payload = {
+            to: owner.email,
+            customerName: owner.fullName ?? null,
+            eventTime: occurredAt,
+            ipAddress: requestContext?.ipAddress,
+            deviceInfo: requestContext?.deviceInfo,
+          };
+          return isEnabled
+            ? sendTwoFactorEnabledEmail(payload)
+            : sendTwoFactorDisabledEmail(payload);
+        },
+        context: {
+          userId: userId.toHexString(),
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to dispatch two-factor email notification.', {
+        userId: userId.toHexString(),
+        event,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async assertSecondFactorForSignin(
