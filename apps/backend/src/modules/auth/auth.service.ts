@@ -13,13 +13,24 @@ import {
   signAccessToken,
 } from '../../utils/crypto.js';
 import { logger } from '../../utils/logger.js';
-import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordResetSuccessEmail, sendSuspiciousSigninAlert } from '../../utils/mailer.js';
+import {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendPasswordResetSuccessEmail,
+  sendSuspiciousSigninAlert,
+  sendPasswordChangedInSessionEmail,
+  sendSignedOutEverywhereEmail,
+  sendSessionRevokedEmail,
+} from '../../utils/mailer.js';
+import { sendNotificationEmailSafely } from '../../utils/notify-email.js';
+import { notificationsService } from '../notifications/notifications.service.js';
 import { userRepository } from '../user/user.repository.js';
 import { tokenService } from '../token/token.service.js';
 import { sessionService } from '../session/session.service.js';
 import { userService } from '../user/user.service.js';
 import type { IUserDocument } from '../user/user.model.js';
 import { twoFactorService } from './two-factor.service.js';
+import type { RequestContext } from '../../utils/request-context.js';
 
 // Re-export shared types for convenience
 export type SignupInput = SignUpRequest;
@@ -168,12 +179,20 @@ export async function beginTwoFactorSetup(userId: string) {
   return twoFactorService.beginSetup(new Types.ObjectId(userId));
 }
 
-export async function verifyTwoFactorSetup(userId: string, code: string) {
-  return twoFactorService.verifyAndEnable(new Types.ObjectId(userId), code);
+export async function verifyTwoFactorSetup(
+  userId: string,
+  code: string,
+  requestContext?: RequestContext,
+) {
+  return twoFactorService.verifyAndEnable(new Types.ObjectId(userId), code, requestContext);
 }
 
-export async function disableTwoFactor(userId: string, code: string): Promise<void> {
-  await twoFactorService.disable(new Types.ObjectId(userId), code);
+export async function disableTwoFactor(
+  userId: string,
+  code: string,
+  requestContext?: RequestContext,
+): Promise<void> {
+  await twoFactorService.disable(new Types.ObjectId(userId), code, requestContext);
 }
 
 // ── Refresh ───────────────────────────────────────────────────────────────────
@@ -198,8 +217,28 @@ export async function signout(sessionId: string): Promise<void> {
 }
 
 // ── Sign Out All Sessions ──────────────────────────────────────────────────────
-export async function signoutAll(userId: string): Promise<void> {
-  await sessionService.revokeAllSessions(new Types.ObjectId(userId));
+export async function signoutAll(
+  userId: string,
+  requestContext?: RequestContext,
+): Promise<void> {
+  const userObjectId = new Types.ObjectId(userId);
+  await sessionService.revokeAllSessions(userObjectId);
+  void notifySecurityEvent({
+    userId: userObjectId,
+    notificationType: 'sign_out_all',
+    title: 'Signed out of all devices',
+    message: 'You signed out of every active session on your account.',
+    severity: 'info',
+    requestContext,
+    sendEmail: ({ email, fullName }) =>
+      sendSignedOutEverywhereEmail({
+        to: email,
+        customerName: fullName,
+        eventTime: new Date(),
+        ipAddress: requestContext?.ipAddress,
+        deviceInfo: requestContext?.deviceInfo,
+      }),
+  });
 }
 
 // ── Forgot Password ───────────────────────────────────────────────────────────
@@ -277,6 +316,7 @@ export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string,
+  requestContext?: RequestContext,
 ): Promise<void> {
   const user = (await userRepository.findById(userId)) as IUserDocument | null;
   if (!user) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
@@ -303,9 +343,27 @@ export async function changePassword(
   }
 
   const newHash = await hashPassword(normalizedPassword);
-  await userService.updatePassword(new Types.ObjectId(userId), newHash);
+  const userObjectId = new Types.ObjectId(userId);
+  await userService.updatePassword(userObjectId, newHash);
   // Revoke all sessions so other devices are signed out
-  await sessionService.revokeAllSessions(new Types.ObjectId(userId));
+  await sessionService.revokeAllSessions(userObjectId);
+
+  void notifySecurityEvent({
+    userId: userObjectId,
+    notificationType: 'password_changed_in_session',
+    title: 'Password changed',
+    message: 'Your password was changed. For your security, all other active sessions were signed out.',
+    severity: 'warning',
+    requestContext,
+    sendEmail: () =>
+      sendPasswordChangedInSessionEmail({
+        to: user.email,
+        customerName: user.fullName ?? null,
+        eventTime: new Date(),
+        ipAddress: requestContext?.ipAddress,
+        deviceInfo: requestContext?.deviceInfo,
+      }),
+  });
 }
 
 // ── Get Current User ──────────────────────────────────────────────────────────
@@ -319,8 +377,91 @@ export async function listSessions(userId: string) {
 }
 
 // ── Revoke a Specific Session ─────────────────────────────────────────────────
-export async function revokeSession(sessionId: string): Promise<void> {
-  await sessionService.revokeSession(new Types.ObjectId(sessionId));
+export async function revokeSession(
+  sessionId: string,
+  options: {
+    actingUserId?: string;
+    requestContext?: RequestContext;
+  } = {},
+): Promise<void> {
+  const sessionObjectId = new Types.ObjectId(sessionId);
+  const session = await sessionService.getSession(sessionObjectId);
+  await sessionService.revokeSession(sessionObjectId);
+
+  if (!session) return;
+  // Only notify when the user revoked one of their OWN sessions and it isn't
+  // the session they're acting from (signout of current device is silent).
+  const isSelfAction = options.actingUserId && session.userId.toString() === options.actingUserId;
+  const isCurrentSession = options.actingUserId
+    && session._id.toString() === options.actingUserId;
+  if (!isSelfAction || isCurrentSession) return;
+
+  void notifySecurityEvent({
+    userId: session.userId,
+    notificationType: 'session_revoked',
+    title: 'A device was signed out',
+    message: 'A signed-in device on your account was terminated.',
+    severity: 'info',
+    requestContext: options.requestContext,
+    sendEmail: ({ email, fullName }) =>
+      sendSessionRevokedEmail({
+        to: email,
+        customerName: fullName,
+        eventTime: new Date(),
+        ipAddress: options.requestContext?.ipAddress,
+        deviceInfo: options.requestContext?.deviceInfo,
+        revokedDeviceInfo: session.deviceInfo ?? null,
+        revokedIp: session.ipAddress ?? null,
+      }),
+  });
+}
+
+// ── Shared helper: notify on security events (in-app + email) ─────────────────
+async function notifySecurityEvent(input: {
+  userId: Types.ObjectId;
+  notificationType: string;
+  title: string;
+  message: string;
+  severity: 'info' | 'success' | 'warning' | 'error';
+  requestContext?: RequestContext;
+  sendEmail: (params: { email: string; fullName: string | null }) => Promise<void>;
+}): Promise<void> {
+  try {
+    await notificationsService.createNotification(input.userId, {
+      kind: 'security',
+      severity: input.severity,
+      title: input.title,
+      message: input.message,
+      metadata: {
+        event: input.notificationType,
+        ipAddress: input.requestContext?.ipAddress ?? null,
+        deviceInfo: input.requestContext?.deviceInfo ?? null,
+      },
+    });
+  } catch (error) {
+    logger.warn('Failed to create security notification.', {
+      userId: input.userId.toHexString(),
+      notificationType: input.notificationType,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const owner = await userRepository.findById(input.userId);
+    if (!owner?.email) return;
+    await sendNotificationEmailSafely({
+      category: 'security',
+      notificationType: input.notificationType,
+      send: () => input.sendEmail({ email: owner.email, fullName: owner.fullName ?? null }),
+      context: { userId: input.userId.toHexString() },
+    });
+  } catch (error) {
+    logger.warn('Failed to dispatch security email notification.', {
+      userId: input.userId.toHexString(),
+      notificationType: input.notificationType,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // ── Get Session by ID ─────────────────────────────────────────────────────────

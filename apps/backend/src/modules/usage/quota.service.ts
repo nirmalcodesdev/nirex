@@ -1,6 +1,8 @@
 import { Types } from 'mongoose';
 import { DEFAULT_CREDITS_LIMIT } from '@nirex/shared';
 import { AppError } from '../../types/index.js';
+import { env } from '../../config/env.js';
+import { logger } from '../../utils/logger.js';
 import { getBillingPlan } from '../billing/billing.catalog.js';
 import { billingRepository } from '../billing/billing.repository.js';
 import type { BillingPlanId } from '../billing/billing.types.js';
@@ -15,6 +17,10 @@ import {
   QuotaDebitModel,
   type IQuotaBucketDocument,
 } from './quota.model.js';
+import { notificationsService } from '../notifications/notifications.service.js';
+import { userRepository } from '../user/user.repository.js';
+import { sendUsageThresholdEmail } from '../../utils/mailer.js';
+import { sendNotificationEmailSafely } from '../../utils/notify-email.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
@@ -309,6 +315,16 @@ export class QuotaService {
         },
       });
 
+      // Detect threshold crossings AFTER the bucket has been mutated. Notifications
+      // are deduplicated per (bucket, threshold) so the user sees one ping per
+      // crossing per period regardless of how many requests crossed it.
+      void this.notifyThresholdCrossings({
+        userId: input.userId,
+        bucket: updatedBucket,
+        planId: context.planId,
+        previousUsed: roundCredits((updatedBucket.used_credits ?? 0) - credits),
+      });
+
       return {
         debitId: debit._id.toString(),
         idempotencyKey: debit.idempotency_key,
@@ -370,6 +386,91 @@ export class QuotaService {
       { _id: updatedDebit.bucket_id },
       { $inc: { used_credits: -roundCredits(updatedDebit.credits) } }
     ).exec();
+  }
+
+  private async notifyThresholdCrossings(input: {
+    userId: Types.ObjectId;
+    bucket: IQuotaBucketDocument;
+    planId: BillingPlanId;
+    previousUsed: number;
+  }): Promise<void> {
+    const limit = Math.max(1, input.bucket.limit_credits || 1);
+    const used = roundCredits(input.bucket.used_credits || 0);
+    const previousFraction = input.previousUsed / limit;
+    const currentFraction = used / limit;
+
+    const thresholds = env.USAGE_QUOTA_WARNING_THRESHOLDS;
+    if (!thresholds.length) return;
+
+    const crossed = thresholds.filter(
+      (t) => previousFraction < t && currentFraction >= t,
+    );
+    if (!crossed.length) return;
+
+    // Only emit the highest crossed threshold this turn so a single big debit
+    // that jumps 0% → 100% sends "you're at 100%" rather than two emails.
+    const threshold = crossed[crossed.length - 1]!;
+    const planName = input.planId === 'custom'
+      ? 'Custom Plan'
+      : getBillingPlan(input.planId)?.name ?? 'Free Plan';
+    const dedupeKey = `usage:quota-threshold:${input.bucket._id.toString()}:${threshold}`;
+    const exhausted = threshold >= 1;
+
+    try {
+      await notificationsService.createNotification(input.userId, {
+        kind: 'usage',
+        severity: exhausted ? 'error' : 'warning',
+        title: exhausted
+          ? 'Credit quota reached'
+          : `You've used ${Math.round(threshold * 100)}% of your credits`,
+        message: exhausted
+          ? `You've used all the credits included with ${planName} for this period. New credit-consuming requests will be blocked until your quota resets or you upgrade.`
+          : `You've used ${Math.round(threshold * 100)}% (${used.toLocaleString('en-US')} / ${limit.toLocaleString('en-US')}) of your credits on ${planName} for the current period.`,
+        dedupe_key: dedupeKey,
+        metadata: {
+          threshold,
+          used_credits: used,
+          included_credits: limit,
+          plan_id: input.planId,
+          period_end: input.bucket.period_end.toISOString(),
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to create usage threshold notification.', {
+        userId: input.userId.toHexString(),
+        threshold,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    try {
+      const owner = await userRepository.findById(input.userId);
+      if (!owner?.email) return;
+      await sendNotificationEmailSafely({
+        category: 'usage',
+        notificationType: `usage_threshold_${Math.round(threshold * 100)}`,
+        send: () => sendUsageThresholdEmail({
+          to: owner.email,
+          customerName: owner.fullName ?? null,
+          planName,
+          thresholdPercent: threshold,
+          usedCredits: used,
+          includedCredits: limit,
+          periodEnd: input.bucket.period_end,
+        }),
+        context: {
+          userId: input.userId.toHexString(),
+          threshold,
+          bucketId: input.bucket._id.toString(),
+        },
+      });
+    } catch (error) {
+      logger.warn('Failed to dispatch usage threshold email.', {
+        userId: input.userId.toHexString(),
+        threshold,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 

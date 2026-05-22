@@ -31,6 +31,13 @@ import {
   sendBillingPaymentFailedEmail,
   sendBillingPaymentSucceededEmail,
   sendBillingSubscriptionStateEmail,
+  sendBillingSubscriptionRestoredEmail,
+  sendBillingSubscriptionCanceledByUserEmail,
+  sendBillingAutoRenewalChangedEmail,
+  sendBillingSubscriptionPausedEmail,
+  sendBillingSubscriptionResumedEmail,
+  sendBillingCancellationReversedEmail,
+  sendBillingDunningEmail,
 } from '../../utils/mailer.js';
 import { notificationsService } from '../notifications/notifications.service.js';
 import { userRepository } from '../user/user.repository.js';
@@ -977,11 +984,25 @@ export class WebhookService {
           message: `Your ${planName} subscription has been canceled.`,
         });
       } else if (status === 'ACTIVE' && existing.status === 'PAST_DUE') {
+        if (user?.email) {
+          await sendBillingEmailSafely(
+            'subscription_restored',
+            customer.userId,
+            () => sendBillingSubscriptionRestoredEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+            }),
+            { providerEventId: event.id, providerSubscriptionId },
+          );
+        }
         await notificationsService.createNotification(customer.userId, {
           kind: 'billing',
           severity: 'info',
           title: 'Subscription restored',
           message: `Your ${planName} subscription is active again. Thank you!`,
+          dedupe_key: `billing:subscription-restored:${providerSubscriptionId}`,
         });
       }
     }
@@ -1217,16 +1238,35 @@ export class DunningService {
       }
 
       try {
+        const finalCancel = attempt.day >= 21;
         await notificationsService.createNotification(subscription.userId, {
           kind: 'billing',
           severity: attempt.day >= 14 ? 'error' : 'warning',
-          title: attempt.day >= 21 ? 'Subscription canceled' : 'Payment retry required',
+          title: finalCancel ? 'Subscription canceled' : 'Payment retry required',
           message:
-            attempt.day >= 21
+            finalCancel
               ? 'Your subscription was canceled after repeated failed payment attempts.'
               : 'We could not collect payment. Please update your billing details.',
           dedupe_key: `billing:dunning:${attempt._id.toString()}`,
         });
+
+        const dunningUser = await userRepository.findById(subscription.userId);
+        if (dunningUser?.email) {
+          const planName = getBillingPlan(subscription.planCode)?.name ?? 'Nirex Subscription';
+          await sendBillingEmailSafely(
+            finalCancel ? 'dunning_final_cancel' : `dunning_day_${attempt.day}`,
+            subscription.userId,
+            () => sendBillingDunningEmail({
+              to: dunningUser.email,
+              customerName: dunningUser.fullName,
+              planName,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+              day: attempt.day,
+              finalCancel,
+            }),
+            { subscriptionId: subscription._id.toString(), day: attempt.day },
+          );
+        }
 
         if (attempt.day === 14 && canTransitionSubscription(subscription.status, 'UNPAID')) {
           await billingRepository.withTransaction(async (session) => {
@@ -2281,6 +2321,23 @@ export class BillingService {
           subscriptionId: updated._id.toString(),
           atPeriodEnd,
         });
+        const user = await userRepository.findById(userId);
+        if (user?.email) {
+          await sendBillingEmailSafely(
+            atPeriodEnd ? 'subscription_cancel_scheduled' : 'subscription_canceled_immediate',
+            userId,
+            () => sendBillingSubscriptionCanceledByUserEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName: getBillingPlan(subscription.planCode)?.name,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+              immediate: !atPeriodEnd,
+              effectiveAt: atPeriodEnd ? subscription.currentPeriodEnd ?? null : new Date(),
+              reason: input.reason ?? null,
+            }),
+            { subscriptionId: subscription._id.toString(), atPeriodEnd },
+          );
+        }
         const response = mapOverviewSubscription(updated);
         return {
           value: response,
@@ -2384,6 +2441,23 @@ export class BillingService {
           autoRenewalEnabled: isAutoRenewalEnabled(updated),
         });
 
+        const autoRenewalUser = await userRepository.findById(userId);
+        if (autoRenewalUser?.email) {
+          await sendBillingEmailSafely(
+            input.enabled ? 'auto_renewal_enabled' : 'auto_renewal_disabled',
+            userId,
+            () => sendBillingAutoRenewalChangedEmail({
+              to: autoRenewalUser.email,
+              customerName: autoRenewalUser.fullName,
+              planName: getBillingPlan(subscription.planCode)?.name,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+              enabled: input.enabled,
+              effectiveAt: updated.currentPeriodEnd ?? null,
+            }),
+            { subscriptionId: updated._id.toString() },
+          );
+        }
+
         const response = mapOverviewSubscription(updated);
         return {
           value: response,
@@ -2445,6 +2519,21 @@ export class BillingService {
       subscriptionId: updated._id.toString(),
       status: updated.status,
     });
+
+    const pauseUser = await userRepository.findById(userId);
+    if (pauseUser?.email) {
+      await sendBillingEmailSafely(
+        'subscription_paused',
+        userId,
+        () => sendBillingSubscriptionPausedEmail({
+          to: pauseUser.email,
+          customerName: pauseUser.fullName,
+          planName: getBillingPlan(subscription.planCode)?.name,
+          billingPortalUrl: `${env.APP_URL}/billing`,
+        }),
+        { subscriptionId: updated._id.toString() },
+      );
+    }
     return mapOverviewSubscription(updated);
   }
 
@@ -2458,6 +2547,7 @@ export class BillingService {
     }
     const key = `billing:resume:${deterministicKey([subscription._id.toString()])}`;
     await this.gateway.resumeSubscription(subscription.providerSubscriptionId, { idempotencyKey: key });
+    const wasPaused = subscription.status === 'PAUSED';
     const updated = await billingRepository.withTransaction(async (session) => {
       if (subscription.status === 'PAUSED') {
         const doc = await this.subscriptionService.transition(
@@ -2508,6 +2598,26 @@ export class BillingService {
       subscriptionId: updated._id.toString(),
       status: updated.status,
     });
+
+    const resumeUser = await userRepository.findById(userId);
+    if (resumeUser?.email) {
+      await sendBillingEmailSafely(
+        wasPaused ? 'subscription_resumed' : 'cancellation_reversed',
+        userId,
+        () => {
+          const payload = {
+            to: resumeUser.email,
+            customerName: resumeUser.fullName,
+            planName: getBillingPlan(subscription.planCode)?.name,
+            billingPortalUrl: `${env.APP_URL}/billing`,
+          };
+          return wasPaused
+            ? sendBillingSubscriptionResumedEmail(payload)
+            : sendBillingCancellationReversedEmail(payload);
+        },
+        { subscriptionId: updated._id.toString(), wasPaused },
+      );
+    }
     return mapOverviewSubscription(updated);
   }
 

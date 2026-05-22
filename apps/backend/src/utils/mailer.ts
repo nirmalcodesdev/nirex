@@ -611,7 +611,7 @@ export async function sendSuspiciousSigninAlert(
     html: emailShell(`
       <h1>New sign-in detected</h1>
       <p>A new sign-in was detected for your account from an unrecognized device or location.</p>
-      
+
       <div class="info-box">
         <div class="info-row">
           <div class="info-label">IP Address</div>
@@ -630,5 +630,602 @@ export async function sendSuspiciousSigninAlert(
         </a>
       </div>
     `, "We detected a new sign-in to your account from a new device."),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security & account emails
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SecurityEventEmail {
+  to: string;
+  customerName?: string | null;
+  ipAddress?: string | undefined;
+  deviceInfo?: string | undefined;
+  eventTime?: Date | undefined;
+}
+
+interface ApiKeyEventEmail extends SecurityEventEmail {
+  keyName: string;
+  keyPrefix?: string | null;
+  scopes?: string[];
+  expiresAt?: Date | null;
+  reason?: string | null;
+}
+
+function securityActionButton(label: string, path = '/account/security'): string {
+  return `
+    <div style="text-align: center; margin-top: 24px;">
+      <a href="${env.APP_URL}${path}" class="btn">
+        ${escapeHtml(label)}
+      </a>
+    </div>
+  `;
+}
+
+function securityFooterCopy(): string {
+  return `<p style="font-size: 14px; color: #64748b;">If you did not perform this action, secure your account immediately by changing your password and reviewing active devices.</p>`;
+}
+
+export async function sendApiKeyCreatedEmail(input: ApiKeyEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const keyName = escapeHtml(input.keyName);
+  const keyPrefix = escapeHtml(input.keyPrefix) || 'N/A';
+  const scopesLabel = input.scopes && input.scopes.length
+    ? escapeHtml(input.scopes.join(', '))
+    : 'No scopes';
+  const expiresAt = formatDate(input.expiresAt);
+
+  await sendEmail({
+    to: input.to,
+    subject: `New API key created: ${input.keyName}`,
+    html: emailShell(`
+      <h1>API key created</h1>
+      <p>Hi ${name},</p>
+      <p>A new API key was created on your account. If this was you, no action is needed.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Name</div>
+          <div class="info-value">${keyName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Key Prefix</div>
+          <div class="info-value">${keyPrefix}…</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Scopes</div>
+          <div class="info-value">${scopesLabel}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Expires</div>
+          <div class="info-value">${expiresAt}</div>
+        </div>
+      </div>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Created',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Review API Keys', '/account/api-keys')}
+    `, `A new API key "${input.keyName}" was created on your account.`),
+  });
+}
+
+export async function sendApiKeyRevokedEmail(input: ApiKeyEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const keyName = escapeHtml(input.keyName);
+  const keyPrefix = escapeHtml(input.keyPrefix) || 'N/A';
+  const reason = escapeHtml(input.reason) || 'Revoked by user';
+
+  await sendEmail({
+    to: input.to,
+    subject: `API key revoked: ${input.keyName}`,
+    html: emailShell(`
+      <h1>API key revoked</h1>
+      <p>Hi ${name},</p>
+      <p>An API key was revoked on your account and can no longer be used.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Name</div>
+          <div class="info-value">${keyName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Key Prefix</div>
+          <div class="info-value">${keyPrefix}…</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Reason</div>
+          <div class="info-value">${reason}</div>
+        </div>
+      </div>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Revoked',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Review API Keys', '/account/api-keys')}
+    `, `API key "${input.keyName}" was revoked.`),
+  });
+}
+
+export async function sendApiKeyRotatedEmail(input: ApiKeyEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const keyName = escapeHtml(input.keyName);
+  const keyPrefix = escapeHtml(input.keyPrefix) || 'N/A';
+
+  await sendEmail({
+    to: input.to,
+    subject: `API key rotated: ${input.keyName}`,
+    html: emailShell(`
+      <h1>API key rotated</h1>
+      <p>Hi ${name},</p>
+      <p>An API key on your account was rotated. The previous key has been revoked and a new key was issued. Update any integrations using the old key.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Name</div>
+          <div class="info-value">${keyName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">New Key Prefix</div>
+          <div class="info-value">${keyPrefix}…</div>
+        </div>
+      </div>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Rotated',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Review API Keys', '/account/api-keys')}
+    `, `API key "${input.keyName}" was rotated.`),
+  });
+}
+
+export async function sendTwoFactorEnabledEmail(input: SecurityEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  await sendEmail({
+    to: input.to,
+    subject: 'Two-factor authentication enabled',
+    html: emailShell(`
+      <h1>Two-factor authentication is on</h1>
+      <p>Hi ${name},</p>
+      <p>Two-factor authentication was enabled for your account. From now on, sign-ins on new devices will require a verification code in addition to your password.</p>
+      <p style="font-size: 14px; color: #64748b;">Make sure to store your backup codes in a safe place — you'll need them if you ever lose access to your authenticator app.</p>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Enabled',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Review Account Security')}
+    `, 'Two-factor authentication was enabled on your account.'),
+  });
+}
+
+export async function sendTwoFactorDisabledEmail(input: SecurityEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  await sendEmail({
+    to: input.to,
+    subject: 'Two-factor authentication disabled',
+    html: emailShell(`
+      <h1>Two-factor authentication is off</h1>
+      <p>Hi ${name},</p>
+      <p>Two-factor authentication was disabled for your account. Your account is now protected only by your password.</p>
+      <p style="font-size: 14px; color: #b91c1c;"><strong>If you did not make this change, your account may be compromised.</strong> Re-enable two-factor authentication and change your password immediately.</p>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Disabled',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${env.APP_URL}/account/security" class="btn" style="background-color: #ef4444;">
+          Secure My Account
+        </a>
+      </div>
+    `, 'Two-factor authentication was disabled on your account.'),
+  });
+}
+
+export async function sendPasswordChangedInSessionEmail(input: SecurityEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  await sendEmail({
+    to: input.to,
+    subject: 'Your password was changed',
+    html: emailShell(`
+      <h1>Password changed</h1>
+      <p>Hi ${name},</p>
+      <p>Your account password was changed from within an active session. For your security, all other active sessions were signed out.</p>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Changed',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      <p style="font-size: 14px; color: #64748b;">If this wasn't you, reset your password immediately and review your active devices.</p>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${env.APP_URL}/auth/forgot-password" class="btn" style="background-color: #ef4444;">
+          Secure My Account
+        </a>
+      </div>
+    `, 'Your Nirex account password was changed from a signed-in session.'),
+  });
+}
+
+export async function sendSignedOutEverywhereEmail(input: SecurityEventEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  await sendEmail({
+    to: input.to,
+    subject: 'You were signed out of all devices',
+    html: emailShell(`
+      <h1>All sessions terminated</h1>
+      <p>Hi ${name},</p>
+      <p>All active sessions on your account were signed out. You will need to sign in again on each device.</p>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Signed out',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Sign In', '/auth/signin')}
+    `, 'All active sessions on your Nirex account were signed out.'),
+  });
+}
+
+interface SessionRevokedEmail extends SecurityEventEmail {
+  revokedDeviceInfo?: string | null;
+  revokedIp?: string | null;
+}
+
+export async function sendSessionRevokedEmail(input: SessionRevokedEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const revokedDevice = escapeHtml(truncateForEmail(input.revokedDeviceInfo)) || 'Unknown device';
+  const revokedIp = escapeHtml(truncateForEmail(input.revokedIp, 64)) || 'Unknown';
+  await sendEmail({
+    to: input.to,
+    subject: 'A device was signed out of your account',
+    html: emailShell(`
+      <h1>Session ended</h1>
+      <p>Hi ${name},</p>
+      <p>A device was signed out of your account.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Device</div>
+          <div class="info-value">${revokedDevice}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">IP Address</div>
+          <div class="info-value">${revokedIp}</div>
+        </div>
+      </div>
+      ${requestMetadataBox({
+        eventTime: input.eventTime,
+        eventLabel: 'Terminated',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
+      ${securityFooterCopy()}
+      ${securityActionButton('Review Devices', '/account/devices')}
+    `, 'A signed-in device was removed from your Nirex account.'),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing — additional lifecycle emails
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function sendBillingSubscriptionRestoredEmail(input: BillingEmailBase): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  await sendEmail({
+    to: input.to,
+    subject: `Subscription restored: ${planName}`,
+    html: emailShell(`
+      <h1>Subscription restored</h1>
+      <p>Hi ${name},</p>
+      <p>Good news — we successfully collected payment and your <strong>${planName}</strong> subscription is fully active again. Thanks for sticking with us.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge badge-success">Active</span></div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `Your ${planName} subscription is active again.`),
+  });
+}
+
+interface BillingCancelEmail extends BillingEmailBase {
+  immediate: boolean;
+  effectiveAt?: Date | null;
+  reason?: string | null;
+}
+
+export async function sendBillingSubscriptionCanceledByUserEmail(
+  input: BillingCancelEmail,
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  const effectiveAt = formatDate(input.effectiveAt);
+  const reason = escapeHtml(input.reason);
+
+  const headline = input.immediate ? 'Subscription canceled' : 'Cancellation scheduled';
+  const intro = input.immediate
+    ? `Your <strong>${planName}</strong> subscription has been canceled and your access has ended.`
+    : `Your <strong>${planName}</strong> subscription is set to end on <strong>${effectiveAt}</strong>. You'll keep full access until then.`;
+
+  await sendEmail({
+    to: input.to,
+    subject: input.immediate
+      ? `Subscription canceled: ${planName}`
+      : `Cancellation scheduled: ${planName}`,
+    html: emailShell(`
+      <h1>${headline}</h1>
+      <p>Hi ${name},</p>
+      <p>${intro}</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" ${reason ? '' : 'style="margin-bottom: 0;"'}>
+          <div class="info-label">Effective</div>
+          <div class="info-value">${input.immediate ? 'Immediately' : effectiveAt}</div>
+        </div>
+        ${reason ? `
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Reason</div>
+          <div class="info-value">${reason}</div>
+        </div>` : ''}
+      </div>
+      <p style="font-size: 14px; color: #64748b;">Changed your mind? You can ${input.immediate ? 'resubscribe' : 'reverse this cancellation'} anytime from your billing portal.</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, input.immediate
+      ? `Your ${planName} subscription has been canceled.`
+      : `Your ${planName} subscription will end on ${effectiveAt}.`),
+  });
+}
+
+interface BillingAutoRenewalEmail extends BillingEmailBase {
+  enabled: boolean;
+  effectiveAt?: Date | null;
+}
+
+export async function sendBillingAutoRenewalChangedEmail(
+  input: BillingAutoRenewalEmail,
+): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  const effectiveAt = formatDate(input.effectiveAt);
+  const headline = input.enabled ? 'Auto-renewal enabled' : 'Auto-renewal disabled';
+  const intro = input.enabled
+    ? `Your <strong>${planName}</strong> subscription will renew automatically at the end of the current billing period.`
+    : `Your <strong>${planName}</strong> subscription will <strong>not</strong> renew. You'll keep access until <strong>${effectiveAt}</strong>.`;
+
+  await sendEmail({
+    to: input.to,
+    subject: `Auto-renewal ${input.enabled ? 'enabled' : 'disabled'}: ${planName}`,
+    html: emailShell(`
+      <h1>${headline}</h1>
+      <p>Hi ${name},</p>
+      <p>${intro}</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Auto-renewal</div>
+          <div class="info-value">
+            <span class="badge ${input.enabled ? 'badge-success' : 'badge-warning'}">
+              ${input.enabled ? 'On' : 'Off'}
+            </span>
+          </div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, input.enabled
+      ? `Auto-renewal is on for your ${planName} subscription.`
+      : `Auto-renewal is off; your ${planName} subscription ends on ${effectiveAt}.`),
+  });
+}
+
+export async function sendBillingSubscriptionPausedEmail(input: BillingEmailBase): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  await sendEmail({
+    to: input.to,
+    subject: `Subscription paused: ${planName}`,
+    html: emailShell(`
+      <h1>Subscription paused</h1>
+      <p>Hi ${name},</p>
+      <p>Your <strong>${planName}</strong> subscription has been paused. You won't be charged while it's paused, and you can resume anytime from your billing portal.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge badge-warning">Paused</span></div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `Your ${planName} subscription is paused.`),
+  });
+}
+
+export async function sendBillingSubscriptionResumedEmail(input: BillingEmailBase): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  await sendEmail({
+    to: input.to,
+    subject: `Subscription resumed: ${planName}`,
+    html: emailShell(`
+      <h1>Welcome back</h1>
+      <p>Hi ${name},</p>
+      <p>Your <strong>${planName}</strong> subscription is active again. Billing has resumed on your usual schedule.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge badge-success">Active</span></div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `Your ${planName} subscription has resumed.`),
+  });
+}
+
+export async function sendBillingCancellationReversedEmail(input: BillingEmailBase): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  await sendEmail({
+    to: input.to,
+    subject: `Cancellation reversed: ${planName}`,
+    html: emailShell(`
+      <h1>Cancellation reversed</h1>
+      <p>Hi ${name},</p>
+      <p>Your <strong>${planName}</strong> subscription will continue to renew automatically. Glad to have you staying with us.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Auto-renewal</div>
+          <div class="info-value"><span class="badge badge-success">On</span></div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `Your ${planName} subscription will continue.`),
+  });
+}
+
+interface BillingDunningEmail extends BillingEmailBase {
+  day: number;
+  finalCancel: boolean;
+}
+
+export async function sendBillingDunningEmail(input: BillingDunningEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  const isFinal = input.finalCancel;
+  const headline = isFinal
+    ? 'Subscription canceled'
+    : input.day >= 14
+      ? 'Final notice: payment required'
+      : 'Payment retry required';
+  const intro = isFinal
+    ? `After ${input.day} days of failed payment attempts, your <strong>${planName}</strong> subscription has been canceled.`
+    : input.day >= 14
+      ? `We still haven't been able to collect payment for <strong>${planName}</strong>. Without action, your subscription will be canceled in the next few days.`
+      : `We tried to charge for <strong>${planName}</strong> but the payment didn't go through. Please update your billing details to avoid interruption.`;
+  const badge = isFinal ? 'badge-error' : input.day >= 14 ? 'badge-error' : 'badge-warning';
+  const statusLabel = isFinal ? 'Canceled' : 'Payment overdue';
+
+  await sendEmail({
+    to: input.to,
+    subject: isFinal
+      ? `Subscription canceled: ${planName}`
+      : `Action required: payment failed for ${planName}`,
+    html: emailShell(`
+      <h1>${headline}</h1>
+      <p>Hi ${name},</p>
+      <p>${intro}</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge ${badge}">${statusLabel}</span></div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Day</div>
+          <div class="info-value">${input.day} of 21</div>
+        </div>
+      </div>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, isFinal
+      ? `Your ${planName} subscription has been canceled after repeated failed payments.`
+      : `Action required: please update your payment method for ${planName}.`),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Usage / quota threshold emails
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface UsageThresholdEmail {
+  to: string;
+  customerName?: string | null;
+  planName?: string | null;
+  thresholdPercent: number;
+  usedCredits: number;
+  includedCredits: number;
+  periodEnd?: Date | null;
+}
+
+export async function sendUsageThresholdEmail(input: UsageThresholdEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your plan';
+  const thresholdLabel = `${Math.round(input.thresholdPercent * 100)}%`;
+  const exhausted = input.thresholdPercent >= 1;
+  const headline = exhausted
+    ? 'You\'ve used all your credits'
+    : `You\'ve used ${thresholdLabel} of your credits`;
+  const intro = exhausted
+    ? `You\'ve hit the credit limit on <strong>${planName}</strong> for the current period. New requests that consume credits will be blocked until your quota resets or you upgrade.`
+    : `Heads-up — you\'ve used ${thresholdLabel} of the credits included with <strong>${planName}</strong> for the current period.`;
+  const periodEnd = formatDate(input.periodEnd);
+
+  await sendEmail({
+    to: input.to,
+    subject: exhausted
+      ? 'Credit quota reached'
+      : `You\'ve used ${thresholdLabel} of your credits`,
+    html: emailShell(`
+      <h1>${headline}</h1>
+      <p>Hi ${name},</p>
+      <p>${intro}</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Used</div>
+          <div class="info-value">${input.usedCredits.toLocaleString('en-US')} / ${input.includedCredits.toLocaleString('en-US')} credits</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Resets</div>
+          <div class="info-value">${periodEnd}</div>
+        </div>
+      </div>
+      <p style="font-size: 14px; color: #64748b;">Need more headroom? Upgrade your plan from the billing portal.</p>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${env.APP_URL}/billing" class="btn" style="${exhausted ? 'background-color: #ef4444;' : ''}">
+          ${exhausted ? 'Upgrade Plan' : 'View Billing'}
+        </a>
+      </div>
+    `, exhausted
+      ? `You\'ve used all the credits on ${planName} for this period.`
+      : `You\'ve used ${thresholdLabel} of your credits on ${planName}.`),
   });
 }
