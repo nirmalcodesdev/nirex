@@ -1,5 +1,7 @@
 import type {
   ArchiveNotificationResponse,
+  BatchReadNotificationsRequest,
+  BatchReadNotificationsResponse,
   ListNotificationsQuery,
   ListNotificationsResponse,
   MarkNotificationReadResponse,
@@ -87,6 +89,16 @@ export const notificationsApi = {
     });
 
     return dataOrThrow(payload, "NOTIFICATION_MARK_ALL_READ_FAILED");
+  },
+
+  async markBatchRead(ids: string[]): Promise<BatchReadNotificationsResponse> {
+    const body: BatchReadNotificationsRequest = { ids };
+    const payload = await request<BatchReadNotificationsResponse>(`${NOTIFICATIONS_BASE}/read`, {
+      method: "PATCH",
+      body,
+    });
+
+    return dataOrThrow(payload, "NOTIFICATION_MARK_BATCH_READ_FAILED");
   },
 
   async archive(notificationId: string): Promise<ArchiveNotificationResponse> {

@@ -16,10 +16,10 @@ import { Dropdown, DropdownItem, KpiCard, PageHeader, Skeleton, CardSkeleton } f
 import { useToast } from "../../../components/ToastProvider";
 import {
   useMarkAllNotificationsReadMutation,
-  useMarkNotificationReadMutation,
   useMarkNotificationUnreadMutation,
   useNotificationsQuery,
 } from "../../../features/notifications/useNotifications";
+import { useAutoMarkAsRead } from "../../../features/notifications/useAutoMarkAsRead";
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
@@ -137,13 +137,15 @@ function getSeverityMeta(severity: NotificationItem["severity"]) {
 interface NotificationRowProps {
   notification: NotificationItem;
   isWorking: boolean;
-  onToggleRead: (notification: NotificationItem) => void;
+  onMarkUnread: (notification: NotificationItem) => void;
+  observeRef: (el: Element | null, id: string, isUnread: boolean) => void;
 }
 
 function NotificationRow({
   notification,
   isWorking,
-  onToggleRead,
+  onMarkUnread,
+  observeRef,
 }: NotificationRowProps) {
   const isRead = Boolean(notification.read_at);
   const { icon: Icon, colorClass } = getSeverityMeta(notification.severity);
@@ -151,6 +153,7 @@ function NotificationRow({
 
   return (
     <article
+      ref={(el) => observeRef(el, notification.id, !isRead)}
       className={`p-4 sm:p-6 flex gap-4 transition-colors group ${
         isRead ? "bg-background" : "bg-muted/10"
       }`}
@@ -170,14 +173,20 @@ function NotificationRow({
         </div>
         <p className="text-sm text-muted-foreground mb-3">{notification.message}</p>
 
-        <button
-          type="button"
-          onClick={() => onToggleRead(notification)}
-          disabled={isWorking}
-          className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
-        >
-          {isRead ? "Mark as unread" : "Mark as read"}
-        </button>
+        {isRead ? (
+          <button
+            type="button"
+            onClick={() => onMarkUnread(notification)}
+            disabled={isWorking}
+            className="text-xs font-medium text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
+          >
+            Mark as unread
+          </button>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            Marks as read once viewed
+          </span>
+        )}
       </div>
       <div className="shrink-0 flex items-start gap-2">
         {!isRead ? (
@@ -185,22 +194,24 @@ function NotificationRow({
             <div className="w-2 h-2 bg-nirex-accent rounded-full" />
           </div>
         ) : null}
-        <Dropdown
-          align="right"
-          trigger={
-            <button
-              type="button"
-              disabled={isWorking}
-              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors sm:opacity-0 group-hover:opacity-100 disabled:opacity-50"
-            >
-              <MoreVertical size={16} />
-            </button>
-          }
-        >
-          <DropdownItem onClick={() => onToggleRead(notification)}>
-            {isRead ? "Mark as unread" : "Mark as read"}
-          </DropdownItem>
-        </Dropdown>
+        {isRead ? (
+          <Dropdown
+            align="right"
+            trigger={
+              <button
+                type="button"
+                disabled={isWorking}
+                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors sm:opacity-0 group-hover:opacity-100 disabled:opacity-50"
+              >
+                <MoreVertical size={16} />
+              </button>
+            }
+          >
+            <DropdownItem onClick={() => onMarkUnread(notification)}>
+              Mark as unread
+            </DropdownItem>
+          </Dropdown>
+        ) : null}
       </div>
     </article>
   );
@@ -220,9 +231,9 @@ export function Notifications() {
     includeRead: true,
     includeArchived: false,
   });
-  const markReadMutation = useMarkNotificationReadMutation();
   const markUnreadMutation = useMarkNotificationUnreadMutation();
   const markAllReadMutation = useMarkAllNotificationsReadMutation();
+  const { observe: observeRef } = useAutoMarkAsRead();
 
   if (isLoading && !data) {
     return <NotificationsSkeleton />;
@@ -247,7 +258,6 @@ export function Notifications() {
   ).length;
   const lastActivity = notifications[0]?.created_at ? formatRelativeTime(notifications[0].created_at) : "No activity";
   const isMutating =
-    markReadMutation.isPending ||
     markUnreadMutation.isPending ||
     markAllReadMutation.isPending;
 
@@ -264,15 +274,10 @@ export function Notifications() {
     }
   };
 
-  const handleToggleRead = async (notification: NotificationItem) => {
+  const handleMarkUnread = async (notification: NotificationItem) => {
     try {
-      if (notification.read_at) {
-        await markUnreadMutation.mutateAsync(notification.id);
-        toast("Notification marked as unread.", "success");
-      } else {
-        await markReadMutation.mutateAsync(notification.id);
-        toast("Notification marked as read.", "success");
-      }
+      await markUnreadMutation.mutateAsync(notification.id);
+      toast("Notification marked as unread.", "success");
     } catch (actionError) {
       toast(getErrorMessage(actionError, "Unable to update notification."), "error");
     }
@@ -361,9 +366,10 @@ export function Notifications() {
                 key={notification.id}
                 notification={notification}
                 isWorking={isMutating}
-                onToggleRead={(item) => {
-                  void handleToggleRead(item);
+                onMarkUnread={(item) => {
+                  void handleMarkUnread(item);
                 }}
+                observeRef={observeRef}
               />
             ))}
           </div>

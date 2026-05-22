@@ -452,6 +452,8 @@ export type {
   MarkNotificationUnreadResponse,
   ArchiveNotificationResponse,
   ReadAllNotificationsResponse,
+  BatchReadNotificationsRequest,
+  BatchReadNotificationsResponse,
 } from './domain/notifications/index.js';
 
 export {
@@ -460,10 +462,28 @@ export {
   listNotificationsQuerySchema,
   createNotificationSchema,
   notificationIdParamSchema,
+  markNotificationsBatchReadSchema,
   type ListNotificationsQuerySchema,
   type CreateNotificationSchema,
   type NotificationIdParamSchema,
+  type MarkNotificationsBatchReadSchema,
 } from './domain/notifications/index.js';
+
+// ============================================================================
+// Domain: Realtime (Socket.IO)
+// ============================================================================
+
+export {
+  RealtimeChannel,
+  type RealtimeChannelName,
+  type RealtimeEventMap,
+  type NotificationCreatedPayload,
+  type NotificationUpdatedPayload,
+  type NotificationReadAllPayload,
+  type NotificationBatchReadPayload,
+  type UnreadCountChangedPayload,
+  type ConnectionReadyPayload,
+} from './domain/realtime/index.js';
 
 // ============================================================================
 // Domain: Dashboard

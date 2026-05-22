@@ -11,6 +11,8 @@ export type {
   MarkNotificationUnreadResponse,
   ArchiveNotificationResponse,
   ReadAllNotificationsResponse,
+  BatchReadNotificationsRequest,
+  BatchReadNotificationsResponse,
 } from './types.js';
 
 export {
@@ -19,7 +21,9 @@ export {
   listNotificationsQuerySchema,
   createNotificationSchema,
   notificationIdParamSchema,
+  markNotificationsBatchReadSchema,
   type ListNotificationsQuerySchema,
   type CreateNotificationSchema,
   type NotificationIdParamSchema,
+  type MarkNotificationsBatchReadSchema,
 } from './schemas.js';

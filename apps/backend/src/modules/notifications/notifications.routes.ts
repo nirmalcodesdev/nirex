@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createNotificationSchema,
   listNotificationsQuerySchema,
+  markNotificationsBatchReadSchema,
   notificationIdParamSchema,
 } from '@nirex/shared';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
@@ -40,6 +41,18 @@ router.patch(
   apiLimiter,
   requireApiKeyScopes(['notifications:write']),
   asyncWrapper(notificationsController.markAllNotificationsRead),
+);
+
+// Batch endpoint backing the frontend auto-read pipeline. Accepts an
+// array of ids and marks them read in a single Mongo round-trip. Must
+// be declared before the `/:notificationId/read` route so Express
+// matches it on the literal segment, not the param.
+router.patch(
+  '/read',
+  apiLimiter,
+  requireApiKeyScopes(['notifications:write']),
+  validate(markNotificationsBatchReadSchema),
+  asyncWrapper(notificationsController.markNotificationsBatchRead),
 );
 
 router.patch(

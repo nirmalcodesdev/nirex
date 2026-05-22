@@ -178,6 +178,25 @@ const envSchema = z.object({
     .refine((v) => Number.isInteger(v) && v >= 5 && v <= 30, {
       message: 'TWO_FACTOR_SETUP_TTL_MINUTES must be between 5 and 30',
     }),
+
+  // ── Socket.IO realtime gateway ──────────────────────────────────────────
+  // Path the Socket.IO server is mounted on. Must match the client.
+  SOCKET_IO_PATH: z.string().default('/socket.io'),
+  // Heartbeat sent by server every N ms; client treats missed pings as disconnect.
+  SOCKET_IO_PING_INTERVAL_MS: z
+    .string()
+    .default('25000')
+    .transform((v) => parseInt(v, 10)),
+  // Disconnect a client after this many ms of missed pings.
+  SOCKET_IO_PING_TIMEOUT_MS: z
+    .string()
+    .default('20000')
+    .transform((v) => parseInt(v, 10)),
+  // Max payload bytes a single emit/recv may carry — defends against abuse.
+  SOCKET_IO_MAX_PAYLOAD_BYTES: z
+    .string()
+    .default('1048576')
+    .transform((v) => parseInt(v, 10)),
 });
 
 const result = envSchema.safeParse(process.env);
