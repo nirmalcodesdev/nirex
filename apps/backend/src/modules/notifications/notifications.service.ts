@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import type {
+  BatchReadNotificationsResponse,
   CreateNotificationRequest,
   ListNotificationsResponse,
   NotificationItem,
@@ -9,6 +10,7 @@ import { AppError } from '../../types/index.js';
 import { notificationsRepository } from './notifications.repository.js';
 import type { INotificationDocument } from './notifications.model.js';
 import type { NotificationListInput } from './notifications.types.js';
+import { realtimePublisher } from '../realtime/realtime.publisher.js';
 
 interface CursorPayload {
   createdAt: string;
@@ -132,7 +134,15 @@ export class NotificationsService {
       expiresAt,
     });
 
-    return mapNotification(created);
+    const notification = mapNotification(created);
+    const unreadCount = await notificationsRepository.countUnread(userId);
+
+    realtimePublisher.notificationCreated(userId, {
+      notification,
+      unread_count: unreadCount,
+    });
+
+    return notification;
   }
 
   async markNotificationRead(
@@ -146,7 +156,13 @@ export class NotificationsService {
     if (!doc) {
       throw new AppError('Notification not found.', 404, 'NOTIFICATION_NOT_FOUND');
     }
-    return mapNotification(doc);
+    const notification = mapNotification(doc);
+    const unreadCount = await notificationsRepository.countUnread(userId);
+    realtimePublisher.notificationUpdated(userId, {
+      notification,
+      unread_count: unreadCount,
+    });
+    return notification;
   }
 
   async markNotificationUnread(
@@ -160,12 +176,71 @@ export class NotificationsService {
     if (!doc) {
       throw new AppError('Notification not found.', 404, 'NOTIFICATION_NOT_FOUND');
     }
-    return mapNotification(doc);
+    const notification = mapNotification(doc);
+    const unreadCount = await notificationsRepository.countUnread(userId);
+    realtimePublisher.notificationUpdated(userId, {
+      notification,
+      unread_count: unreadCount,
+    });
+    return notification;
   }
 
   async markAllRead(userId: Types.ObjectId): Promise<ReadAllNotificationsResponse> {
-    const updated = await notificationsRepository.markAllRead(userId);
+    const readAt = new Date();
+    const updated = await notificationsRepository.markAllRead(userId, readAt);
+    if (updated > 0) {
+      realtimePublisher.notificationReadAll(userId, {
+        updated_count: updated,
+        read_at: readAt.toISOString(),
+        unread_count: 0,
+      });
+    }
     return { updated_count: updated };
+  }
+
+  /**
+   * Mark a batch of notification ids as read in a single round-trip.
+   * Used by the frontend auto-read pipeline (IntersectionObserver +
+   * debounce) so a user scrolling through 30 notifications produces one
+   * request, not 30. The repository constrains the update to the calling
+   * user's documents — an unscoped id list cannot escape user ownership.
+   */
+  async markManyRead(
+    userId: Types.ObjectId,
+    ids: string[],
+  ): Promise<BatchReadNotificationsResponse> {
+    // Drop anything that can't possibly be a valid ObjectId; we don't 404
+    // on bad ids here because a partial batch is expected behaviour
+    // (some ids may have been archived between client read and request).
+    const objectIds: Types.ObjectId[] = [];
+    const seen = new Set<string>();
+    for (const raw of ids) {
+      if (seen.has(raw)) continue;
+      seen.add(raw);
+      if (Types.ObjectId.isValid(raw)) {
+        objectIds.push(new Types.ObjectId(raw));
+      }
+    }
+
+    const readAt = new Date();
+    const updated = objectIds.length
+      ? await notificationsRepository.markManyRead(objectIds, userId, readAt)
+      : 0;
+
+    if (updated > 0) {
+      const unreadCount = await notificationsRepository.countUnread(userId);
+      realtimePublisher.notificationBatchRead(userId, {
+        ids: objectIds.map((id) => id.toString()),
+        read_at: readAt.toISOString(),
+        unread_count: unreadCount,
+      });
+    }
+
+    return {
+      updated_count: updated,
+      read_at: readAt.toISOString(),
+      ids: objectIds.map((id) => id.toString()),
+    };
   }
 
   async archiveNotification(
@@ -179,7 +254,13 @@ export class NotificationsService {
     if (!doc) {
       throw new AppError('Notification not found.', 404, 'NOTIFICATION_NOT_FOUND');
     }
-    return mapNotification(doc);
+    const notification = mapNotification(doc);
+    const unreadCount = await notificationsRepository.countUnread(userId);
+    realtimePublisher.notificationUpdated(userId, {
+      notification,
+      unread_count: unreadCount,
+    });
+    return notification;
   }
 }
 

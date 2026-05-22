@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import type {
+  BatchReadNotificationsRequest,
   CreateNotificationRequest,
   ListNotificationsQuery,
 } from '@nirex/shared';
@@ -76,6 +77,16 @@ export async function markNotificationUnread(req: Request, res: Response): Promi
 export async function markAllNotificationsRead(req: Request, res: Response): Promise<void> {
   const userId = getUserId(req);
   const result = await notificationsService.markAllRead(userId);
+  res.json({
+    status: 'success',
+    data: result,
+  });
+}
+
+export async function markNotificationsBatchRead(req: Request, res: Response): Promise<void> {
+  const userId = getUserId(req);
+  const body = req.body as BatchReadNotificationsRequest;
+  const result = await notificationsService.markManyRead(userId, body.ids);
   res.json({
     status: 'success',
     data: result,

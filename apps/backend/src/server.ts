@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
+import { initRealtimeGateway, closeRealtimeGateway } from './modules/realtime/realtime.gateway.js';
 import app from './app.js';
 
 const PORT = env.PORT;
@@ -28,6 +29,12 @@ async function bootstrap(): Promise<void> {
   // ── HTTP server ───────────────────────────────────────────────────────────
   const server = http.createServer(app);
 
+  // ── Realtime gateway (Socket.IO + Redis adapter) ──────────────────────────
+  // Initialised after Redis so the adapter can attach; the gateway itself
+  // tolerates Redis being unavailable in development (falls back to
+  // standalone single-instance mode with a warning).
+  await initRealtimeGateway(server);
+
   server.listen(PORT, () => {
     logger.info(`Server listening on port ${PORT} [${env.NODE_ENV}]`);
   });
@@ -36,6 +43,8 @@ async function bootstrap(): Promise<void> {
   const graceful = async (signal: string) => {
     logger.info(`${signal} received — shutting down gracefully.`);
     server.close(async () => {
+      // Drain sockets before tearing down the pub/sub clients they depend on.
+      await closeRealtimeGateway();
       await disconnectDatabase();
       try {
         await disconnectRedis();

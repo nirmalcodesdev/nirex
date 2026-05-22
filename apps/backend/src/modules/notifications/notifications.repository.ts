@@ -150,6 +150,30 @@ export class NotificationsRepository {
     return result.modifiedCount;
   }
 
+  /**
+   * Mark a specific set of notifications as read in a single round-trip.
+   * Scoped to the calling user so a malicious id list can't touch
+   * notifications owned by someone else. Already-read items are skipped
+   * (the `readAt: null` filter makes the operation idempotent).
+   */
+  async markManyRead(
+    notificationIds: Types.ObjectId[],
+    userId: Types.ObjectId,
+    readAt: Date = new Date(),
+  ): Promise<number> {
+    if (notificationIds.length === 0) return 0;
+    const result = await NotificationModel.updateMany(
+      {
+        _id: { $in: notificationIds },
+        userId,
+        readAt: null,
+        archivedAt: null,
+      },
+      { $set: { readAt } },
+    ).exec();
+    return result.modifiedCount;
+  }
+
   async archive(
     notificationId: Types.ObjectId,
     userId: Types.ObjectId,

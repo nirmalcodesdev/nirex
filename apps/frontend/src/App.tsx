@@ -12,6 +12,7 @@ import { ThemeProvider } from "./components/ui/ThemeProvider";
 import { RouteTransition } from "./components/main/RouteTransition";
 import { AuthBootstrap } from "./features/auth/AuthBootstrap";
 import { ProtectedRoute, PublicOnlyRoute } from "./features/auth/AuthGuards";
+import { RealtimeProvider } from "./features/realtime/RealtimeProvider";
 
 // Constants
 import { ROUTES } from "./constant/routes";
@@ -83,41 +84,43 @@ const App = () => (
           <SonnerToaster />
           <BrowserRouter>
             <AuthBootstrap />
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                {/* Public Marketing Routes */}
-                <Route path={ROUTES.LANDING} element={<LandingPage />} />
-                <Route path={ROUTES.TERMS} element={<Terms />} />
-                <Route path={ROUTES.PRIVACY} element={<Privacy />} />
-                <Route path={ROUTES.DOCS} element={<Documentation />} />
-                <Route path={ROUTES.DOCUMENTATION} element={<Documentation />} />
-                {/* Onboarding Route */}
-                <Route path={ROUTES.ONBOARDING} element={<ProtectedRoute><RouteTransition><OnboardingPage /></RouteTransition></ProtectedRoute>} />
+            <RealtimeProvider>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  {/* Public Marketing Routes */}
+                  <Route path={ROUTES.LANDING} element={<LandingPage />} />
+                  <Route path={ROUTES.TERMS} element={<Terms />} />
+                  <Route path={ROUTES.PRIVACY} element={<Privacy />} />
+                  <Route path={ROUTES.DOCS} element={<Documentation />} />
+                  <Route path={ROUTES.DOCUMENTATION} element={<Documentation />} />
+                  {/* Onboarding Route */}
+                  <Route path={ROUTES.ONBOARDING} element={<ProtectedRoute><RouteTransition><OnboardingPage /></RouteTransition></ProtectedRoute>} />
 
-                {/* Authentication System */}
-                <Route path={ROUTES.AUTH.ROOT} element={<PublicOnlyRoute><AuthLayout /></PublicOnlyRoute>}>
-                  <Route path="signin" element={<Signin />} />
-                  <Route path="signup" element={<Signup />} />
-                  <Route path="forgot-password" element={<ForgotPassword />} />
-                  <Route path="reset-password" element={<ResetPassword />} />
-                  <Route path="verify-email" element={<VerifyEmail />} />
-                </Route>
+                  {/* Authentication System */}
+                  <Route path={ROUTES.AUTH.ROOT} element={<PublicOnlyRoute><AuthLayout /></PublicOnlyRoute>}>
+                    <Route path="signin" element={<Signin />} />
+                    <Route path="signup" element={<Signup />} />
+                    <Route path="forgot-password" element={<ForgotPassword />} />
+                    <Route path="reset-password" element={<ResetPassword />} />
+                    <Route path="verify-email" element={<VerifyEmail />} />
+                  </Route>
 
-                {/* Core Application (Protected Area) */}
-                <Route path={ROUTES.DASHBOARD.ROOT} element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
-                  <Route index element={<RouteTransition><Home /></RouteTransition>} />
-                  <Route path="sessions" element={<RouteTransition><Sessions /></RouteTransition>} />
-                  <Route path={ROUTES.DASHBOARD.SESSION_DETAILS_RAW} element={<RouteTransition><SessionDetails /></RouteTransition>} />
-                  <Route path="usage" element={<RouteTransition><Usage /></RouteTransition>} />
-                  <Route path="billing" element={<RouteTransition><Billing /></RouteTransition>} />
-                  <Route path="notifications" element={<RouteTransition><Notifications /></RouteTransition>} />
-                  <Route path="settings" element={<RouteTransition><Settings /></RouteTransition>} />
-                </Route>
+                  {/* Core Application (Protected Area) */}
+                  <Route path={ROUTES.DASHBOARD.ROOT} element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+                    <Route index element={<RouteTransition><Home /></RouteTransition>} />
+                    <Route path="sessions" element={<RouteTransition><Sessions /></RouteTransition>} />
+                    <Route path={ROUTES.DASHBOARD.SESSION_DETAILS_RAW} element={<RouteTransition><SessionDetails /></RouteTransition>} />
+                    <Route path="usage" element={<RouteTransition><Usage /></RouteTransition>} />
+                    <Route path="billing" element={<RouteTransition><Billing /></RouteTransition>} />
+                    <Route path="notifications" element={<RouteTransition><Notifications /></RouteTransition>} />
+                    <Route path="settings" element={<RouteTransition><Settings /></RouteTransition>} />
+                  </Route>
 
-                {/* 404 - Not Found Catch-all */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
+                  {/* 404 - Not Found Catch-all */}
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </RealtimeProvider>
           </BrowserRouter>
         </TooltipProvider> {/* Closing tag for TooltipProvider */}
       </ToastProvider>

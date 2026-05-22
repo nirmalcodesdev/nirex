@@ -21,6 +21,7 @@
   "dependencies": {
     "@nirex/assets": "workspace:^",
     "@nirex/shared": "workspace:*",
+    "@socket.io/redis-adapter": "^8.3.0",
     "argon2": "^0.31.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -37,6 +38,7 @@
     "passport-github2": "^0.1.12",
     "passport-google-oauth20": "^2.0.0",
     "rate-limit-redis": "^4.2.0",
+    "socket.io": "^4.8.3",
     "stripe": "^18.5.0",
     "uuid": "^13.0.0",
     "winston": "^3.17.0",

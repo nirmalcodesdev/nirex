@@ -67,3 +67,13 @@ export type ArchiveNotificationResponse = NotificationItem;
 export interface ReadAllNotificationsResponse {
   updated_count: number;
 }
+
+export interface BatchReadNotificationsRequest {
+  ids: string[];
+}
+
+export interface BatchReadNotificationsResponse {
+  updated_count: number;
+  read_at: string;
+  ids: string[];
+}

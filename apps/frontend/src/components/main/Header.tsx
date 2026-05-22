@@ -30,6 +30,8 @@ import {
     useMarkAllNotificationsReadMutation,
     useNotificationsQuery,
 } from "../../features/notifications/useNotifications";
+import { useRealtimeNotifications } from "../../features/realtime/useRealtimeNotifications";
+import { useAutoMarkAsRead } from "../../features/notifications/useAutoMarkAsRead";
 
 const searchItems = [
     { id: "dashboard", label: "Dashboard", path: "/", icon: Activity },
@@ -105,9 +107,18 @@ function SearchModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void
 function NotificationsDropdown() {
     const [isOpen, setIsOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
-    const lastToastedIdRef = useRef<string | null>(null);
     const { toast } = useToast();
     const navigate = useNavigate();
+
+    // Realtime push: socket events update the query cache directly, so the
+    // dropdown stays current without polling. A long-interval refetch acts
+    // as a belt-and-suspenders backfill in case the socket misses an event.
+    useRealtimeNotifications();
+
+    // Auto-read pipeline: rows visible inside the open dropdown for >1.5s
+    // get batched into one PATCH /notifications/read request.
+    const { observe: observeRef, flush: flushAutoRead } = useAutoMarkAsRead();
+
     const {
         data: notifications,
         isFetching,
@@ -119,46 +130,22 @@ function NotificationsDropdown() {
             includeArchived: false,
         },
         {
-            refetchInterval: 30_000, // Poll every 30 seconds for new notifications
+            refetchInterval: 5 * 60_000,
         },
     );
     const markAllReadMutation = useMarkAllNotificationsReadMutation();
 
-    useClickOutside(ref, () => setIsOpen(false));
+    useClickOutside(ref, () => {
+        if (isOpen) {
+            // Flush any pending auto-read batch before the dropdown unmounts
+            // so a quick open/close still lands the read writes.
+            flushAutoRead();
+        }
+        setIsOpen(false);
+    });
 
     const unreadCount = notifications?.unread_count ?? 0;
     const recentNotifications = notifications?.items ?? [];
-
-    // Effect to show Toast for new unread notifications
-    useEffect(() => {
-        const items = notifications?.items;
-        if (!items || items.length === 0) return;
-
-        const latest = items[0];
-        if (!latest) return;
-
-        // Only toast if it's unread and we haven't toasted it in this session yet
-        if (!latest.read_at && latest.id !== lastToastedIdRef.current) {
-            // Check if the notification was created very recently (within the last minute)
-            // to avoid toasting old unread notifications on page load.
-            const createdTime = new Date(latest.created_at).getTime();
-            const now = Date.now();
-            const isFresh = now - createdTime < 60_000;
-
-            if (isFresh) {
-                const toastType =
-                    latest.severity === "error"
-                        ? "error"
-                        : latest.severity === "warning"
-                          ? "warning"
-                          : "success";
-
-                // Since our toast provider doesn't support titles, we combine title and message
-                toast(`${latest.title}: ${latest.message}`, toastType);
-            }
-            lastToastedIdRef.current = latest.id;
-        }
-    }, [notifications, toast]);
 
     const formatTime = (value: string) =>
         new Intl.DateTimeFormat(undefined, {
@@ -249,7 +236,11 @@ function NotificationsDropdown() {
                                             const { Icon, iconClass } = getSeverityMeta(notification.severity);
 
                                             return (
-                                                <article key={notification.id} className="px-3 py-2 hover:bg-muted rounded-lg">
+                                                <article
+                                                    key={notification.id}
+                                                    ref={(el) => observeRef(el, notification.id, !notification.read_at)}
+                                                    className="px-3 py-2 hover:bg-muted rounded-lg"
+                                                >
                                                     <div className="flex items-start gap-2.5">
                                                         <Icon size={14} className={`mt-0.5 ${iconClass}`} />
                                                         <div className="min-w-0">
