@@ -1,4 +1,4 @@
-export type PlanName = 'Starter' | 'Pro' | 'Team';
+export type PlanName = 'Free' | 'Go' | 'Pro' | 'Plus' | 'Max' | 'Enterprise' | 'Starter' | 'Team';
 
 export interface PricingPlan {
     name: PlanName;

@@ -19,12 +19,12 @@ export interface SubscriptionTransition {
 type ActiveSubscriptionState = Exclude<BillingSubscriptionStatus, 'NONE'>;
 
 const transitionMap: Record<ActiveSubscriptionState, ActiveSubscriptionState[]> = {
-  TRIALING: ['ACTIVE', 'CANCELED'],
+  TRIALING: ['ACTIVE', 'PAST_DUE', 'CANCELED'],
   ACTIVE: ['PAST_DUE', 'CANCELED', 'PAUSED'],
   PAST_DUE: ['ACTIVE', 'UNPAID', 'CANCELED'],
   UNPAID: ['ACTIVE', 'CANCELED'],
   PAUSED: ['ACTIVE', 'CANCELED'],
-  CANCELED: [],
+  CANCELED: ['ACTIVE', 'TRIALING'],
 };
 
 export function allowedSubscriptionTransitions(

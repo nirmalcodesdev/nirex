@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 export const billingCycleSchema = z.enum(['month', 'year']);
-export const billingPlanIdSchema = z.enum(['free', 'pro', 'enterprise', 'custom']);
-export const checkoutPlanIdSchema = z.enum(['free', 'pro', 'enterprise']);
+export const billingPlanIdSchema = z.enum(['free', 'go', 'pro', 'plus', 'max', 'enterprise', 'custom']);
+export const checkoutPlanIdSchema = z.enum(['free', 'go', 'pro', 'plus', 'max', 'enterprise']);
+export const topUpPackIdSchema = z.enum(['small', 'medium', 'large', 'xl']);
 export const billingInvoiceStatusSchema = z.enum([
   'DRAFT',
   'OPEN',
@@ -57,6 +58,7 @@ export const changePlanSchema = z.object({
   planId: checkoutPlanIdSchema,
   billingCycle: billingCycleSchema,
   couponCode: z.string().trim().min(1).max(80).optional(),
+  downgradeAtPeriodEnd: z.boolean().optional(),
 });
 
 export const cancelSubscriptionSchema = z.object({
@@ -113,6 +115,12 @@ export const adminManualChargeSchema = z.object({
   currency: z.string().trim().length(3).transform((value) => value.toLowerCase()),
   description: z.string().trim().min(1).max(300),
   paymentMethodId: billingObjectIdSchema.optional(),
+});
+
+export const createTopUpSessionSchema = z.object({
+  packId: topUpPackIdSchema,
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
 });
 
 export type BillingInvoicesQuerySchema = z.infer<typeof billingInvoicesQuerySchema>;

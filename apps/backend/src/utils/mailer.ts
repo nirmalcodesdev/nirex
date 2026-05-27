@@ -546,11 +546,11 @@ export async function sendPasswordResetEmail(
           </a>
         </div>
         ${requestMetadataBox({
-          eventTime: input.requestedAt,
-          eventLabel: 'Requested',
-          ipAddress: input.ipAddress,
-          deviceInfo: input.deviceInfo,
-        })}
+        eventTime: input.requestedAt,
+        eventLabel: 'Requested',
+        ipAddress: input.ipAddress,
+        deviceInfo: input.deviceInfo,
+      })}
         <p style="font-size: 14px; color: #64748b;">
           This link will expire in <strong>15 minutes</strong>. If you did not request a password reset, 
           your password will remain unchanged and you can safely ignore this email.
@@ -583,11 +583,11 @@ export async function sendPasswordResetSuccessEmail(
       <h1>Password changed</h1>
       <p>Your Nirex account password was changed successfully. For your security, active sessions were terminated and you may need to sign in again.</p>
       ${requestMetadataBox({
-        eventTime: input.completedAt,
-        eventLabel: 'Changed',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.completedAt,
+      eventLabel: 'Changed',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       <p style="font-size: 14px; color: #64748b;">
         If you made this change, no further action is required. If you did not make this change, reset your password immediately and review your active devices.
       </p>
@@ -702,11 +702,11 @@ export async function sendApiKeyCreatedEmail(input: ApiKeyEventEmail): Promise<v
         </div>
       </div>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Created',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Created',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Review API Keys', '/account/api-keys')}
     `, `A new API key "${input.keyName}" was created on your account.`),
@@ -741,11 +741,11 @@ export async function sendApiKeyRevokedEmail(input: ApiKeyEventEmail): Promise<v
         </div>
       </div>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Revoked',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Revoked',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Review API Keys', '/account/api-keys')}
     `, `API key "${input.keyName}" was revoked.`),
@@ -775,11 +775,11 @@ export async function sendApiKeyRotatedEmail(input: ApiKeyEventEmail): Promise<v
         </div>
       </div>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Rotated',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Rotated',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Review API Keys', '/account/api-keys')}
     `, `API key "${input.keyName}" was rotated.`),
@@ -797,11 +797,11 @@ export async function sendTwoFactorEnabledEmail(input: SecurityEventEmail): Prom
       <p>Two-factor authentication was enabled for your account. From now on, sign-ins on new devices will require a verification code in addition to your password.</p>
       <p style="font-size: 14px; color: #64748b;">Make sure to store your backup codes in a safe place — you'll need them if you ever lose access to your authenticator app.</p>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Enabled',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Enabled',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Review Account Security')}
     `, 'Two-factor authentication was enabled on your account.'),
@@ -819,11 +819,11 @@ export async function sendTwoFactorDisabledEmail(input: SecurityEventEmail): Pro
       <p>Two-factor authentication was disabled for your account. Your account is now protected only by your password.</p>
       <p style="font-size: 14px; color: #b91c1c;"><strong>If you did not make this change, your account may be compromised.</strong> Re-enable two-factor authentication and change your password immediately.</p>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Disabled',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Disabled',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       <div style="text-align: center; margin-top: 24px;">
         <a href="${env.APP_URL}/account/security" class="btn" style="background-color: #ef4444;">
           Secure My Account
@@ -843,11 +843,11 @@ export async function sendPasswordChangedInSessionEmail(input: SecurityEventEmai
       <p>Hi ${name},</p>
       <p>Your account password was changed from within an active session. For your security, all other active sessions were signed out.</p>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Changed',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Changed',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       <p style="font-size: 14px; color: #64748b;">If this wasn't you, reset your password immediately and review your active devices.</p>
       <div style="text-align: center; margin-top: 24px;">
         <a href="${env.APP_URL}/auth/forgot-password" class="btn" style="background-color: #ef4444;">
@@ -868,11 +868,11 @@ export async function sendSignedOutEverywhereEmail(input: SecurityEventEmail): P
       <p>Hi ${name},</p>
       <p>All active sessions on your account were signed out. You will need to sign in again on each device.</p>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Signed out',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Signed out',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Sign In', '/auth/signin')}
     `, 'All active sessions on your Nirex account were signed out.'),
@@ -906,11 +906,11 @@ export async function sendSessionRevokedEmail(input: SessionRevokedEmail): Promi
         </div>
       </div>
       ${requestMetadataBox({
-        eventTime: input.eventTime,
-        eventLabel: 'Terminated',
-        ipAddress: input.ipAddress,
-        deviceInfo: input.deviceInfo,
-      })}
+      eventTime: input.eventTime,
+      eventLabel: 'Terminated',
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo,
+    })}
       ${securityFooterCopy()}
       ${securityActionButton('Review Devices', '/account/devices')}
     `, 'A signed-in device was removed from your Nirex account.'),
@@ -1168,6 +1168,43 @@ export async function sendBillingDunningEmail(input: BillingDunningEmail): Promi
   });
 }
 
+interface BillingTopUpEmail extends BillingEmailBase {
+  amountMinor: number;
+  currency: string;
+}
+
+export async function sendBillingTopUpCompletedEmail(input: BillingTopUpEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const packName = escapeHtml(input.planName) || 'Top-up';
+  const amount = formatMoney(input.amountMinor, input.currency);
+
+  await sendEmail({
+    to: input.to,
+    subject: `Top-up added: ${amount}`,
+    html: emailShell(`
+      <h1>Top-up added</h1>
+      <p>Hi ${name},</p>
+      <p>Your payment of <strong>${amount}</strong> was successful. The balance has been added to your account and is ready to use immediately.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Pack</div>
+          <div class="info-value">${packName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Amount</div>
+          <div class="info-value">${amount}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="badge badge-success">Credited</span></div>
+        </div>
+      </div>
+      <p style="font-size: 14px; color: #64748b;">Top-up balance never expires.</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `${amount} has been added to your balance.`),
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Usage / quota threshold emails
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1188,18 +1225,18 @@ export async function sendUsageThresholdEmail(input: UsageThresholdEmail): Promi
   const thresholdLabel = `${Math.round(input.thresholdPercent * 100)}%`;
   const exhausted = input.thresholdPercent >= 1;
   const headline = exhausted
-    ? 'You\'ve used all your credits'
-    : `You\'ve used ${thresholdLabel} of your credits`;
+    ? 'You\'ve used all your balance'
+    : `You\'ve used ${thresholdLabel} of your balance`;
   const intro = exhausted
-    ? `You\'ve hit the credit limit on <strong>${planName}</strong> for the current period. New requests that consume credits will be blocked until your quota resets or you upgrade.`
-    : `Heads-up — you\'ve used ${thresholdLabel} of the credits included with <strong>${planName}</strong> for the current period.`;
+    ? `You\'ve hit the balance limit on <strong>${planName}</strong> for the current period. New requests will be blocked until your balance resets or you upgrade.`
+    : `Heads-up — you\'ve used ${thresholdLabel} of the balance included with <strong>${planName}</strong> for the current period.`;
   const periodEnd = formatDate(input.periodEnd);
 
   await sendEmail({
     to: input.to,
     subject: exhausted
-      ? 'Credit quota reached'
-      : `You\'ve used ${thresholdLabel} of your credits`,
+      ? 'Balance limit reached'
+      : `You\'ve used ${thresholdLabel} of your balance`,
     html: emailShell(`
       <h1>${headline}</h1>
       <p>Hi ${name},</p>
@@ -1211,7 +1248,7 @@ export async function sendUsageThresholdEmail(input: UsageThresholdEmail): Promi
         </div>
         <div class="info-row">
           <div class="info-label">Used</div>
-          <div class="info-value">${input.usedCredits.toLocaleString('en-US')} / ${input.includedCredits.toLocaleString('en-US')} credits</div>
+          <div class="info-value">$${(input.usedCredits / 100).toFixed(2)} / $${(input.includedCredits / 100).toFixed(2)}</div>
         </div>
         <div class="info-row" style="margin-bottom: 0;">
           <div class="info-label">Resets</div>
@@ -1225,7 +1262,52 @@ export async function sendUsageThresholdEmail(input: UsageThresholdEmail): Promi
         </a>
       </div>
     `, exhausted
-      ? `You\'ve used all the credits on ${planName} for this period.`
-      : `You\'ve used ${thresholdLabel} of your credits on ${planName}.`),
+      ? `You\'ve used all the balance on ${planName} for this period.`
+      : `You\'ve used ${thresholdLabel} of your balance on ${planName}.`),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Renewal reminder emails
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RenewalReminderEmail extends BillingEmailBase {
+  renewalDate: Date;
+  amountCents: number;
+  currency: string;
+  daysUntilRenewal: number;
+}
+
+export async function sendBillingRenewalReminderEmail(input: RenewalReminderEmail): Promise<void> {
+  const name = escapeHtml(input.customerName) || 'there';
+  const planName = escapeHtml(input.planName) || 'your subscription';
+  const renewalDate = formatDate(input.renewalDate);
+  const amount = formatMoney(input.amountCents, input.currency);
+  const daysLabel = input.daysUntilRenewal === 1 ? 'tomorrow' : `in ${input.daysUntilRenewal} days`;
+
+  await sendEmail({
+    to: input.to,
+    subject: `Your ${planName} subscription renews ${daysLabel}`,
+    html: emailShell(`
+      <h1>Subscription renewal reminder</h1>
+      <p>Hi ${name},</p>
+      <p>This is a friendly reminder that your <strong>${planName}</strong> subscription will automatically renew ${daysLabel}.</p>
+      <div class="info-box">
+        <div class="info-row">
+          <div class="info-label">Plan</div>
+          <div class="info-value">${planName}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Renewal date</div>
+          <div class="info-value">${renewalDate}</div>
+        </div>
+        <div class="info-row" style="margin-bottom: 0;">
+          <div class="info-label">Amount</div>
+          <div class="info-value">${amount}</div>
+        </div>
+      </div>
+      <p style="font-size: 14px; color: #64748b;">If you'd like to make changes to your subscription, you can do so from your billing portal before the renewal date.</p>
+      ${billingPortalLink(input.billingPortalUrl)}
+    `, `Your ${planName} subscription renews on ${renewalDate} for ${amount}.`),
   });
 }

@@ -54,10 +54,10 @@ function isRenewalBoundary(input: BillingLifecycleInput, boundary: string | null
 export function getCreditPeriodDateLabel(input: CreditPeriodNoticeInput): string {
   const boundary = input.nextCreditResetAt ?? input.creditsExpireAt;
 
-  if (isTrialBoundary(input, boundary)) return "Trial credits expire";
-  if (isScheduledEndBoundary(input, boundary)) return "Plan credits expire";
-  if (isRenewalBoundary(input, boundary)) return "Credits renew";
-  return "Next credit reset";
+  if (isTrialBoundary(input, boundary)) return "Trial balance expires";
+  if (isScheduledEndBoundary(input, boundary)) return "Plan balance expires";
+  if (isRenewalBoundary(input, boundary)) return "Balance renews";
+  return "Next balance reset";
 }
 
 export function getCreditPeriodNotice(
@@ -71,22 +71,22 @@ export function getCreditPeriodNotice(
   if (!boundary) return null;
 
   if (isTrialBoundary(input, boundary)) {
-    return `Trial credits expire on ${formatDate(expireAt)}. A new credit period starts only if the subscription continues.`;
+    return `Trial balance expires on ${formatDate(expireAt)}. A new billing period starts only if the subscription continues.`;
   }
 
   if (isScheduledEndBoundary(input, boundary)) {
-    return `Plan access and unused credits expire on ${formatDate(expireAt)}.`;
+    return `Plan access and unused balance expire on ${formatDate(expireAt)}.`;
   }
 
   if (resetAt && isRenewalBoundary(input, resetAt)) {
-    return `Credits renew with your subscription on ${formatDate(resetAt)}. Unused credits expire then.`;
+    return `Balance renews with your subscription on ${formatDate(resetAt)}. Unused balance expires then.`;
   }
 
   if (resetAt) {
-    return `Credits reset ${formatDate(resetAt)}. Unused credits expire at reset.`;
+    return `Balance resets ${formatDate(resetAt)}. Unused balance expires at reset.`;
   }
 
-  return `Unused credits expire on ${formatDate(expireAt)}.`;
+  return `Unused balance expires on ${formatDate(expireAt)}.`;
 }
 
 export function getCreditUsageFootnote(
@@ -97,18 +97,18 @@ export function getCreditUsageFootnote(
   const boundary = input.nextCreditResetAt ?? input.creditsExpireAt;
 
   if (isTrialBoundary(input, boundary)) {
-    return `${pct}% of plan credits consumed. Unused trial credits expire on ${formatDate(input.creditsExpireAt ?? boundary)}.`;
+    return `${pct}% of plan balance consumed. Unused trial balance expires on ${formatDate(input.creditsExpireAt ?? boundary)}.`;
   }
 
   if (isScheduledEndBoundary(input, boundary)) {
-    return `${pct}% of plan credits consumed. Unused credits expire when plan access ends.`;
+    return `${pct}% of plan balance consumed. Unused balance expires when plan access ends.`;
   }
 
   if (isRenewalBoundary(input, boundary)) {
-    return `${pct}% of plan credits consumed. Unused credits expire when the subscription renews.`;
+    return `${pct}% of plan balance consumed. Unused balance expires when the subscription renews.`;
   }
 
-  return `${pct}% of plan credits consumed. Unused credits expire at reset.`;
+  return `${pct}% of plan balance consumed. Unused balance expires at reset.`;
 }
 
 export function getBillingDateKpi(

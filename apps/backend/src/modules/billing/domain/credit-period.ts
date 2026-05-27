@@ -91,11 +91,13 @@ export function resolveMonthlyCreditPeriod(input: CreditPeriodInput): CreditPeri
     return calendarMonthCreditPeriod(now);
   }
 
+  const effectiveNow = new Date(Math.max(now.getTime(), subscriptionPeriodStart.getTime()));
+
   let periodStart = new Date(subscriptionPeriodStart);
   let nextPeriodStart = addMonthsClamped(periodStart, 1, anchorDay);
 
   while (
-    nextPeriodStart.getTime() <= now.getTime() &&
+    nextPeriodStart.getTime() <= effectiveNow.getTime() &&
     nextPeriodStart.getTime() < subscriptionPeriodEnd.getTime()
   ) {
     periodStart = nextPeriodStart;

@@ -74,8 +74,17 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_API_VERSION: z.string().default('2025-04-30.basil'),
   STRIPE_BILLING_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  STRIPE_PRICE_GO_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_GO_YEARLY: z.string().optional(),
   STRIPE_PRICE_PRO_MONTHLY: z.string().optional(),
   STRIPE_PRICE_PRO_YEARLY: z.string().optional(),
+  STRIPE_PRICE_PLUS_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PLUS_YEARLY: z.string().optional(),
+  STRIPE_PRICE_MAX_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_TOPUP_SMALL: z.string().optional(),
+  STRIPE_PRICE_TOPUP_MEDIUM: z.string().optional(),
+  STRIPE_PRICE_TOPUP_LARGE: z.string().optional(),
+  STRIPE_PRICE_TOPUP_XL: z.string().optional(),
   STRIPE_AUTOMATIC_TAX_ENABLED: z
     .string()
     .default('false')

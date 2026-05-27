@@ -20,7 +20,7 @@ import { useDashboardOverviewQuery } from "../../../features/dashboard/useDashbo
 const usageRangeLabels: Record<UsageRange, string> = {
   "30d": "Last 30 days",
   "90d": "Last 90 days",
-  month_to_date: "Current credit period",
+  month_to_date: "Current billing period",
 };
 
 function formatNumber(value: number): string {
@@ -230,8 +230,8 @@ export function Home() {
           changeContext={usageRangeLabels[usageRange]}
         />
         <KpiCard
-          title="Total Credits Used"
-          value={usageSummary?.credits_total_used ? formatNumber(usageSummary.credits_total_used) : "N/A"}
+          title="Total Balance Used"
+          value={usageSummary?.credits_total_used ? `$${(usageSummary.credits_total_used / 100).toFixed(2)}` : "N/A"}
           change="Lifetime"
           changeType="neutral"
           icon={Layers}
@@ -262,14 +262,14 @@ export function Home() {
             <div className="mt-4 space-y-5">
               <div className="grid grid-cols-1 gap-4">
                 <MetricRow
-                  label="Total credits used"
-                  value={formatNumber(usageSummary.credits_total_used ?? 0)}
+                  label="Total balance used"
+                  value={`$${((usageSummary.credits_total_used ?? 0) / 100).toFixed(2)}`}
                   detail="Cumulative consumption across all billing periods"
                 />
               </div>
               <div>
                 <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Credits consumption</span>
+                  <span className="text-muted-foreground">Balance consumption</span>
                   <span className="font-medium">
                     {creditsUsedPct === null ? "N/A" : formatPercent(creditsUsedPct)}
                   </span>
@@ -333,6 +333,25 @@ export function Home() {
           <h2 className="text-lg font-semibold">Billing Snapshot</h2>
           {overview.billing.available ? (
             <div className="mt-4 space-y-4">
+              {overview.billing.balance_usd !== null && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Balance</p>
+                  <p className="mt-1 text-2xl font-bold">${overview.billing.balance_usd.toFixed(2)}</p>
+                  {overview.billing.quota_lifted && (
+                    <p className="mt-1 text-xs text-muted-foreground">Unlimited requests</p>
+                  )}
+                  <div className="mt-2 space-y-1 border-t border-primary/10 pt-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Included</span>
+                      <span className="font-medium">${((overview.billing.included_credits ?? 0) / 100).toFixed(2)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Top-up</span>
+                      <span className="font-medium">${((overview.billing.topup_balance ?? 0) / 100).toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <MetricRow
                 label="Current plan"
                 value={overview.billing.current_plan_name ?? "N/A"}

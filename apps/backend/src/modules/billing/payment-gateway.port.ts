@@ -107,6 +107,7 @@ export interface GatewaySubscriptionParams {
   priceId: string;
   trialDays?: number;
   metadata?: JsonObject;
+  prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
 }
 
 export interface GatewayCheckoutSessionParams {
@@ -115,6 +116,8 @@ export interface GatewayCheckoutSessionParams {
   successUrl: string;
   cancelUrl: string;
   trialDays?: number;
+  mode?: 'subscription' | 'payment';
+  clientReferenceId?: string;
   metadata?: JsonObject;
 }
 
@@ -150,6 +153,18 @@ export interface GatewayPriceParams {
   metadata?: JsonObject;
 }
 
+export interface GatewayUpcomingInvoiceParams {
+  providerCustomerId: string;
+  providerSubscriptionId: string;
+  newProviderPriceId: string;
+}
+
+export interface GatewayUpcomingInvoice {
+  amountDueMinor: number;
+  currency: string;
+  creditAppliedMinor: number;
+}
+
 export interface PaymentGatewayPort {
   createCustomer(params: GatewayCreateCustomerParams): Promise<GatewayCustomer>;
   updateCustomer(id: string, params: Partial<GatewayCreateCustomerParams>): Promise<GatewayCustomer>;
@@ -180,5 +195,6 @@ export interface PaymentGatewayPort {
   createCheckoutSession(params: GatewayCheckoutSessionParams): Promise<GatewayCheckoutSession>;
   createPortalSession(customerId: string, returnUrl: string, idempotencyKey: string): Promise<GatewayPortalSession>;
 
+  previewUpcomingInvoice(params: GatewayUpcomingInvoiceParams): Promise<GatewayUpcomingInvoice>;
   constructWebhookEvent(payload: Buffer, signature: string, secret: string): GatewayEvent;
 }
