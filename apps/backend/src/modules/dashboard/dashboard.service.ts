@@ -97,6 +97,11 @@ export class DashboardService {
         trial_end: billing?.subscription?.trialEnd ?? null,
         total_paid_ytd_cents: billing?.kpis?.totalPaidYtdCents ?? null,
         currency: billing?.kpis?.currency ?? null,
+        balance_usd: billing?.usage?.balanceUsd ?? null,
+        total_credits: billing?.usage?.totalCredits ?? null,
+        included_credits: billing?.usage?.includedCredits ?? null,
+        topup_balance: billing?.usage?.topupBalance ?? null,
+        quota_lifted: billing?.usage?.quotaLifted ?? null,
       },
       notifications: {
         available: notificationsAvailable,

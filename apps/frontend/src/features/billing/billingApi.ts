@@ -17,6 +17,8 @@ import type {
   CreateCheckoutSessionResponse,
   CreatePortalSessionRequest,
   CreatePortalSessionResponse,
+  CreateTopUpSessionRequest,
+  CreateTopUpSessionResponse,
   DownloadInvoicePdfResponse,
   PauseSubscriptionRequest,
   ProrationPreviewQuery,
@@ -81,6 +83,14 @@ export const billingApi = {
       { method: "POST", body },
     );
     return dataOrThrow(payload, "BILLING_CHECKOUT_SESSION_FAILED");
+  },
+
+  async createTopUpSession(body: CreateTopUpSessionRequest): Promise<CreateTopUpSessionResponse> {
+    const payload = await request<CreateTopUpSessionResponse>(
+      `${BILLING_BASE}/topup-sessions`,
+      { method: "POST", body },
+    );
+    return dataOrThrow(payload, "BILLING_TOPUP_SESSION_FAILED");
   },
 
   async createPortalSession(body: CreatePortalSessionRequest = {}): Promise<CreatePortalSessionResponse> {

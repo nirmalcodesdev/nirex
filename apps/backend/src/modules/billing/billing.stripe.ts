@@ -30,6 +30,8 @@ import type {
   GatewayRefundPaymentParams,
   GatewaySubscription,
   GatewaySubscriptionParams,
+  GatewayUpcomingInvoice,
+  GatewayUpcomingInvoiceParams,
   PaymentGatewayPort,
 } from './payment-gateway.port.js';
 
@@ -86,9 +88,12 @@ function normalizeStripeSubscription(subscription: Stripe.Subscription): Gateway
     readNumber(itemRecord ?? {}, 'current_period_end') ??
     readNumber(subscriptionRecord ?? {}, 'current_period_end');
 
+  const isPaused = Boolean(subscription.pause_collection && typeof subscription.pause_collection === 'object');
+  const status = isPaused ? 'paused' : subscription.status;
+
   return {
     id: subscription.id,
-    status: subscription.status,
+    status,
     providerPriceId: price?.id,
     amountMinor: price?.unit_amount ?? 0,
     currency: price?.currency ?? 'usd',
@@ -523,7 +528,7 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
     const subscription = await this.call('updateSubscription', undefined, () =>
       this.stripe.subscriptions.update(id, {
         items: params.priceId && itemId ? [{ id: itemId, price: params.priceId }] : undefined,
-        proration_behavior: params.priceId ? 'create_prorations' : undefined,
+        proration_behavior: params.priceId ? (params.prorationBehavior ?? 'create_prorations') : undefined,
         metadata: toStripeMetadata(params.metadata),
       }),
     );
@@ -649,20 +654,22 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
   async createCheckoutSession(params: GatewayCheckoutSessionParams): Promise<GatewayCheckoutSession> {
     await this.getPreferredCheckoutPaymentMethodId(params.customerId);
 
+    const mode = params.mode ?? 'subscription';
+    const isPayment = mode === 'payment';
+
     const session = await this.call('createCheckoutSession', params.customerId, () =>
       this.stripe.checkout.sessions.create({
-        mode: 'subscription',
+        mode,
         customer: params.customerId,
+        client_reference_id: params.clientReferenceId,
         line_items: [{ price: params.priceId, quantity: 1 }],
         success_url: params.successUrl,
         cancel_url: params.cancelUrl,
-        payment_method_collection: 'always',
-        // Billing Portal-created cards can have allow_redisplay=unspecified, which
-        // Checkout filters out by default unless the session opts into displaying it.
+        payment_method_collection: isPayment ? undefined : 'always',
         saved_payment_method_options: {
           allow_redisplay_filters: ['always', 'limited', 'unspecified'],
         },
-        subscription_data: {
+        subscription_data: isPayment ? undefined : {
           trial_period_days: params.trialDays && params.trialDays > 0 ? params.trialDays : undefined,
           metadata: toStripeMetadata(params.metadata),
         },
@@ -688,6 +695,40 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
       ),
     );
     return { url: session.url };
+  }
+
+  async previewUpcomingInvoice(params: GatewayUpcomingInvoiceParams): Promise<GatewayUpcomingInvoice> {
+    const subscription = await this.call('previewUpcomingInvoice.retrieveSubscription', params.providerCustomerId, () =>
+      this.stripe.subscriptions.retrieve(params.providerSubscriptionId, { expand: ['items'] }),
+    );
+    const firstItemId = subscription.items.data[0]?.id;
+
+    const invoice = await this.call('previewUpcomingInvoice', params.providerCustomerId, () =>
+      this.stripe.invoices.createPreview({
+        customer: params.providerCustomerId,
+        subscription: params.providerSubscriptionId,
+        subscription_details: {
+          items: firstItemId
+            ? [{ id: firstItemId, price: params.newProviderPriceId }]
+            : [{ price: params.newProviderPriceId }],
+          proration_behavior: 'always_invoice',
+        },
+      }),
+    );
+
+    // Credit lines are proration adjustments with a negative amount
+    const creditAppliedMinor = invoice.lines.data
+      .filter((line) => {
+        const p = line.parent;
+        return (p?.invoice_item_details?.proration || p?.subscription_item_details?.proration) && line.amount < 0;
+      })
+      .reduce((sum, line) => sum + Math.abs(line.amount), 0);
+
+    return {
+      amountDueMinor: Math.max(0, invoice.amount_due),
+      currency: invoice.currency ?? 'usd',
+      creditAppliedMinor,
+    };
   }
 
   constructWebhookEvent(payload: Buffer, signature: string, secret: string): GatewayEvent {

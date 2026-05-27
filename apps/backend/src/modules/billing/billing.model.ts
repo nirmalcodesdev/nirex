@@ -79,6 +79,15 @@ export interface IBillingPlanDocument extends Document<Types.ObjectId>, SoftDele
   updatedAt: Date;
 }
 
+export interface IScheduledPlanChange {
+  planCode: BillingPlanId;
+  billingCycle: BillingCycle;
+  scheduledAt: Date;
+  providerPriceId?: string;
+  amountMinor?: number;
+  currency?: string;
+}
+
 export interface IBillingSubscriptionDocument extends Document<Types.ObjectId>, SoftDeleteFields {
   _id: Types.ObjectId;
   customerId: Types.ObjectId;
@@ -100,6 +109,7 @@ export interface IBillingSubscriptionDocument extends Document<Types.ObjectId>, 
   pausedAt?: Date;
   endedAt?: Date;
   latestInvoiceId?: Types.ObjectId;
+  scheduledPlanChange?: IScheduledPlanChange;
   metadata?: BillingMetadata;
   createdAt: Date;
   updatedAt: Date;
@@ -374,7 +384,7 @@ BillingPaymentMethodSchema.index({ provider: 1, providerPaymentMethodId: 1 }, { 
 
 const BillingPlanSchema = new Schema(
   {
-    code: { type: String, enum: ['free', 'pro', 'enterprise', 'custom'], required: true, index: true },
+    code: { type: String, enum: ['free', 'pro', 'max', 'enterprise', 'custom'], required: true, index: true },
     name: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     features: { type: [String], required: true, default: [] },
@@ -399,7 +409,7 @@ const BillingSubscriptionSchema = new Schema(
   {
     customerId: { type: Schema.Types.ObjectId, ref: 'BillingCustomer', required: true, index: true },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    planCode: { type: String, enum: ['free', 'pro', 'enterprise', 'custom'], required: true, index: true },
+    planCode: { type: String, enum: ['free', 'pro', 'max', 'enterprise', 'custom'], required: true, index: true },
     billingCycle: { type: String, enum: ['month', 'year'], required: true },
     status: { type: String, enum: ['TRIALING', 'ACTIVE', 'PAST_DUE', 'UNPAID', 'PAUSED', 'CANCELED'], required: true, index: true },
     provider: { type: String, enum: ['stripe'], required: true, default: 'stripe' },
@@ -416,6 +426,18 @@ const BillingSubscriptionSchema = new Schema(
     pausedAt: { type: Date, required: false },
     endedAt: { type: Date, required: false },
     latestInvoiceId: { type: Schema.Types.ObjectId, ref: 'BillingInvoice', required: false },
+    scheduledPlanChange: {
+      type: {
+        planCode: { type: String, enum: ['free', 'pro', 'max', 'enterprise', 'custom'], required: true },
+        billingCycle: { type: String, enum: ['month', 'year'], required: true },
+        scheduledAt: { type: Date, required: true },
+        providerPriceId: { type: String, required: false, trim: true },
+        amountMinor: { type: Number, required: false, min: 0 },
+        currency: { type: String, required: false, lowercase: true, trim: true },
+      },
+      required: false,
+      default: undefined,
+    },
     metadata: jsonMixed,
     ...softDeleteFields,
   },
@@ -423,6 +445,7 @@ const BillingSubscriptionSchema = new Schema(
 );
 
 BillingSubscriptionSchema.index({ userId: 1, status: 1, currentPeriodEnd: -1 });
+BillingSubscriptionSchema.index({ 'scheduledPlanChange.scheduledAt': 1 }, { sparse: true });
 BillingSubscriptionSchema.index(
   { provider: 1, providerSubscriptionId: 1 },
   { unique: true, partialFilterExpression: { providerSubscriptionId: { $type: 'string' } } },
@@ -460,6 +483,10 @@ const BillingInvoiceSchema = new Schema(
 
 BillingInvoiceSchema.index({ userId: 1, createdAt: -1 });
 BillingInvoiceSchema.index({ userId: 1, status: 1, createdAt: -1 });
+BillingInvoiceSchema.index(
+  { provider: 1, userId: 1, providerInvoiceId: 1 },
+  { unique: true, sparse: true, name: 'uniq_provider_user_providerInvoiceId' },
+);
 
 const BillingInvoiceLineItemSchema = new Schema(
   {
@@ -472,7 +499,7 @@ const BillingInvoiceLineItemSchema = new Schema(
     unitAmountMinor: { type: Number, required: true, min: 0 },
     amountMinor: { type: Number, required: true, min: 0 },
     currency: { type: String, required: true, lowercase: true, trim: true, minlength: 3, maxlength: 3 },
-    planCode: { type: String, enum: ['free', 'pro', 'enterprise', 'custom'], required: false },
+    planCode: { type: String, enum: ['free', 'pro', 'max', 'enterprise', 'custom'], required: false },
     usageRecordId: { type: Schema.Types.ObjectId, ref: 'BillingUsageRecord', required: false },
     ...softDeleteFields,
   },
@@ -743,3 +770,49 @@ export const BillingDunningAttemptModel = (mongoose.models.BillingDunningAttempt
 
 export const BillingReconciliationAlertModel = (mongoose.models.BillingReconciliationAlert ||
   mongoose.model<IBillingReconciliationAlertDocument>('BillingReconciliationAlert', BillingReconciliationAlertSchema)) as mongoose.Model<IBillingReconciliationAlertDocument>;
+
+// ─── Credit Transaction ───────────────────────────────────────────────────────
+
+export type CreditTransactionType = 'usage' | 'topup' | 'renewal' | 'upgrade' | 'downgrade' | 'adjustment';
+
+export interface ICreditTransactionDocument extends Document<Types.ObjectId> {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  amount: number;         // negative for usage, positive for topup/renewal
+  type: CreditTransactionType;
+  source: 'included' | 'topup' | 'n/a';
+  includedCreditsBefore: number;
+  topupBalanceBefore: number;
+  idempotencyKey?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const CreditTransactionSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    amount: { type: Number, required: true },
+    type: {
+      type: String,
+      enum: ['usage', 'topup', 'renewal', 'upgrade', 'downgrade', 'adjustment'],
+      required: true,
+      index: true,
+    },
+    source: { type: String, enum: ['included', 'topup', 'n/a'], required: true, default: 'n/a' },
+    includedCreditsBefore: { type: Number, required: true, min: 0 },
+    topupBalanceBefore: { type: Number, required: true, min: 0 },
+    idempotencyKey: { type: String, required: false, trim: true },
+    metadata: { type: Schema.Types.Mixed, required: false },
+  },
+  { timestamps: true },
+);
+
+CreditTransactionSchema.index({ userId: 1, createdAt: -1 });
+CreditTransactionSchema.index(
+  { idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+);
+
+export const CreditTransactionModel = (mongoose.models.CreditTransaction ||
+  mongoose.model<ICreditTransactionDocument>('CreditTransaction', CreditTransactionSchema)) as mongoose.Model<ICreditTransactionDocument>;

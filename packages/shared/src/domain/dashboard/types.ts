@@ -27,6 +27,11 @@ export interface DashboardBillingOverview {
   trial_end: string | null;
   total_paid_ytd_cents: number | null;
   currency: string | null;
+  balance_usd: number | null;
+  total_credits: number | null;
+  included_credits: number | null;
+  topup_balance: number | null;
+  quota_lifted: boolean | null;
 }
 
 export interface DashboardNotificationsOverview {

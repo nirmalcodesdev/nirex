@@ -14,8 +14,6 @@ import {
   Download,
   FileText,
   Loader2,
-  Pause,
-  Play,
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
@@ -36,15 +34,22 @@ import {
   useChangePlanMutation,
   useCreateCheckoutSessionMutation,
   useCreatePortalSessionMutation,
+  useCreateTopUpSessionMutation,
   useDownloadInvoicePdfMutation,
-  usePauseSubscriptionMutation,
   useProrationPreviewQuery,
   useRemovePaymentMethodMutation,
-  useResumeSubscriptionMutation,
   useRetryPaymentMutation,
   useSetDefaultPaymentMethodMutation,
   useUpdateAutoRenewalMutation,
 } from "../../../features/billing";
+import type { TopUpPackId } from "@nirex/shared";
+
+const TOPUP_PACKS: Array<{ id: TopUpPackId; name: string; credits: number; price: string; popular?: boolean }> = [
+  { id: "small", name: "Small", credits: 1000, price: "$10" },
+  { id: "medium", name: "Medium", credits: 2500, price: "$25", popular: true },
+  { id: "large", name: "Large", credits: 5000, price: "$50" },
+  { id: "xl", name: "XL", credits: 10000, price: "$100" },
+];
 import {
   getBillingDateKpi,
   getCreditPeriodNotice,
@@ -85,6 +90,16 @@ function formatDate(value: string | null | undefined): string {
     year: "numeric",
   }).format(date);
 }
+
+const PLAN_TIER: Record<BillingPlanId, number> = {
+  free: 0,
+  go: 1,
+  pro: 2,
+  plus: 3,
+  max: 4,
+  enterprise: 5,
+  custom: 5,
+};
 
 function getVisiblePaidYtdMinor(invoices: BillingInvoiceItem[], year: number): number {
   const now = new Date();
@@ -223,10 +238,9 @@ export function Billing() {
   const checkoutMutation = useCreateCheckoutSessionMutation();
   const changePlanMutation = useChangePlanMutation();
   const autoRenewalMutation = useUpdateAutoRenewalMutation();
-  const pauseMutation = usePauseSubscriptionMutation();
-  const resumeMutation = useResumeSubscriptionMutation();
   const retryPaymentMutation = useRetryPaymentMutation();
   const portalMutation = useCreatePortalSessionMutation();
+  const topUpMutation = useCreateTopUpSessionMutation();
   const removePaymentMethodMutation = useRemovePaymentMethodMutation();
   const setDefaultPaymentMethodMutation = useSetDefaultPaymentMethodMutation();
   const applyDiscountMutation = useApplyDiscountMutation();
@@ -308,19 +322,27 @@ export function Billing() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const checkoutStatus = params.get("checkout");
-    if (!checkoutStatus) return;
+    const topupStatus = params.get("topup");
+    if (!checkoutStatus && !topupStatus) return;
     if (handledCheckoutLocationKey === location.key) return;
     handledCheckoutLocationKey = location.key;
 
     if (checkoutStatus === "success") {
       toast("Checkout completed. Billing data is refreshing.", "success");
       void forceRefreshBillingFromProvider();
-    }
-    if (checkoutStatus === "cancelled") {
+    } else if (checkoutStatus === "cancelled") {
       toast("Checkout was cancelled.", "info");
     }
 
+    if (topupStatus === "success") {
+      toast("Top-up purchased! Credits have been added to your balance.", "success");
+      void forceRefreshBillingFromProvider();
+    } else if (topupStatus === "cancelled") {
+      toast("Top-up was cancelled.", "info");
+    }
+
     params.delete("checkout");
+    params.delete("topup");
     navigate(
       {
         pathname: location.pathname,
@@ -356,12 +378,14 @@ export function Billing() {
   const showCancellationScheduledBanner = Boolean(
     overview?.subscription.cancelAtPeriodEnd && currentStatus !== "CANCELED",
   );
+  const scheduledPlanChange = overview?.subscription.scheduledPlanChange;
+  const scheduledPlanName = scheduledPlanChange
+    ? overview?.plans.find((plan) => plan.id === scheduledPlanChange.planId)?.name ?? scheduledPlanChange.planId
+    : null;
   const autoRenewalEnabled =
     overview?.subscription.autoRenewalEnabled ??
     Boolean(overview && AUTO_RENEWAL_STATUSES.includes(currentStatus) && !overview.subscription.cancelAtPeriodEnd);
   const canUpdateAutoRenewal = AUTO_RENEWAL_STATUSES.includes(currentStatus);
-  const canPause = currentStatus === "ACTIVE" && !overview?.subscription.cancelAtPeriodEnd;
-  const canResume = currentStatus === "PAUSED";
 
   const tabs = useMemo<BillingTab[]>(() => {
     const base: BillingTab[] = ["overview", "plans", "payments", "invoices"];
@@ -400,11 +424,12 @@ export function Billing() {
   async function confirmPlanChange(): Promise<void> {
     if (!planDialog) return;
     try {
-      if (
-        overview?.subscription.status === "NONE" ||
-        overview?.subscription.status === "CANCELED" ||
-        !overview?.subscription.subscriptionId
-      ) {
+      const hasActiveSubscription =
+        overview?.subscription.status !== "NONE" &&
+        overview?.subscription.status !== "CANCELED" &&
+        Boolean(overview?.subscription.subscriptionId);
+
+      if (!hasActiveSubscription) {
         await startCheckout(planDialog.planId, planDialog.billingCycle);
       } else {
         await changePlanMutation.mutateAsync(planDialog);
@@ -583,6 +608,11 @@ export function Billing() {
           </button>
         </div>
       )}
+      {scheduledPlanChange && scheduledPlanName && (
+        <div className="rounded-lg border border-nirex-info/30 bg-nirex-info/10 p-4 text-sm text-nirex-info">
+          Plan downgrade scheduled. Your plan will change to {scheduledPlanName} on {formatDate(scheduledPlanChange.scheduledAt)}.
+        </div>
+      )}
       {currentStatus === "CANCELED" && (
         <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
           Subscription is canceled. Choose a plan to resubscribe.
@@ -591,6 +621,50 @@ export function Billing() {
 
       {activeTab === "overview" && (
         <>
+          {/* Credit balance hero */}
+          {(() => {
+            const usage = overview.usage;
+            const balanceUsd = usage.balanceUsd ?? 0;
+            const includedCredits = usage.includedCredits ?? 0;
+            const topupBalance = usage.topupBalance ?? 0;
+            const requestQuota = usage.requestQuota;
+            const monthlyRequestCount = usage.monthlyRequestCount ?? 0;
+            const isMaxPlan = overview.currentPlan.id === 'max';
+            return (
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="py-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Balance</p>
+                      <p className="mt-1 text-3xl font-bold text-foreground">
+                        ${balanceUsd.toFixed(2)}
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {isMaxPlan
+                          ? "Unlimited requests · Max plan"
+                          : topupBalance > 0
+                            ? `${monthlyRequestCount.toLocaleString()} requests this month · limit lifted by top-up`
+                            : requestQuota
+                              ? `${monthlyRequestCount.toLocaleString()} / ${requestQuota.toLocaleString()} requests this month`
+                              : ""}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1 text-sm">
+                      <div className="flex items-center justify-between gap-6">
+                        <span className="text-muted-foreground">Included</span>
+                        <span className="font-medium">${(includedCredits / 100).toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-6">
+                        <span className="text-muted-foreground">Top-up</span>
+                        <span className="font-medium">${(topupBalance / 100).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               title="Current Plan"
@@ -645,36 +719,6 @@ export function Billing() {
                     </p>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={!canPause || pauseMutation.isPending}
-                    onClick={() => {
-                      pauseMutation.mutate({}, {
-                        onSuccess: () => toast("Subscription paused.", "success"),
-                        onError: (error) => toast(error instanceof Error ? error.message : "Pause failed.", "error"),
-                      });
-                    }}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-muted disabled:opacity-50"
-                  >
-                    <Pause className="h-4 w-4" />
-                    Pause
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canResume || resumeMutation.isPending}
-                    onClick={() => {
-                      resumeMutation.mutate({}, {
-                        onSuccess: () => toast("Subscription resumed.", "success"),
-                        onError: (error) => toast(error instanceof Error ? error.message : "Resume failed.", "error"),
-                      });
-                    }}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-muted disabled:opacity-50"
-                  >
-                    <Play className="h-4 w-4" />
-                    Resume
-                  </button>
-                </div>
               </div>
               <div className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -708,6 +752,51 @@ export function Billing() {
               </p>
             </CardContent>
           </Card>
+
+          {/* Top-Up Credits */}
+          <Card>
+            <CardContent className="space-y-4 py-5">
+              <div>
+                <h2 className="text-lg font-semibold">Top-Up Credits</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Credits never expire. While your top-up balance is above $0, monthly request limits are lifted.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {TOPUP_PACKS.map((pack) => (
+                  <div
+                    key={pack.id}
+                    className={`relative flex flex-col rounded-lg border p-4 ${pack.popular ? "border-primary/40 bg-primary/5" : "border-border"}`}
+                  >
+                    {pack.popular && (
+                      <span className="absolute -top-2.5 left-3 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                        Popular
+                      </span>
+                    )}
+                    <p className="text-base font-semibold">{pack.price}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">${(pack.credits / 100).toFixed(2)} value</p>
+                    <button
+                      type="button"
+                      disabled={topUpMutation.isPending}
+                      onClick={() => {
+                        topUpMutation.mutate(pack.id, {
+                          onError: (error) =>
+                            toast(error instanceof Error ? error.message : "Unable to start top-up.", "error"),
+                        });
+                      }}
+                      className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
+                    >
+                      {topUpMutation.isPending && topUpMutation.variables === pack.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Buy"
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </>
       )}
 
@@ -732,23 +821,30 @@ export function Billing() {
             <div className="grid gap-4 lg:grid-cols-3">
               {overview.plans.map((plan) => {
                 const planId = checkoutPlanId(plan.id);
-                const price = plan.prices[selectedCycle] ?? plan.prices.month;
+                // Max only supports monthly billing
+                const effectiveCycle: BillingCycle = plan.id === "max" ? "month" : selectedCycle;
+                const price = plan.prices[effectiveCycle] ?? plan.prices.month;
                 const hasActiveCurrentSubscription =
                   overview.subscription.status !== "NONE" &&
                   overview.subscription.status !== "CANCELED";
                 const isCurrent = hasActiveCurrentSubscription && plan.id === overview.currentPlan.id;
+                const isDowngrade = hasActiveCurrentSubscription && plan.id !== "free" && PLAN_TIER[plan.id] < PLAN_TIER[overview.currentPlan.id];
+                const canSelect = Boolean(planId) && !isCurrent && !isDowngrade && plan.checkoutEnabled;
                 return (
-                  <div key={plan.id} className="flex min-h-[300px] flex-col rounded-lg border border-border p-4">
+                  <div key={plan.id} className={`flex min-h-[300px] flex-col rounded-lg border p-4 ${plan.id === "max" ? "border-primary/30" : "border-border"}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="font-semibold">{plan.name}</h3>
                         <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
                       </div>
-                      {isCurrent && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Current</span>}
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        {isCurrent && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Current</span>}
+                        {plan.id === "max" && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Monthly only</span>}
+                      </div>
                     </div>
                     <div className="mt-4 text-2xl font-semibold">
                       {price ? formatMoneyMinor(price.amountMinor, price.currency) : "Custom"}
-                      {price && <span className="text-sm font-normal text-muted-foreground"> / {selectedCycle}</span>}
+                      {price && <span className="text-sm font-normal text-muted-foreground"> / mo</span>}
                     </div>
                     {plan.trialDays > 0 && <p className="mt-1 text-xs text-muted-foreground">{plan.trialDays}-day free trial</p>}
                     <div className="mt-4 flex-1 space-y-2">
@@ -761,17 +857,14 @@ export function Billing() {
                     </div>
                     <button
                       type="button"
-                      disabled={!planId || isCurrent || !plan.checkoutEnabled}
+                      disabled={!canSelect}
                       onClick={() => {
-                        if (!planId) {
-                          toast("Contact sales for enterprise billing.", "info");
-                          return;
-                        }
-                        setPlanDialog({ planId, billingCycle: selectedCycle });
+                        if (!planId) return;
+                        setPlanDialog({ planId, billingCycle: effectiveCycle });
                       }}
                       className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
                     >
-                      {isCurrent ? "Current Plan" : plan.checkoutEnabled ? "Select Plan" : "Contact Sales"}
+                      {isCurrent ? "Current Plan" : isDowngrade ? "Downgrade Not Available" : canSelect ? "Select Plan" : plan.checkoutEnabled ? "Included" : "Not Available"}
                     </button>
                   </div>
                 );
@@ -966,19 +1059,30 @@ export function Billing() {
                 <span>{statusLabel(planDialog.planId)} · {planDialog.billingCycle}</span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">Due today</span>
+                <span className="text-muted-foreground">{planDialog.billingCycle === "year" ? "Annual price" : "Monthly price"}</span>
+                <span>
+                  {prorationPreview.data
+                    ? `${formatMoneyMinor(prorationPreview.data.newRecurringAmount.amountMinor, prorationPreview.data.newRecurringAmount.currency)} / ${planDialog.billingCycle === "year" ? "yr" : "mo"}`
+                    : prorationPreview.isFetching ? "Calculating…" : "Available at checkout"}
+                </span>
+              </div>
+              {prorationPreview.data && prorationPreview.data.creditApplied.amountMinor > 0 && (
+                <>
+                  <div className="flex justify-between gap-3 text-nirex-success">
+                    <span>Unused time on current plan</span>
+                    <span>−{formatMoneyMinor(prorationPreview.data.creditApplied.amountMinor, prorationPreview.data.creditApplied.currency)}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Prorated refund for remaining days on your current subscription
+                  </p>
+                </>
+              )}
+              <div className="flex justify-between gap-3 border-t border-border pt-2 font-medium">
+                <span>Due today</span>
                 <span>
                   {prorationPreview.data
                     ? formatMoneyMinor(prorationPreview.data.amountDueToday.amountMinor, prorationPreview.data.amountDueToday.currency)
-                    : prorationPreview.isFetching ? "Calculating" : "Available at checkout"}
-                </span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">Recurring</span>
-                <span>
-                  {prorationPreview.data
-                    ? formatMoneyMinor(prorationPreview.data.newRecurringAmount.amountMinor, prorationPreview.data.newRecurringAmount.currency)
-                    : "Available at checkout"}
+                    : prorationPreview.isFetching ? "Calculating…" : "Available at checkout"}
                 </span>
               </div>
               {selectedPlanTrialDays > 0 && (
@@ -988,6 +1092,9 @@ export function Billing() {
                 </div>
               )}
             </div>
+            {prorationPreview.data?.description && (
+              <p className="mt-2 text-xs text-muted-foreground">{prorationPreview.data.description}</p>
+            )}
             <div className="mt-4">
               <label className="text-sm font-medium" htmlFor="discount-code">Discount code</label>
               <div className="mt-2 flex gap-2">

@@ -21,18 +21,19 @@ interface ToastProviderProps {
 
 export function ToastProvider({ children }: ToastProviderProps) {
     const toast = (message: string, type: "success" | "error" | "info" | "warning" = "info") => {
+        const id = `${type}:${message}`;
         switch (type) {
             case "success":
-                sonnerToast.success(message);
+                sonnerToast.success(message, { id });
                 break;
             case "error":
-                sonnerToast.error(message);
+                sonnerToast.error(message, { id });
                 break;
             case "warning":
-                sonnerToast.warning(message);
+                sonnerToast.warning(message, { id });
                 break;
             default:
-                sonnerToast.info(message);
+                sonnerToast.info(message, { id });
         }
     };
 

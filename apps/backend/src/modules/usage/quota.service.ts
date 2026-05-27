@@ -67,7 +67,7 @@ function roundCredits(value: number): number {
 }
 
 function isBillingPlanId(value: string | undefined): value is BillingPlanId {
-  return value === 'free' || value === 'pro' || value === 'enterprise' || value === 'custom';
+  return value === 'free' || value === 'go' || value === 'pro' || value === 'plus' || value === 'max' || value === 'enterprise' || value === 'custom';
 }
 
 function normalizePlanId(value: string | undefined): BillingPlanId {
@@ -87,7 +87,7 @@ function isDuplicateKeyError(error: unknown): boolean {
 
 function quotaExceededError(): AppError {
   return new AppError(
-    'Credit quota exceeded. Upgrade your plan or wait for the next billing period.',
+    'Balance limit reached. Upgrade your plan or wait for the next billing period.',
     402,
     'QUOTA_EXCEEDED'
   );
@@ -421,11 +421,11 @@ export class QuotaService {
         kind: 'usage',
         severity: exhausted ? 'error' : 'warning',
         title: exhausted
-          ? 'Credit quota reached'
-          : `You've used ${Math.round(threshold * 100)}% of your credits`,
+          ? 'Balance limit reached'
+          : `You've used ${Math.round(threshold * 100)}% of your balance`,
         message: exhausted
-          ? `You've used all the credits included with ${planName} for this period. New credit-consuming requests will be blocked until your quota resets or you upgrade.`
-          : `You've used ${Math.round(threshold * 100)}% (${used.toLocaleString('en-US')} / ${limit.toLocaleString('en-US')}) of your credits on ${planName} for the current period.`,
+          ? `You've used all the balance included with ${planName} for this period. New requests will be blocked until your balance resets or you upgrade.`
+          : `You've used ${Math.round(threshold * 100)}% ($${(used / 100).toFixed(2)} / $${(limit / 100).toFixed(2)}) of your balance on ${planName} for the current period.`,
         dedupe_key: dedupeKey,
         metadata: {
           threshold,

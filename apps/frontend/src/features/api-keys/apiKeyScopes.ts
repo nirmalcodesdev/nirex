@@ -24,7 +24,7 @@ export const API_KEY_SCOPE_METADATA: Array<{
   {
     scope: "usage:read",
     label: "Read usage",
-    description: "Access credit usage charts, export data, and analyze quota trends.",
+    description: "Access balance usage charts, export data, and analyze quota trends.",
     group: "Usage",
     recommended: true,
   },

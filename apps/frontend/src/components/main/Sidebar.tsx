@@ -25,6 +25,7 @@ import { usePlansDialog } from "../../hooks/usePlansDialog";
 import { signOutUser } from "../../features/auth/authSlice";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { useNotificationsQuery } from "../../features/notifications/useNotifications";
+import { useBillingOverviewQuery } from "../../features/billing";
 
 // ============================================================================
 // Types & Context
@@ -142,6 +143,26 @@ export function DesktopSidebar() {
     const location = useLocation();
     const dispatch = useAppDispatch();
     const user = useAppSelector((state) => state.auth.user);
+    const { data: billingOverview } = useBillingOverviewQuery();
+    const currentPlanId = billingOverview?.usage?.includedCredits !== undefined
+      ? billingOverview?.currentPlan?.id ?? "free"
+      : "free";
+    const balanceUsd = billingOverview?.usage?.balanceUsd ?? 0;
+    const includedCredits = billingOverview?.usage?.includedCredits ?? 0;
+    const topupBalance = billingOverview?.usage?.topupBalance ?? 0;
+    const isMaxPlan = currentPlanId === "max";
+    const quotaLifted = billingOverview?.usage?.quotaLifted ?? false;
+    const monthlyRequestCount = billingOverview?.usage?.monthlyRequestCount ?? 0;
+    const requestQuota = billingOverview?.usage?.requestQuota ?? null;
+    const upgradeLabel = isMaxPlan
+      ? "Max plan"
+      : currentPlanId === "plus"
+        ? "Upgrade to Max"
+        : currentPlanId === "pro"
+          ? "Upgrade to Plus"
+          : currentPlanId === "go"
+            ? "Upgrade to Pro"
+            : "Upgrade to Go";
     const { data: notifications } = useNotificationsQuery({
         limit: 1,
         includeRead: true,
@@ -382,19 +403,37 @@ export function DesktopSidebar() {
                                     )}
                                 >
                                     <div className="p-3 bg-gradient-to-br from-nirex-accent/10 to-nirex-accent/5 border-b border-border">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <Sparkles size={14} className="text-nirex-accent" />
-                                            <span className="text-xs font-semibold">Pro</span>
+                                        <div className="flex items-center justify-between gap-2 mb-1">
+                                            <div className="flex items-center gap-1.5">
+                                                <Sparkles size={14} className="text-nirex-accent" />
+                                                <span className="text-xs font-semibold capitalize">{currentPlanId} plan</span>
+                                            </div>
+                                            <span className="text-xs font-medium text-nirex-accent">${balanceUsd.toFixed(2)}</span>
                                         </div>
-                                        <button
-                                            onClick={() => {
-                                                openPlansDialog();
-                                                setIsUserMenuOpen(false);
-                                            }}
-                                            className="w-full py-1.5 px-3 rounded-md bg-nirex-accent text-nirex-text-inverse text-xs font-medium"
-                                        >
-                                            Upgrade
-                                        </button>
+                                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-1">
+                                            <span>Included: ${((includedCredits) / 100).toFixed(2)}</span>
+                                            <span>Top-up: ${((topupBalance) / 100).toFixed(2)}</span>
+                                        </div>
+                                        <p className={`text-[10px] mb-2 ${isMaxPlan || quotaLifted ? "text-nirex-success" : "text-muted-foreground"}`}>
+                                            {isMaxPlan
+                                                ? "Unlimited requests · Max plan"
+                                                : quotaLifted
+                                                    ? `${monthlyRequestCount.toLocaleString()} req this month · no limit`
+                                                    : requestQuota
+                                                        ? `${monthlyRequestCount.toLocaleString()} / ${requestQuota.toLocaleString()} requests this month`
+                                                        : ""}
+                                        </p>
+                                        {!isMaxPlan && (
+                                            <button
+                                                onClick={() => {
+                                                    openPlansDialog();
+                                                    setIsUserMenuOpen(false);
+                                                }}
+                                                className="w-full py-1.5 px-3 rounded-md bg-nirex-accent text-nirex-text-inverse text-xs font-medium"
+                                            >
+                                                {upgradeLabel}
+                                            </button>
+                                        )}
                                     </div>
                                     <div className="p-1.5">
                                         <button

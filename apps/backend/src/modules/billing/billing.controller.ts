@@ -10,6 +10,7 @@ import type {
   ChangePlanRequest,
   CreateCheckoutSessionRequest,
   CreatePortalSessionRequest,
+  CreateTopUpSessionRequest,
   PauseSubscriptionRequest,
   ProrationPreviewQuery,
   ResumeSubscriptionRequest,
@@ -64,6 +65,14 @@ export async function createCheckoutSession(req: Request, res: Response): Promis
   const session = await billingService.createCheckoutSession(
     getUserId(req),
     req.body as CreateCheckoutSessionRequest,
+  );
+  res.status(201).json({ status: 'success', data: session });
+}
+
+export async function createTopUpSession(req: Request, res: Response): Promise<void> {
+  const session = await billingService.createTopUpSession(
+    getUserId(req),
+    req.body as CreateTopUpSessionRequest,
   );
   res.status(201).json({ status: 'success', data: session });
 }

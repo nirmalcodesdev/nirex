@@ -10,6 +10,7 @@ import {
   changePlanSchema,
   createCheckoutSessionSchema,
   createPortalSessionSchema,
+  createTopUpSessionSchema,
   invoiceIdParamSchema,
   pauseSubscriptionSchema,
   paymentMethodIdParamSchema,
@@ -74,6 +75,13 @@ protectedRouter.post(
   rejectRawCardData,
   validate(createCheckoutSessionSchema),
   asyncWrapper(billingController.createCheckoutSession),
+);
+protectedRouter.post(
+  '/topup-sessions',
+  billingMutationLimiter,
+  requireApiKeyScopes(['billing:write']),
+  validate(createTopUpSessionSchema),
+  asyncWrapper(billingController.createTopUpSession),
 );
 protectedRouter.post(
   '/portal-sessions',

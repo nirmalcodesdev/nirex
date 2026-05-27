@@ -11,10 +11,12 @@ import type {
   CreateCheckoutSessionRequest,
   CreateCheckoutSessionResponse,
   CreatePortalSessionRequest,
+  CreateTopUpSessionResponse,
   PauseSubscriptionRequest,
   ProrationPreviewQuery,
   ResumeSubscriptionRequest,
   RetryPaymentRequest,
+  TopUpPackId,
   UpdateAutoRenewalRequest,
 } from "@nirex/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -115,6 +117,16 @@ export function useCreateCheckoutSessionMutation() {
   });
 }
 
+export function useCreateTopUpSessionMutation() {
+  return useMutation({
+    mutationFn: (packId: TopUpPackId): Promise<CreateTopUpSessionResponse> =>
+      billingApi.createTopUpSession({ packId }),
+    onSuccess: (data) => {
+      window.location.href = data.checkoutUrl;
+    },
+  });
+}
+
 export function useCreatePortalSessionMutation() {
   return useMutation({
     mutationFn: (input: CreatePortalSessionRequest = {}) => billingApi.createPortalSession(input),
@@ -208,5 +220,7 @@ export function useDownloadInvoicePdfMutation() {
 }
 
 export function checkoutPlanId(planId: BillingPlanId): CheckoutPlanId | null {
-  return planId === "free" || planId === "pro" || planId === "enterprise" ? planId : null;
+  if (planId === "free" || planId === "go" || planId === "pro" || planId === "plus" || planId === "max") return planId;
+  if (planId === "enterprise") return planId;
+  return null;
 }

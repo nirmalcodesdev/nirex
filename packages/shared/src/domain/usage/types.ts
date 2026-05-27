@@ -44,6 +44,14 @@ export interface UsageCurrentPlan {
   credit_period_end: string | null; // ISO date
   next_credit_reset_at: string | null; // ISO date
   credits_expire_at: string | null; // ISO date
+  // Live credit balance from user record
+  remaining_included_credits: number;
+  topup_balance: number;
+  total_credits: number;
+  balance_usd: number;
+  monthly_request_count: number;
+  request_quota: number | null;
+  quota_lifted: boolean;
 }
 
 export interface UsageOverviewResponse {

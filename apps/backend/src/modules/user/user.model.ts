@@ -9,6 +9,8 @@ import {
   type IUser,
 } from '../../types/index.js';
 
+const FREE_INCLUDED_CREDITS_DEFAULT = 500;
+
 // Re-export shared types for Mongoose-specific extensions
 export type { LocalProviderData, GoogleProviderData, GithubProviderData, ProviderData, IProvider };
 
@@ -17,6 +19,11 @@ export type { LocalProviderData, GoogleProviderData, GithubProviderData, Provide
 
 export interface IUserDocument extends IUser, Document {
   _id: Types.ObjectId;
+  // Billing / credit fields
+  planId: 'free' | 'pro' | 'max';
+  includedCredits: number;
+  topupBalance: number;
+  monthlyRequestCount: number;
   twoFactor?: {
     enabled: boolean;
     secret?: {
@@ -101,6 +108,11 @@ const UserSchema = new Schema<IUserDocument>(
     failedSigninAttempts: { type: Number, default: 0 },
     lockedUntil: { type: Date },
     twoFactor: { type: TwoFactorSchema, default: () => ({ enabled: false, backupCodes: [] }) },
+    // Billing / credit tracking (atomic, updated transactionally)
+    planId: { type: String, enum: ['free', 'go', 'pro', 'plus', 'max'], default: 'free', required: true },
+    includedCredits: { type: Number, default: FREE_INCLUDED_CREDITS_DEFAULT, min: 0, required: true },
+    topupBalance: { type: Number, default: 0, min: 0, required: true },
+    monthlyRequestCount: { type: Number, default: 0, min: 0, required: true },
   },
   { timestamps: true }
 );

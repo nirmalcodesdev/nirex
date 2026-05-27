@@ -5,7 +5,8 @@ import type {
   UsageRange,
   UsageTopProject,
 } from '@nirex/shared';
-import { DEFAULT_CREDITS_LIMIT } from '@nirex/shared';
+import { DEFAULT_CREDITS_LIMIT, CREDITS_PER_DOLLAR, getPlanRequestQuota } from '@nirex/shared';
+import { UserModel } from '../user/user.model.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
 import { billingRepository } from '../billing/billing.repository.js';
 import { getBillingPlan } from '../billing/billing.catalog.js';
@@ -159,7 +160,7 @@ function escapeCsv(value: string | number): string {
 }
 
 function isBillingPlanId(value: string | undefined): value is BillingPlanId {
-  return value === 'free' || value === 'pro' || value === 'enterprise' || value === 'custom';
+  return value === 'free' || value === 'go' || value === 'pro' || value === 'plus' || value === 'max' || value === 'enterprise' || value === 'custom';
 }
 
 function normalizePlanId(value: string | undefined): BillingPlanId {
@@ -526,19 +527,40 @@ export class UsageService {
       credits_total_used: round(lifetimeCreditsUsed, 2),
       chart,
       top_projects: topProjects,
-      current_plan: {
-        plan_id: currentPlan.planId,
-        plan_name: currentPlan.planName,
-        included_credits: spendableCredits.creditsLimit,
-        subscription_status: currentPlan.subscriptionStatus,
-        cancel_at_period_end: currentPlan.cancelAtPeriodEnd,
-        next_billing_date: currentPlan.nextBillingDate,
-        trial_end: currentPlan.trialEnd,
-        credit_period_start: currentPlan.creditPeriod.periodStart.toISOString(),
-        credit_period_end: currentPlan.creditPeriod.periodEndExclusive.toISOString(),
-        next_credit_reset_at: currentPlan.creditPeriod.nextCreditResetAt.toISOString(),
-        credits_expire_at: currentPlan.creditPeriod.creditsExpireAt.toISOString(),
-      },
+      current_plan: await (async () => {
+        const userDoc = await UserModel
+          .findById(userId)
+          .select('planId includedCredits topupBalance monthlyRequestCount')
+          .lean()
+          .exec();
+        const remainingIncluded = userDoc?.includedCredits ?? spendableCredits.creditsRemaining;
+        const topupBalance = userDoc?.topupBalance ?? 0;
+        const totalCredits = remainingIncluded + topupBalance;
+        const liveplanId = (userDoc?.planId ?? currentPlan.planId) as string;
+        const requestQuota = getPlanRequestQuota(liveplanId as Parameters<typeof getPlanRequestQuota>[0]);
+        const monthlyRequestCount = userDoc?.monthlyRequestCount ?? 0;
+        const quotaLifted = topupBalance > 0 || liveplanId === 'max';
+        return {
+          plan_id: currentPlan.planId,
+          plan_name: currentPlan.planName,
+          included_credits: spendableCredits.creditsLimit,
+          subscription_status: currentPlan.subscriptionStatus,
+          cancel_at_period_end: currentPlan.cancelAtPeriodEnd,
+          next_billing_date: currentPlan.nextBillingDate,
+          trial_end: currentPlan.trialEnd,
+          credit_period_start: currentPlan.creditPeriod.periodStart.toISOString(),
+          credit_period_end: currentPlan.creditPeriod.periodEndExclusive.toISOString(),
+          next_credit_reset_at: currentPlan.creditPeriod.nextCreditResetAt.toISOString(),
+          credits_expire_at: currentPlan.creditPeriod.creditsExpireAt.toISOString(),
+          remaining_included_credits: remainingIncluded,
+          topup_balance: topupBalance,
+          total_credits: totalCredits,
+          balance_usd: totalCredits / CREDITS_PER_DOLLAR,
+          monthly_request_count: monthlyRequestCount,
+          request_quota: Number.isFinite(requestQuota) ? requestQuota : null,
+          quota_lifted: quotaLifted,
+        };
+      })(),
     };
 
     await setCachedUsageOverview(userId, range, result);

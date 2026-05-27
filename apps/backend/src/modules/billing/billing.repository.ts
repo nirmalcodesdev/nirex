@@ -81,6 +81,15 @@ export interface PlanInput {
   active: boolean;
 }
 
+export interface ScheduledPlanChangeInput {
+  planCode: BillingPlanId;
+  billingCycle: BillingCycle;
+  scheduledAt: Date;
+  providerPriceId?: string;
+  amountMinor?: number;
+  currency?: string;
+}
+
 export interface SubscriptionInput {
   customerId: Types.ObjectId;
   userId: Types.ObjectId;
@@ -96,6 +105,7 @@ export interface SubscriptionInput {
   currentPeriodEnd?: Date;
   trialStart?: Date;
   trialEnd?: Date;
+  scheduledPlanChange?: ScheduledPlanChangeInput | null;
   metadata?: JsonObject;
 }
 
@@ -408,17 +418,26 @@ export class BillingRepository {
       ? { provider: 'stripe', providerSubscriptionId: input.providerSubscriptionId }
       : { customerId: input.customerId, status: { $ne: 'CANCELED' }, planCode: input.planCode };
 
+    const { scheduledPlanChange, ...restInput } = input;
+    const updateOp: Record<string, unknown> = {
+      $set: {
+        ...restInput,
+        provider: 'stripe',
+        currency: input.currency.toLowerCase(),
+        cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+        deletedAt: undefined,
+      },
+    };
+
+    if (scheduledPlanChange) {
+      (updateOp.$set as Record<string, unknown>).scheduledPlanChange = scheduledPlanChange;
+    } else if (scheduledPlanChange === null) {
+      updateOp.$unset = { scheduledPlanChange: '' };
+    }
+
     const doc = await BillingSubscriptionModel.findOneAndUpdate(
       filter,
-      {
-        $set: {
-          ...input,
-          provider: 'stripe',
-          currency: input.currency.toLowerCase(),
-          cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
-          deletedAt: undefined,
-        },
-      },
+      updateOp,
       { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
     ).exec();
     if (!doc) throw new Error('Failed to upsert billing subscription.');
@@ -431,9 +450,25 @@ export class BillingRepository {
     fields: Partial<Pick<IBillingSubscriptionDocument, 'cancelAtPeriodEnd' | 'canceledAt' | 'pausedAt' | 'endedAt' | 'currentPeriodStart' | 'currentPeriodEnd'>> = {},
     session?: ClientSession,
   ): Promise<IBillingSubscriptionDocument | null> {
+    const setFields: Record<string, unknown> = { status };
+    const unsetFields: Record<string, 1> = {};
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) {
+        unsetFields[key] = 1;
+      } else {
+        setFields[key] = value;
+      }
+    }
+
+    const update: Record<string, unknown> = { $set: setFields };
+    if (Object.keys(unsetFields).length > 0) {
+      update.$unset = unsetFields;
+    }
+
     return BillingSubscriptionModel.findByIdAndUpdate(
       subscriptionId,
-      { $set: { status, ...fields } },
+      update,
       { new: true, ...optionalSession(session) },
     ).exec();
   }
@@ -539,24 +574,33 @@ export class BillingRepository {
       return this.createInvoice(input, session);
     }
 
-    const doc = await BillingInvoiceModel.findOneAndUpdate(
-      {
+    const filter = {
+      provider: 'stripe',
+      userId: input.userId,
+      providerInvoiceId: input.providerInvoiceId,
+    };
+    const update = {
+      $set: {
+        ...input,
         provider: 'stripe',
-        userId: input.userId,
-        providerInvoiceId: input.providerInvoiceId,
+        currency: input.currency.toLowerCase(),
+        deletedAt: undefined,
       },
-      {
-        $set: {
-          ...input,
-          provider: 'stripe',
-          currency: input.currency.toLowerCase(),
-          deletedAt: undefined,
-        },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true, ...optionalSession(session) },
-    ).exec();
-    if (!doc) throw new Error('Failed to upsert billing invoice.');
-    return doc;
+    };
+    const options = { new: true as const, upsert: true as const, setDefaultsOnInsert: true as const, ...optionalSession(session) };
+
+    try {
+      const doc = await BillingInvoiceModel.findOneAndUpdate(filter, update, options).exec();
+      if (!doc) throw new Error('Failed to upsert billing invoice.');
+      return doc;
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error && (error as { code: number }).code === 11000) {
+        const doc = await BillingInvoiceModel.findOneAndUpdate(filter, update, { ...options, upsert: false }).exec();
+        if (!doc) throw new Error('Failed to upsert billing invoice after duplicate key retry.');
+        return doc;
+      }
+      throw error;
+    }
   }
 
   async createInvoiceLineItem(
@@ -601,11 +645,21 @@ export class BillingRepository {
 
     const docs = await BillingInvoiceModel.find(filter)
       .sort({ _id: -1 })
-      .limit(limit + 1)
+      .limit(limit * 2 + 1)
       .session(session ?? null)
       .exec();
-    const items = docs.slice(0, limit);
-    const nextCursor = docs.length > limit ? items[items.length - 1]?._id.toString() ?? null : null;
+
+    const seen = new Set<string>();
+    const deduped: typeof docs = [];
+    for (const doc of docs) {
+      const key = doc.providerInvoiceId ?? doc._id.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(doc);
+    }
+
+    const items = deduped.slice(0, limit);
+    const nextCursor = deduped.length > limit ? items[items.length - 1]?._id.toString() ?? null : null;
     return { items, nextCursor };
   }
 

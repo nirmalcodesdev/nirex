@@ -10,8 +10,41 @@ export interface JsonObject {
 export type JsonArray = JsonValue[];
 
 export type BillingCycle = 'month' | 'year';
-export type BillingPlanId = 'free' | 'pro' | 'enterprise' | 'custom';
+export type BillingPlanId = 'free' | 'go' | 'pro' | 'plus' | 'max' | 'enterprise' | 'custom';
 export type BillingProvider = 'stripe';
+
+export type TopUpPackId = 'small' | 'medium' | 'large' | 'xl';
+
+export interface TopUpPack {
+  id: TopUpPackId;
+  name: string;
+  credits: number;
+  amountMinor: number;
+  currency: string;
+}
+
+export interface CreateTopUpSessionRequest {
+  packId: TopUpPackId;
+  customAmount?: number;
+  successUrl?: string;
+  cancelUrl?: string;
+}
+
+export interface CreateTopUpSessionResponse {
+  sessionId: string;
+  checkoutUrl: string;
+}
+
+export interface CreditBalanceResponse {
+  planId: BillingPlanId;
+  includedCredits: number;
+  topupBalance: number;
+  totalCredits: number;
+  balanceUsd: number;
+  monthlyRequestCount: number;
+  requestQuota: number | null;
+  quotaLifted: boolean;
+}
 
 export type BillingSubscriptionStatus =
   | 'TRIALING'
@@ -181,6 +214,12 @@ export interface BillingRefund {
   createdAt: string;
 }
 
+export interface ScheduledPlanChange {
+  planId: BillingPlanId;
+  billingCycle: BillingCycle;
+  scheduledAt: string;
+}
+
 export interface BillingOverviewSubscription {
   subscriptionId: string | null;
   status: BillingSubscriptionStatus;
@@ -191,6 +230,7 @@ export interface BillingOverviewSubscription {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   trialEnd: string | null;
+  scheduledPlanChange: ScheduledPlanChange | null;
 }
 
 export interface BillingOverviewPaymentMethod {
@@ -210,6 +250,13 @@ export interface BillingOverviewUsage {
   creditPeriodEnd: string | null;
   nextCreditResetAt: string | null;
   creditsExpireAt: string | null;
+  includedCredits: number;
+  topupBalance: number;
+  totalCredits: number;
+  balanceUsd: number;
+  monthlyRequestCount: number;
+  requestQuota: number | null;
+  quotaLifted: boolean;
 }
 
 export interface BillingOverviewKpis {
@@ -301,6 +348,7 @@ export interface ChangePlanRequest {
   planId: Exclude<BillingPlanId, 'custom'>;
   billingCycle: BillingCycle;
   couponCode?: string;
+  downgradeAtPeriodEnd?: boolean;
 }
 
 export interface CancelSubscriptionRequest {

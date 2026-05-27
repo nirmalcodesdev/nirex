@@ -2,6 +2,11 @@ import crypto from 'crypto';
 import { Types } from 'mongoose';
 import {
   DEFAULT_BILLING_CURRENCY,
+  CREDITS_PER_DOLLAR,
+  FREE_INCLUDED_CREDITS,
+  getPlanIncludedCredits,
+  getPlanRequestQuota,
+  getTopUpPack,
   type BillingAdminCustomerSummary,
   type BillingAdminReconciliationReport,
   type BillingAuditLogItem,
@@ -20,14 +25,18 @@ import {
   type BillingSubscription,
   type BillingSubscriptionStatus,
   type CreateNotificationRequest,
+  type CreateTopUpSessionRequest,
+  type CreateTopUpSessionResponse,
   type JsonObject,
   type MoneyAmount,
+  type TopUpPackId,
 } from '@nirex/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
 import {
   sendBillingCheckoutCompletedEmail,
+  sendBillingTopUpCompletedEmail,
   sendBillingPaymentFailedEmail,
   sendBillingPaymentSucceededEmail,
   sendBillingSubscriptionStateEmail,
@@ -41,7 +50,7 @@ import {
 } from '../../utils/mailer.js';
 import { notificationsService } from '../notifications/notifications.service.js';
 import { userRepository } from '../user/user.repository.js';
-import { getBillingPlan, getBillingPlans, getPlanPrice, resolvePlanFromStripePriceId } from './billing.catalog.js';
+import { getBillingPlan, getBillingPlans, getPlanPrice, resolvePlanFromStripePriceId, getStripePriceIdForTopUpPack } from './billing.catalog.js';
 import {
   BillingAuthorizationError,
   BillingError,
@@ -54,6 +63,8 @@ import type {
   IdempotencyStartResult,
 } from './billing.repository.js';
 import { billingRepository } from './billing.repository.js';
+import { CreditTransactionModel } from './billing.model.js';
+import { UserModel } from '../user/user.model.js';
 import {
   type IBillingAuditLogDocument,
   type IBillingCustomerDocument,
@@ -68,6 +79,7 @@ import {
   assertSubscriptionTransition,
   canTransitionSubscription,
 } from './domain/subscription-state-machine.js';
+import { classifyPlanChange, type PlanChangeType } from './domain/plan-hierarchy.js';
 import { Money } from './domain/money.js';
 import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
@@ -307,9 +319,11 @@ function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): Bill
       currentPeriodStart: null,
       currentPeriodEnd: null,
       trialEnd: null,
+      scheduledPlanChange: null,
     };
   }
 
+  const spc = doc.scheduledPlanChange;
   return {
     subscriptionId: doc._id.toString(),
     status: doc.status,
@@ -320,6 +334,13 @@ function mapOverviewSubscription(doc: IBillingSubscriptionDocument | null): Bill
     currentPeriodStart: iso(doc.currentPeriodStart),
     currentPeriodEnd: iso(doc.currentPeriodEnd),
     trialEnd: iso(doc.trialEnd),
+    scheduledPlanChange: spc
+      ? {
+          planId: spc.planCode,
+          billingCycle: spc.billingCycle,
+          scheduledAt: spc.scheduledAt.toISOString(),
+        }
+      : null,
   };
 }
 
@@ -869,15 +890,343 @@ export class WebhookService {
   }
 
   private async handleCheckoutCompleted(event: GatewayEvent, session: BillingSession): Promise<void> {
+    const data = readRecord(event.data);
+    const mode = readString(data, 'mode');
+    const metadata = readNestedRecord(data, 'metadata');
+    const packId = readString(metadata, 'packId') as TopUpPackId | undefined;
+    const clientRef = readString(data, 'client_reference_id');
+
+    // Top-up payment checkout
+    if (mode === 'payment' && packId && clientRef) {
+      if (!Types.ObjectId.isValid(clientRef)) {
+        await this.auditService.record(
+          { action: 'webhook.checkout.topup.invalid_user', outcome: 'IGNORED', metadata: { providerEventId: event.id, clientRef } },
+          { actorType: 'WEBHOOK', actorId: event.id },
+          session,
+        );
+        return;
+      }
+
+      const pack = getTopUpPack(packId);
+      if (!pack) {
+        await this.auditService.record(
+          { action: 'webhook.checkout.topup.invalid_pack', outcome: 'IGNORED', metadata: { providerEventId: event.id, packId } },
+          { actorType: 'WEBHOOK', actorId: event.id },
+          session,
+        );
+        return;
+      }
+
+      const userId = new Types.ObjectId(clientRef);
+      const idempotencyKey = `topup:checkout:${event.id}`;
+
+      // Idempotency check — skip if already processed
+      const existing = await CreditTransactionModel.findOne({ idempotencyKey }).session(session).exec();
+      if (existing) {
+        await this.auditService.record(
+          { userId, action: 'webhook.checkout.topup.duplicate', outcome: 'IGNORED', metadata: { providerEventId: event.id, packId } },
+          { actorType: 'WEBHOOK', actorId: event.id },
+          session,
+        );
+        return;
+      }
+
+      // Atomically credit the top-up balance
+      const userBefore = await UserModel.findOneAndUpdate(
+        { _id: userId },
+        { $inc: { topupBalance: pack.credits } },
+        { session, returnDocument: 'before', new: false },
+      ).exec();
+
+      if (!userBefore) {
+        logger.warn('Top-up webhook: user not found', { userId: clientRef, packId, providerEventId: event.id });
+        return;
+      }
+
+      await CreditTransactionModel.create(
+        [{
+          userId,
+          amount: pack.credits,
+          type: 'topup',
+          source: 'topup',
+          includedCreditsBefore: userBefore.includedCredits ?? 0,
+          topupBalanceBefore: userBefore.topupBalance ?? 0,
+          idempotencyKey,
+          metadata: { packId, providerEventId: event.id, amountMinor: pack.amountMinor },
+        }],
+        { session },
+      );
+
+      // Persist a billing invoice record so the top-up appears in the invoice list
+      const topupCustomer = await billingRepository.findCustomerByUserId(userId, session);
+      if (topupCustomer) {
+        await billingRepository.upsertInvoice(
+          {
+            customerId: topupCustomer._id,
+            userId,
+            providerInvoiceId: readString(data, 'id'),
+            description: `Top-up: ${pack.name} ($${(pack.amountMinor / CREDITS_PER_DOLLAR).toFixed(2)})`,
+            status: 'PAID',
+            currency: normalizeCurrency(readString(data, 'currency') ?? pack.currency),
+            subtotalMinor: pack.amountMinor,
+            taxMinor: 0,
+            discountMinor: 0,
+            totalMinor: pack.amountMinor,
+            amountDueMinor: 0,
+            amountPaidMinor: pack.amountMinor,
+            amountRemainingMinor: 0,
+            paidAt: event.createdAt,
+            providerCreatedAt: event.createdAt,
+          },
+          session,
+        );
+      }
+
+      await this.auditService.record(
+        {
+          userId,
+          action: 'webhook.checkout.topup',
+          outcome: 'SUCCESS',
+          metadata: { providerEventId: event.id, packId, credits: pack.credits },
+        },
+        { actorType: 'WEBHOOK', actorId: event.id },
+        session,
+      );
+
+      // Notify the user
+      const user = await userRepository.findById(userId);
+      if (user) {
+        await createBillingNotificationSafely(
+          userId,
+          {
+            kind: 'billing',
+            severity: 'info',
+            title: 'Top-up added',
+            message: `$${(pack.amountMinor / 100).toFixed(2)} has been added to your balance.`,
+            dedupe_key: idempotencyKey,
+          },
+          { providerEventId: event.id },
+        );
+        if (user.email) {
+          await sendBillingEmailSafely(
+            'topup_completed',
+            userId,
+            () => sendBillingTopUpCompletedEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName: pack.name,
+              amountMinor: pack.amountMinor,
+              currency: pack.currency,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+            }),
+            { providerEventId: event.id },
+          );
+        }
+      }
+
+      await invalidateBillingDependentCachesSafely(userId, { source: 'webhook.checkout.topup', providerEventId: event.id });
+      return;
+    }
+
+    // Regular subscription checkout
+    if (mode === 'subscription') {
+      const upgradeFromSubscriptionId = readString(metadata, 'upgradeFromSubscriptionId');
+      if (upgradeFromSubscriptionId) {
+        // The user upgraded via Checkout — cancel the superseded subscription now.
+        try {
+          await this.gateway.cancelSubscription(upgradeFromSubscriptionId, {
+            atPeriodEnd: false,
+            idempotencyKey: `billing:checkout-upgrade-cancel:${event.id}`,
+          });
+        } catch (error) {
+          logger.warn('Failed to cancel superseded subscription after checkout upgrade.', {
+            service: 'billing',
+            operation: 'handleCheckoutCompleted',
+            upgradeFromSubscriptionId,
+            providerEventId: event.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
     await this.auditService.record(
       {
         action: 'webhook.checkout.completed',
         outcome: 'SUCCESS',
-        metadata: { providerEventId: event.id },
+        metadata: { providerEventId: event.id, mode: mode ?? null },
       },
       { actorType: 'WEBHOOK', actorId: event.id },
       session,
     );
+  }
+
+  async syncUserPlanAndCredits(
+    userId: Types.ObjectId,
+    newPlanCode: BillingPlanId,
+    status: string,
+    existing: { planCode: string; status: string } | null,
+    providerEventId: string,
+    session: BillingSession,
+  ): Promise<void> {
+    const validPlanId: 'free' | 'go' | 'pro' | 'plus' | 'max' =
+      newPlanCode === 'go' ? 'go' : newPlanCode === 'pro' ? 'pro' : newPlanCode === 'plus' ? 'plus' : newPlanCode === 'max' ? 'max' : 'free';
+
+    if (status === 'CANCELED') {
+      const userBefore = await UserModel.findOneAndUpdate(
+        { _id: userId },
+        {
+          $set: {
+            planId: 'free',
+            includedCredits: FREE_INCLUDED_CREDITS,
+            monthlyRequestCount: 0,
+          },
+        },
+        { session, returnDocument: 'before', new: false },
+      ).exec();
+
+      if (userBefore) {
+        const key = `plan:cancel:${providerEventId}`;
+        const exists = await CreditTransactionModel.findOne({ idempotencyKey: key }).session(session).exec();
+        if (!exists) {
+          await CreditTransactionModel.create(
+            [{
+              userId,
+              amount: FREE_INCLUDED_CREDITS,
+              type: 'adjustment',
+              source: 'included',
+              includedCreditsBefore: userBefore.includedCredits ?? 0,
+              topupBalanceBefore: userBefore.topupBalance ?? 0,
+              idempotencyKey: key,
+              metadata: { reason: 'subscription_canceled', providerEventId },
+            }],
+            { session },
+          );
+        }
+      }
+      return;
+    }
+
+    if (status !== 'ACTIVE' && status !== 'TRIALING') return;
+
+    const prevPlanCode = existing?.planCode ?? null;
+    const isNewSubscription = !existing;
+    const isPlanChange = prevPlanCode !== null && prevPlanCode !== newPlanCode;
+
+    if (!isNewSubscription && !isPlanChange) {
+      await UserModel.updateOne(
+        { _id: userId, planId: { $ne: validPlanId } },
+        { $set: { planId: validPlanId } },
+        { session },
+      ).exec();
+      return;
+    }
+
+    const newIncludedCredits = getPlanIncludedCredits(newPlanCode);
+
+    if (isNewSubscription) {
+      const key = `plan:new:${providerEventId}`;
+      const exists = await CreditTransactionModel.findOne({ idempotencyKey: key }).session(session).exec();
+      if (!exists) {
+        const userBefore = await UserModel.findOneAndUpdate(
+          { _id: userId },
+          { $set: { planId: validPlanId, includedCredits: newIncludedCredits } },
+          { session, returnDocument: 'before', new: false },
+        ).exec();
+
+        if (userBefore) {
+          await CreditTransactionModel.create(
+            [{
+              userId,
+              amount: newIncludedCredits,
+              type: 'upgrade',
+              source: 'included',
+              includedCreditsBefore: userBefore.includedCredits ?? 0,
+              topupBalanceBefore: userBefore.topupBalance ?? 0,
+              idempotencyKey: key,
+              metadata: { prevPlanCode: null, newPlanCode, providerEventId },
+            }],
+            { session },
+          );
+        }
+      }
+      return;
+    }
+
+    const changeType = classifyPlanChange(
+      prevPlanCode as BillingPlanId,
+      newPlanCode as BillingPlanId,
+    );
+
+    if (changeType === 'upgrade') {
+      const key = `plan:upgrade:${providerEventId}:${prevPlanCode}:${newPlanCode}`;
+      const exists = await CreditTransactionModel.findOne({ idempotencyKey: key }).session(session).exec();
+      if (!exists) {
+        const oldIncludedCredits = getPlanIncludedCredits(prevPlanCode as BillingPlanId);
+        const userBefore = await UserModel.findOneAndUpdate(
+          { _id: userId },
+          { $set: { planId: validPlanId, includedCredits: newIncludedCredits } },
+          { session, returnDocument: 'before', new: false },
+        ).exec();
+
+        if (userBefore) {
+          const remainingFromOld = Math.max(0, userBefore.includedCredits ?? 0);
+          const upgradeCredit = newIncludedCredits - oldIncludedCredits;
+          const finalIncluded = remainingFromOld + upgradeCredit;
+
+          await UserModel.updateOne(
+            { _id: userId },
+            { $set: { includedCredits: finalIncluded } },
+            { session },
+          ).exec();
+
+          await CreditTransactionModel.create(
+            [{
+              userId,
+              amount: upgradeCredit,
+              type: 'upgrade',
+              source: 'included',
+              includedCreditsBefore: userBefore.includedCredits ?? 0,
+              topupBalanceBefore: userBefore.topupBalance ?? 0,
+              idempotencyKey: key,
+              metadata: { prevPlanCode, newPlanCode, providerEventId, changeType: 'upgrade', remainingFromOld, oldIncludedCredits, upgradeCredit },
+            }],
+            { session },
+          );
+        }
+      }
+    } else if (changeType === 'downgrade') {
+      const key = `plan:downgrade:${providerEventId}:${prevPlanCode}:${newPlanCode}`;
+      const exists = await CreditTransactionModel.findOne({ idempotencyKey: key }).session(session).exec();
+      if (!exists) {
+        const userBefore = await UserModel.findOneAndUpdate(
+          { _id: userId },
+          { $set: { planId: validPlanId, includedCredits: newIncludedCredits } },
+          { session, returnDocument: 'before', new: false },
+        ).exec();
+
+        if (userBefore) {
+          await CreditTransactionModel.create(
+            [{
+              userId,
+              amount: newIncludedCredits,
+              type: 'downgrade',
+              source: 'included',
+              includedCreditsBefore: userBefore.includedCredits ?? 0,
+              topupBalanceBefore: userBefore.topupBalance ?? 0,
+              idempotencyKey: key,
+              metadata: { prevPlanCode, newPlanCode, providerEventId, changeType: 'downgrade' },
+            }],
+            { session },
+          );
+        }
+      }
+    } else {
+      await UserModel.updateOne(
+        { _id: userId, planId: { $ne: validPlanId } },
+        { $set: { planId: validPlanId } },
+        { session },
+      ).exec();
+    }
   }
 
   private async handleSubscriptionUpsert(
@@ -924,6 +1273,51 @@ export class WebhookService {
 
     const user = await userRepository.findById(customer.userId);
     const planName = mappedPlan?.name ?? (existing ? getBillingPlan(existing.planCode)?.name : undefined) ?? 'Nirex Subscription';
+    const newPlanCode = subscription.planCode as BillingPlanId;
+
+    // Sync user.planId and grant credits on plan changes.
+    // Guard: when a CANCELED event arrives but the user already has a different active
+    // subscription (created by the new Checkout), this is the superseded old subscription.
+    // Skip syncUserPlanAndCredits so we don't reset the user back to the free plan.
+    let skipPlanSync = false;
+    if (status === 'CANCELED') {
+      const latestActiveSub = await billingRepository.findLatestSubscriptionByUserId(
+        customer.userId,
+        ACTIVE_SUBSCRIPTION_STATUSES,
+        session,
+      );
+      if (latestActiveSub && latestActiveSub.providerSubscriptionId !== providerSubscriptionId) {
+        skipPlanSync = true;
+        await this.auditService.record(
+          {
+            userId: customer.userId,
+            customerId: customer._id,
+            subscriptionId: subscription._id,
+            action: 'webhook.subscription.superseded_skip',
+            outcome: 'IGNORED',
+            metadata: {
+              providerSubscriptionId,
+              activeSubscriptionId: latestActiveSub.providerSubscriptionId ?? null,
+              providerEventId: event.id,
+            },
+          },
+          { actorType: 'WEBHOOK', actorId: event.id },
+          session,
+        );
+      }
+    }
+    if (!skipPlanSync) {
+      await this.syncUserPlanAndCredits(
+        customer.userId,
+        newPlanCode,
+        status,
+        existing,
+        providerSubscriptionId ?? event.id,
+        session,
+      );
+    }
+
+    await this.executeScheduledDowngradeIfNeeded(subscription, customer, event, session);
 
     await invalidateUsageOverviewCacheSafely(customer.userId, {
       source: 'webhook.subscription',
@@ -1008,6 +1402,129 @@ export class WebhookService {
     }
   }
 
+  private async executeScheduledDowngradeIfNeeded(
+    subscription: IBillingSubscriptionDocument,
+    customer: { _id: Types.ObjectId; userId: Types.ObjectId },
+    event: GatewayEvent,
+    session: BillingSession,
+  ): Promise<void> {
+    const scheduledChange = subscription.scheduledPlanChange;
+    if (!scheduledChange || !scheduledChange.providerPriceId || !subscription.providerSubscriptionId) return;
+
+    const scheduledAt = scheduledChange.scheduledAt instanceof Date
+      ? scheduledChange.scheduledAt
+      : new Date(scheduledChange.scheduledAt as unknown as string);
+    if (scheduledAt > new Date()) return;
+
+    try {
+      await this.gateway.updateSubscription(subscription.providerSubscriptionId, {
+        priceId: scheduledChange.providerPriceId,
+        prorationBehavior: 'none',
+        metadata: {
+          userId: customer.userId.toString(),
+          planId: scheduledChange.planCode,
+          billingCycle: scheduledChange.billingCycle,
+          changeType: 'scheduled_downgrade',
+        },
+      });
+
+      const newPlanPrice = getPlanPrice(scheduledChange.planCode, scheduledChange.billingCycle);
+      await billingRepository.upsertSubscription(
+        {
+          customerId: subscription.customerId,
+          userId: customer.userId,
+          planCode: scheduledChange.planCode,
+          billingCycle: scheduledChange.billingCycle,
+          status: subscription.status,
+          providerSubscriptionId: subscription.providerSubscriptionId,
+          providerPriceId: scheduledChange.providerPriceId,
+          currency: scheduledChange.currency ?? subscription.currency,
+          amountMinor: scheduledChange.amountMinor ?? newPlanPrice?.amountMinor ?? subscription.amountMinor,
+          cancelAtPeriodEnd: false,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          trialStart: subscription.trialStart,
+          trialEnd: subscription.trialEnd,
+          scheduledPlanChange: null,
+          metadata: { source: 'scheduled_downgrade_fallback', providerEventId: event.id },
+        },
+        session,
+      );
+
+      await this.syncUserPlanAndCredits(
+        customer.userId,
+        scheduledChange.planCode,
+        subscription.status,
+        { planCode: subscription.planCode, status: subscription.status },
+        event.id,
+        session,
+      );
+
+      const prevPlanName = getBillingPlan(subscription.planCode)?.name ?? subscription.planCode;
+      const newPlanName = getBillingPlan(scheduledChange.planCode)?.name ?? scheduledChange.planCode;
+
+      await this.auditService.record(
+        {
+          userId: customer.userId,
+          customerId: customer._id,
+          subscriptionId: subscription._id,
+          action: 'subscription.scheduled_downgrade_executed_fallback',
+          outcome: 'SUCCESS',
+          before: { planId: subscription.planCode, billingCycle: subscription.billingCycle },
+          after: { planId: scheduledChange.planCode, billingCycle: scheduledChange.billingCycle },
+          metadata: { providerEventId: event.id },
+        },
+        { actorType: 'WEBHOOK', actorId: event.id },
+        session,
+      );
+
+      await notificationsService.createNotification(customer.userId, {
+        kind: 'billing',
+        severity: 'info',
+        title: 'Plan downgrade completed',
+        message: `Your plan has changed from ${prevPlanName} to ${newPlanName} as scheduled. Your balance has been updated for the new billing period.`,
+      });
+
+      const renewalUser = await userRepository.findById(customer.userId);
+      if (renewalUser?.email) {
+        await sendBillingEmailSafely(
+          'subscription_downgrade_executed',
+          customer.userId,
+          () => sendBillingSubscriptionStateEmail({
+            to: renewalUser.email,
+            customerName: renewalUser.fullName,
+            planName: newPlanName,
+            statusLabel: 'Downgrade Completed',
+            detail: `Your plan has been changed from ${prevPlanName} to ${newPlanName} as scheduled. Your balance has been updated for the new billing period.`,
+            billingPortalUrl: `${env.APP_URL}/billing`,
+          }),
+          { subscriptionId: subscription._id.toString(), changeType: 'scheduled_downgrade' },
+        );
+      }
+    } catch (downgradeError) {
+      logger.error('Failed to execute scheduled plan downgrade (fallback).', {
+        subscriptionId: subscription._id.toString(),
+        scheduledPlanCode: scheduledChange.planCode,
+        error: downgradeError instanceof Error ? downgradeError.message : String(downgradeError),
+      });
+      await this.auditService.record(
+        {
+          userId: customer.userId,
+          customerId: customer._id,
+          subscriptionId: subscription._id,
+          action: 'subscription.scheduled_downgrade_failed_fallback',
+          outcome: 'FAILURE',
+          metadata: {
+            providerEventId: event.id,
+            error: downgradeError instanceof Error ? downgradeError.message : String(downgradeError),
+          },
+        },
+        { actorType: 'WEBHOOK', actorId: event.id },
+        session,
+      );
+    }
+  }
+
   private async handleInvoiceEvent(
     event: GatewayEvent,
     status: 'PAID' | 'OPEN',
@@ -1055,6 +1572,9 @@ export class WebhookService {
       session,
     );
 
+    const billingReason = readString(data, 'billing_reason');
+    const isInitialPurchase = billingReason === 'subscription_create';
+
     if (subscription && !paid && canTransitionSubscription(subscription.status, 'PAST_DUE')) {
       await this.subscriptionService.transition(
         subscription,
@@ -1063,6 +1583,178 @@ export class WebhookService {
         {},
         session,
       );
+    }
+
+    // On successful subscription renewal, reset included credits and request count
+    if (paid && subscription) {
+      const isRenewal = billingReason === 'subscription_cycle' || billingReason === 'subscription';
+      if (isRenewal) {
+        const scheduledChange = subscription.scheduledPlanChange;
+
+        if (scheduledChange && scheduledChange.providerPriceId && subscription.providerSubscriptionId) {
+          try {
+            await this.gateway.updateSubscription(subscription.providerSubscriptionId, {
+              priceId: scheduledChange.providerPriceId,
+              prorationBehavior: 'none',
+              metadata: {
+                userId: customer.userId.toString(),
+                planId: scheduledChange.planCode,
+                billingCycle: scheduledChange.billingCycle,
+                changeType: 'scheduled_downgrade',
+              },
+            });
+
+            const newPlanPrice = getPlanPrice(scheduledChange.planCode, scheduledChange.billingCycle);
+            await billingRepository.upsertSubscription(
+              {
+                customerId: subscription.customerId,
+                userId: customer.userId,
+                planCode: scheduledChange.planCode,
+                billingCycle: scheduledChange.billingCycle,
+                status: subscription.status,
+                providerSubscriptionId: subscription.providerSubscriptionId,
+                providerPriceId: scheduledChange.providerPriceId,
+                currency: scheduledChange.currency ?? subscription.currency,
+                amountMinor: scheduledChange.amountMinor ?? newPlanPrice?.amountMinor ?? subscription.amountMinor,
+                cancelAtPeriodEnd: false,
+                currentPeriodStart: toDate(readNumber(data, 'period_start')) ?? subscription.currentPeriodStart,
+                currentPeriodEnd: toDate(readNumber(data, 'period_end')) ?? subscription.currentPeriodEnd,
+                trialStart: subscription.trialStart,
+                trialEnd: subscription.trialEnd,
+                scheduledPlanChange: null,
+                metadata: { source: 'scheduled_downgrade', providerEventId: event.id },
+              },
+              session,
+            );
+
+            await this.syncUserPlanAndCredits(
+              customer.userId,
+              scheduledChange.planCode,
+              subscription.status,
+              { planCode: subscription.planCode, status: subscription.status },
+              event.id,
+              session,
+            );
+
+            const prevPlanName = getBillingPlan(subscription.planCode)?.name ?? subscription.planCode;
+            const newPlanName = getBillingPlan(scheduledChange.planCode)?.name ?? scheduledChange.planCode;
+
+            await this.auditService.record(
+              {
+                userId: customer.userId,
+                customerId: customer._id,
+                subscriptionId: subscription._id,
+                action: 'subscription.scheduled_downgrade_executed',
+                outcome: 'SUCCESS',
+                before: { planId: subscription.planCode, billingCycle: subscription.billingCycle },
+                after: { planId: scheduledChange.planCode, billingCycle: scheduledChange.billingCycle },
+                metadata: { providerEventId: event.id },
+              },
+              { actorType: 'WEBHOOK', actorId: event.id },
+              session,
+            );
+
+            await notificationsService.createNotification(customer.userId, {
+              kind: 'billing',
+              severity: 'info',
+              title: 'Plan downgrade completed',
+              message: `Your plan has changed from ${prevPlanName} to ${newPlanName} as scheduled. Your balance has been updated for the new billing period.`,
+            });
+
+            const renewalUser = await userRepository.findById(customer.userId);
+            if (renewalUser?.email) {
+              await sendBillingEmailSafely(
+                'subscription_downgrade_executed',
+                customer.userId,
+                () => sendBillingSubscriptionStateEmail({
+                  to: renewalUser.email,
+                  customerName: renewalUser.fullName,
+                  planName: newPlanName,
+                  statusLabel: 'Downgrade Completed',
+                  detail: `Your plan has been changed from ${prevPlanName} to ${newPlanName} as scheduled. Your balance has been updated for the new billing period.`,
+                  billingPortalUrl: `${env.APP_URL}/billing`,
+                }),
+                { subscriptionId: subscription._id.toString(), changeType: 'scheduled_downgrade' },
+              );
+            }
+          } catch (downgradeError) {
+            logger.error('Failed to execute scheduled plan downgrade.', {
+              subscriptionId: subscription._id.toString(),
+              scheduledPlanCode: scheduledChange.planCode,
+              error: downgradeError instanceof Error ? downgradeError.message : String(downgradeError),
+            });
+            await this.auditService.record(
+              {
+                userId: customer.userId,
+                customerId: customer._id,
+                subscriptionId: subscription._id,
+                action: 'subscription.scheduled_downgrade_failed',
+                outcome: 'FAILURE',
+                metadata: {
+                  providerEventId: event.id,
+                  error: downgradeError instanceof Error ? downgradeError.message : String(downgradeError),
+                },
+              },
+              { actorType: 'WEBHOOK', actorId: event.id },
+              session,
+            );
+          }
+        } else {
+          const planCode = subscription.planCode as BillingPlanId;
+          const newIncludedCredits = getPlanIncludedCredits(planCode);
+
+          const periodStart = toDate(readNumber(data, 'period_start'));
+          const periodEnd = toDate(readNumber(data, 'period_end'));
+
+          if (periodStart) {
+            await billingRepository.updateSubscriptionState(
+              subscription._id,
+              subscription.status,
+              { currentPeriodStart: periodStart, currentPeriodEnd: periodEnd },
+              session,
+            );
+          }
+
+          const userBefore = await UserModel.findOneAndUpdate(
+            { _id: customer.userId },
+            { $set: { includedCredits: newIncludedCredits, monthlyRequestCount: 0 } },
+            { session, returnDocument: 'before', new: false },
+          ).exec();
+
+          if (userBefore) {
+            const idempotencyKey = `renewal:invoice:${readString(data, 'id') ?? event.id}`;
+            const existing = await CreditTransactionModel.findOne({ idempotencyKey }).session(session).exec();
+            if (!existing) {
+              await CreditTransactionModel.create(
+                [{
+                  userId: customer.userId,
+                  amount: newIncludedCredits,
+                  type: 'renewal',
+                  source: 'included',
+                  includedCreditsBefore: userBefore.includedCredits ?? 0,
+                  topupBalanceBefore: userBefore.topupBalance ?? 0,
+                  idempotencyKey,
+                  metadata: { planCode, providerEventId: event.id, billingReason },
+                }],
+                { session },
+              );
+            }
+          }
+        }
+      } else if (isInitialPurchase) {
+        // Fallback: sync user plan on initial subscription creation
+        // This ensures user.planId is updated even if customer.subscription.created webhook failed
+        // Uses subscription provider ID for idempotency key to match handleSubscriptionUpsert()
+        const newPlanCode = subscription.planCode as BillingPlanId;
+        await this.syncUserPlanAndCredits(
+          customer.userId,
+          newPlanCode,
+          subscription.status,
+          null,
+          subscription.providerSubscriptionId ?? event.id,
+          session,
+        );
+      }
     }
 
     await this.auditService.record(
@@ -1083,31 +1775,34 @@ export class WebhookService {
     const planName = subscription ? getBillingPlan(subscription.planCode)?.name : 'Nirex Subscription';
 
     if (paid) {
-      if (user?.email) {
-        await sendBillingEmailSafely(
-          'payment_succeeded',
-          customer.userId,
-          () => sendBillingPaymentSucceededEmail({
-            to: user.email,
-            customerName: user.fullName,
-            planName,
-            amountCents: totalMinor,
-            currency: normalizeCurrency(readString(data, 'currency')),
-            invoiceNumber: readString(data, 'number'),
-            invoicePdfUrl: readString(data, 'invoice_pdf'),
-            hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
-            paidAt,
-            billingPortalUrl: `${env.APP_URL}/billing`,
-          }),
-          { providerEventId: event.id, providerSubscriptionId: providerSubscriptionId ?? null },
-        );
+      if (!isInitialPurchase) {
+        if (user?.email) {
+          await sendBillingEmailSafely(
+            'payment_succeeded',
+            customer.userId,
+            () => sendBillingPaymentSucceededEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName,
+              amountCents: totalMinor,
+              currency: normalizeCurrency(readString(data, 'currency')),
+              invoiceNumber: readString(data, 'number'),
+              invoicePdfUrl: readString(data, 'invoice_pdf'),
+              hostedInvoiceUrl: readString(data, 'hosted_invoice_url'),
+              paidAt,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+            }),
+            { providerEventId: event.id, providerSubscriptionId: providerSubscriptionId ?? null },
+          );
+        }
+        await notificationsService.createNotification(customer.userId, {
+          kind: 'billing',
+          severity: 'info',
+          title: 'Payment received',
+          message: `We received your payment for ${planName}. Thank you!`,
+          dedupe_key: `billing:payment-received:${readString(data, 'id') ?? event.id}`,
+        });
       }
-      await notificationsService.createNotification(customer.userId, {
-        kind: 'billing',
-        severity: 'info',
-        title: 'Payment received',
-        message: `We received your payment for ${planName}. Thank you!`,
-      });
     } else {
       if (user?.email) {
         await sendBillingEmailSafely(
@@ -1668,6 +2363,8 @@ export class BillingService {
       providerSubscriptionId?: string;
     }> = [];
     let subscriptionSynced = false;
+    let syncedSubscription: IBillingSubscriptionDocument | null = null;
+    let prevPlanCodeForSync: string | null = null;
     const sortedSubscriptions = [...gatewaySubscriptions].sort(
       (a, b) => (b.currentPeriodEnd?.getTime() ?? 0) - (a.currentPeriodEnd?.getTime() ?? 0),
     );
@@ -1712,14 +2409,19 @@ export class BillingService {
         await billingRepository.setDefaultPaymentMethod(customer._id, resolvedDefaultMethodId, session);
       }
 
-      let syncedSubscription: IBillingSubscriptionDocument | null = null;
       if (targetSubscription) {
         const existing = await billingRepository.findSubscriptionByProviderId(targetSubscription.id, session);
         const mappedPlan = resolvePlanFromStripePriceId(targetSubscription.providerPriceId);
         const planCode = mappedPlan?.planId ?? existing?.planCode ?? 'custom';
         const billingCycle = mappedPlan?.billingCycle ?? existing?.billingCycle ?? 'month';
         const planPrice = mappedPlan ? getPlanPrice(mappedPlan.planId, mappedPlan.billingCycle) : null;
-        const status = mapProviderSubscriptionStatus(targetSubscription.status);
+        let status = mapProviderSubscriptionStatus(targetSubscription.status);
+
+        if (existing?.status === 'PAUSED' && status === 'ACTIVE') {
+          status = 'PAUSED';
+        }
+
+        prevPlanCodeForSync = existing?.planCode ?? null;
 
         syncedSubscription = await billingRepository.upsertSubscription(
           {
@@ -1805,6 +2507,30 @@ export class BillingService {
       });
     }
 
+    if (syncedSubscription && ((syncedSubscription as IBillingSubscriptionDocument).status === 'ACTIVE' || (syncedSubscription as IBillingSubscriptionDocument).status === 'TRIALING')) {
+      const sub = syncedSubscription as IBillingSubscriptionDocument;
+      const newPlanCode = sub.planCode as BillingPlanId;
+      const existingPlanCode = prevPlanCodeForSync;
+      const isPlanChange = existingPlanCode !== null && existingPlanCode !== newPlanCode;
+      const isNewSubscription = existingPlanCode === null;
+      const syncStatus = sub.status;
+      const syncProviderSubId = sub.providerSubscriptionId ?? `sync:${sub._id.toString()}`;
+
+      if (isNewSubscription || isPlanChange) {
+        await billingRepository.withTransaction(async (session) => {
+          await this.webhookService.syncUserPlanAndCredits(
+            userId,
+            newPlanCode,
+            syncStatus,
+            existingPlanCode ? { planCode: existingPlanCode, status: syncStatus } : null,
+            syncProviderSubId,
+            session,
+          );
+          return { ok: true };
+        });
+      }
+    }
+
     const startedSubscriptionNotification = startedSubscriptionNotifications[0];
     if (startedSubscriptionNotification) {
       const user = await userRepository.findById(userId);
@@ -1841,15 +2567,47 @@ export class BillingService {
       }
 
       const now = new Date();
-      const [subscription, paymentMethods, invoices, totalPaidYtdMinor] = await Promise.all([
+      const [subscription, paymentMethods, invoices, totalPaidYtdMinor, userDoc] = await Promise.all([
         billingRepository.findLatestSubscriptionByUserId(userId, OVERVIEW_SUBSCRIPTION_STATUSES),
         billingRepository.listPaymentMethods(userId),
         this.invoiceService.listForUser(userId, 10),
         billingRepository.getPaidInvoicesYtdTotalMinor(userId, now.getUTCFullYear()),
+        UserModel.findById(userId).select('planId includedCredits topupBalance monthlyRequestCount').lean().exec(),
       ]);
       const plans = await this.getPlansForUser(userId);
 
-      const planId = subscription?.planCode ?? 'free';
+      // Subscription is the Stripe-authoritative source. user.planId is a webhook-updated
+      // denormalized cache that may be stale (missed webhook, unresolved price ID, etc.).
+      // Priority: active subscription planCode → user.planId → 'free'
+      const KNOWN_PLANS = new Set(['free', 'go', 'pro', 'plus', 'max']);
+      const subPlanCode = subscription?.planCode as BillingPlanId | undefined;
+      const subIsActive = Boolean(
+        subscription &&
+        ACTIVE_SUBSCRIPTION_STATUSES.includes(subscription.status) &&
+        !(subscription.cancelAtPeriodEnd && subscription.currentPeriodEnd && subscription.currentPeriodEnd <= now),
+      );
+      const subHasKnownPlan = subPlanCode !== undefined && KNOWN_PLANS.has(subPlanCode);
+
+      const planId: BillingPlanId = subIsActive && subHasKnownPlan
+        ? subPlanCode!
+        : (userDoc?.planId as BillingPlanId | undefined) ?? 'free';
+
+      // Self-heal: if subscription says a paid plan but user.planId doesn't match, fix it.
+      // Only update planId and reset monthlyRequestCount. Do NOT update includedCredits here
+      // as that should only happen during explicit events (renewal, upgrade, downgrade).
+      if (subIsActive && subHasKnownPlan && subPlanCode !== 'free' && userDoc?.planId !== subPlanCode) {
+        UserModel.updateOne(
+          { _id: userId, planId: { $ne: subPlanCode } },
+          { $set: { planId: subPlanCode, monthlyRequestCount: 0 } },
+        ).exec().catch((err: unknown) => {
+          logger.warn('Failed to self-heal user.planId from subscription', {
+            userId: userId.toString(),
+            subPlanCode,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+
       const currentPlan = plans.find((plan) => plan.id === planId) ?? plans.find((plan) => plan.id === 'free') ?? plans[0];
       if (!currentPlan) {
         throw new AppError('Billing plan catalog is empty.', 500, 'BILLING_CATALOG_EMPTY');
@@ -1886,15 +2644,33 @@ export class BillingService {
         entitlement: deriveEntitlement(subscription, planId),
         paymentMethod: defaultPaymentMethod ? mapOverviewPaymentMethod(defaultPaymentMethod) : null,
         paymentMethods: paymentMethods.map(mapPaymentMethod),
-        usage: {
-          creditsUsed: null,
-          creditsIncluded: currentPlan.includedCredits,
-          creditsUsagePct: null,
-          creditPeriodStart: creditPeriod?.periodStart.toISOString() ?? null,
-          creditPeriodEnd: creditPeriod?.periodEndExclusive.toISOString() ?? null,
-          nextCreditResetAt: creditPeriod?.nextCreditResetAt.toISOString() ?? null,
-          creditsExpireAt: creditPeriod?.creditsExpireAt.toISOString() ?? null,
-        },
+        usage: (() => {
+          const includedCredits = userDoc?.includedCredits ?? getPlanIncludedCredits(planId);
+          const topupBalance = userDoc?.topupBalance ?? 0;
+          const totalCredits = includedCredits + topupBalance;
+          const monthlyRequestCount = userDoc?.monthlyRequestCount ?? 0;
+          const requestQuota = getPlanRequestQuota(planId);
+          const planIncluded = getPlanIncludedCredits(planId);
+          const creditsUsed = Math.max(0, planIncluded - includedCredits);
+          const creditsUsagePct = planIncluded > 0 ? creditsUsed / planIncluded : null;
+          return {
+            creditsUsed,
+            creditsIncluded: planIncluded,
+            creditsUsagePct,
+            creditPeriodStart: creditPeriod?.periodStart.toISOString() ?? null,
+            creditPeriodEnd: creditPeriod?.periodEndExclusive.toISOString() ?? null,
+            nextCreditResetAt: creditPeriod?.nextCreditResetAt.toISOString() ?? null,
+            creditsExpireAt: creditPeriod?.creditsExpireAt.toISOString() ?? null,
+            // Flat credit balance fields for UI display
+            includedCredits,
+            topupBalance,
+            totalCredits,
+            balanceUsd: totalCredits / CREDITS_PER_DOLLAR,
+            monthlyRequestCount,
+            requestQuota: isFinite(requestQuota) ? requestQuota : null,
+            quotaLifted: topupBalance > 0 || planId === 'max',
+          };
+        })(),
         kpis: {
           currentPlanAmountMinor: price?.amountMinor ?? 0,
           currentPlanAmountCents: price?.amountMinor ?? 0,
@@ -2011,6 +2787,7 @@ export class BillingService {
           planId: input.planId,
           billingCycle: input.billingCycle,
           couponCode: input.couponCode ?? null,
+          upgradeFromSubscriptionId: existing?.providerSubscriptionId ?? null,
         },
       });
 
@@ -2040,6 +2817,68 @@ export class BillingService {
     });
   }
 
+  async createTopUpSession(
+    userId: Types.ObjectId,
+    input: CreateTopUpSessionRequest,
+  ): Promise<CreateTopUpSessionResponse> {
+    return this.withOperation('createTopUpSession', undefined, async () => {
+      if (!isStripeConfigured()) {
+        throw new AppError('Billing is not configured.', 503, 'BILLING_NOT_CONFIGURED');
+      }
+
+      const pack = getTopUpPack(input.packId);
+      const priceId = getStripePriceIdForTopUpPack(input.packId);
+      if (!priceId) {
+        throw new AppError(
+          `Top-up pack '${input.packId}' is not configured in Stripe.`,
+          422,
+          'TOPUP_PACK_NOT_CONFIGURED',
+        );
+      }
+
+      const customer = await this.getOrCreateCustomer(userId);
+      const successUrl = this.resolveSafeUrl(
+        input.successUrl,
+        `${env.APP_URL}/billing?topup=success`,
+      );
+      const cancelUrl = this.resolveSafeUrl(
+        input.cancelUrl,
+        `${env.APP_URL}/billing?topup=cancelled`,
+      );
+
+      const session = await this.gateway.createCheckoutSession({
+        customerId: customer.providerCustomerId ?? '',
+        priceId,
+        successUrl,
+        cancelUrl,
+        mode: 'payment',
+        clientReferenceId: userId.toString(),
+        metadata: {
+          packId: input.packId,
+          credits: pack.credits,
+          userId: userId.toString(),
+        },
+      });
+
+      await billingRepository.withTransaction(async (dbSession) => {
+        await this.auditService.record(
+          {
+            userId,
+            customerId: customer._id,
+            action: 'topup_session.created',
+            outcome: 'SUCCESS',
+            metadata: { packId: input.packId, credits: pack.credits, sessionId: session.id },
+          },
+          { actorType: 'USER', actorId: userId.toString() },
+          dbSession,
+        );
+        return { ok: true };
+      });
+
+      return { sessionId: session.id, checkoutUrl: session.url };
+    });
+  }
+
   async createPortalSession(
     userId: Types.ObjectId,
     input: CreatePortalSessionInput,
@@ -2053,6 +2892,7 @@ export class BillingService {
     const session = await this.gateway.createPortalSession(customer.providerCustomerId, returnUrl, key);
     return { portalUrl: session.url };
   }
+
 
   async attachPaymentMethod(userId: Types.ObjectId, input: { providerToken: string; setDefault?: boolean }): Promise<BillingPaymentMethod> {
     const customer = await this.getOrCreateCustomer(userId);
@@ -2158,24 +2998,137 @@ export class BillingService {
     const providerPriceId = price.providerPriceId;
     const customer = await this.getOrCreateCustomer(userId);
     const existing = await billingRepository.findLatestSubscriptionByUserId(userId, ACTIVE_SUBSCRIPTION_STATUSES);
-    const key = `billing:change-plan:${deterministicKey([userId.toString(), existing?._id.toString(), input.planId, input.billingCycle])}`;
+
+    if (existing) {
+      if (existing.planCode === input.planId && existing.billingCycle === input.billingCycle) {
+        throw new AppError('You are already on this plan with the same billing cycle.', 409, 'PLAN_ALREADY_ACTIVE');
+      }
+      if (existing.scheduledPlanChange) {
+        throw new AppError(
+          'A plan change is already scheduled. Cancel the pending change before scheduling a new one.',
+          409,
+          'SCHEDULED_CHANGE_EXISTS',
+        );
+      }
+      if (existing.status !== 'ACTIVE' && existing.status !== 'TRIALING') {
+        throw new AppError(
+          'Plan changes are only allowed on active or trialing subscriptions.',
+          422,
+          'SUBSCRIPTION_NOT_ELIGIBLE',
+        );
+      }
+    }
+
+    const changeType: PlanChangeType = existing
+      ? classifyPlanChange(existing.planCode as BillingPlanId, input.planId as BillingPlanId)
+      : 'upgrade';
+
+    const isDowngrade = changeType === 'downgrade';
+    const scheduleAtPeriodEnd = isDowngrade && input.downgradeAtPeriodEnd !== false && existing?.currentPeriodEnd;
+
+    const key = `billing:change-plan:${deterministicKey([userId.toString(), existing?._id.toString(), input.planId, input.billingCycle, scheduleAtPeriodEnd ? 'deferred' : 'immediate'])}`;
 
     return this.runIdempotent(
       key,
       'changePlan',
-      { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+      { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle, changeType, scheduleAtPeriodEnd: Boolean(scheduleAtPeriodEnd) },
       async () => {
+        if (scheduleAtPeriodEnd && existing) {
+          const saved = await billingRepository.withTransaction(async (session) => {
+            const subscription = await billingRepository.upsertSubscription(
+              {
+                customerId: customer._id,
+                userId,
+                planCode: existing.planCode,
+                billingCycle: existing.billingCycle,
+                status: existing.status,
+                providerSubscriptionId: existing.providerSubscriptionId,
+                providerPriceId: existing.providerPriceId,
+                currency: existing.currency,
+                amountMinor: existing.amountMinor,
+                cancelAtPeriodEnd: existing.cancelAtPeriodEnd,
+                currentPeriodStart: existing.currentPeriodStart,
+                currentPeriodEnd: existing.currentPeriodEnd,
+                trialStart: existing.trialStart,
+                trialEnd: existing.trialEnd,
+                scheduledPlanChange: {
+                  planCode: input.planId,
+                  billingCycle: input.billingCycle,
+                  scheduledAt: existing.currentPeriodEnd!,
+                  providerPriceId,
+                  amountMinor: price.amountMinor,
+                  currency: price.currency,
+                },
+                metadata: { source: 'changePlan', changeType: 'downgrade', scheduledAt: existing.currentPeriodEnd!.toISOString() },
+              },
+              session,
+            );
+            await this.auditService.record(
+              {
+                userId,
+                customerId: customer._id,
+                subscriptionId: subscription._id,
+                action: 'subscription.downgrade_scheduled',
+                outcome: 'SUCCESS',
+                before: { planId: existing.planCode, billingCycle: existing.billingCycle },
+                after: { planId: input.planId, billingCycle: input.billingCycle, effectiveAt: existing.currentPeriodEnd!.toISOString() },
+              },
+              { actorType: 'USER', actorId: userId.toString() },
+              session,
+            );
+            return subscription;
+          });
+
+          await notificationsService.createNotification(userId, {
+            kind: 'billing',
+            severity: 'info',
+            title: 'Plan downgrade scheduled',
+            message: `Your plan will change from ${getBillingPlan(existing.planCode)?.name ?? existing.planCode} to ${plan.name} on ${existing.currentPeriodEnd?.toLocaleDateString() ?? 'the end of your billing period'}. You keep your current plan until then.`,
+          });
+
+          const user = await userRepository.findById(userId);
+          if (user?.email) {
+            await sendBillingEmailSafely(
+              'subscription_downgrade_scheduled',
+              userId,
+              () => sendBillingSubscriptionStateEmail({
+                to: user.email,
+                customerName: user.fullName,
+                planName: plan.name,
+                statusLabel: 'Downgrade Scheduled',
+                detail: `Your plan will change from ${getBillingPlan(existing.planCode)?.name ?? existing.planCode} to ${plan.name} on ${existing.currentPeriodEnd?.toLocaleDateString() ?? 'the end of your billing period'}. You keep your current plan until then.`,
+                billingPortalUrl: `${env.APP_URL}/billing`,
+              }),
+              { subscriptionId: saved._id.toString(), changeType: 'downgrade' },
+            );
+          }
+
+          await invalidateBillingDependentCachesSafely(userId, {
+            source: 'changePlan',
+            subscriptionId: saved._id.toString(),
+            status: saved.status,
+          });
+          const response = mapOverviewSubscription(saved);
+          return {
+            value: response,
+            response: { subscriptionId: response.subscriptionId, status: response.status },
+          };
+        }
+
+        const prorationBehavior = isDowngrade ? 'create_prorations' as const : 'always_invoice' as const;
+
         const trialDays = await this.resolveEligibleTrialDays(userId, plan);
         const gatewaySubscription: GatewaySubscription = existing?.providerSubscriptionId
           ? await this.gateway.updateSubscription(existing.providerSubscriptionId, {
             priceId: providerPriceId,
-            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+            prorationBehavior,
+            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle, changeType },
           })
           : await this.gateway.createSubscription({
             customerId: customer.providerCustomerId ?? '',
             priceId: providerPriceId,
             trialDays,
-            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle },
+            metadata: { userId: userId.toString(), planId: input.planId, billingCycle: input.billingCycle, changeType },
           });
         const subscriptionStatus = mapProviderSubscriptionStatus(gatewaySubscription.status);
 
@@ -2196,7 +3149,8 @@ export class BillingService {
               currentPeriodEnd: gatewaySubscription.currentPeriodEnd,
               trialStart: gatewaySubscription.trialStart,
               trialEnd: gatewaySubscription.trialEnd,
-              metadata: { source: 'changePlan' },
+              scheduledPlanChange: null,
+              metadata: { source: 'changePlan', changeType },
             },
             session,
           );
@@ -2205,16 +3159,26 @@ export class BillingService {
               userId,
               customerId: customer._id,
               subscriptionId: subscription._id,
-              action: 'subscription.plan_changed',
+              action: `subscription.plan_changed.${changeType}`,
               outcome: 'SUCCESS',
               before: existing
                 ? { planId: existing.planCode, billingCycle: existing.billingCycle }
                 : undefined,
-              after: { planId: input.planId, billingCycle: input.billingCycle },
+              after: { planId: input.planId, billingCycle: input.billingCycle, changeType },
             },
             { actorType: 'USER', actorId: userId.toString() },
             session,
           );
+          if (existing) {
+            await this.webhookService.syncUserPlanAndCredits(
+              userId,
+              input.planId as BillingPlanId,
+              subscriptionStatus,
+              { planCode: existing.planCode, status: existing.status },
+              existing.providerSubscriptionId ?? gatewaySubscription.id,
+              session,
+            );
+          }
           return subscription;
         });
         if (!existing && (subscriptionStatus === 'ACTIVE' || subscriptionStatus === 'TRIALING')) {
@@ -2228,7 +3192,15 @@ export class BillingService {
             source: 'changePlan',
           });
         }
-        await invalidateUsageOverviewCacheSafely(userId, {
+        if (existing && isDowngrade) {
+          await notificationsService.createNotification(userId, {
+            kind: 'billing',
+            severity: 'warning',
+            title: 'Plan downgraded',
+            message: `Your plan has been changed from ${getBillingPlan(existing.planCode)?.name ?? existing.planCode} to ${plan.name}. Your balance has been adjusted.`,
+          });
+        }
+        await invalidateBillingDependentCachesSafely(userId, {
           source: 'changePlan',
           subscriptionId: saved._id.toString(),
           status: subscriptionStatus,
@@ -2249,6 +3221,7 @@ export class BillingService {
         currentPeriodStart: null,
         currentPeriodEnd: null,
         trialEnd: null,
+        scheduledPlanChange: null,
       }),
     );
   }
@@ -2354,6 +3327,7 @@ export class BillingService {
         currentPeriodStart: iso(subscription.currentPeriodStart),
         currentPeriodEnd: iso(subscription.currentPeriodEnd),
         trialEnd: iso(subscription.trialEnd),
+        scheduledPlanChange: null,
       }),
     );
   }
@@ -2484,6 +3458,7 @@ export class BillingService {
         currentPeriodStart: readString(response, 'currentPeriodStart') ?? iso(subscription.currentPeriodStart),
         currentPeriodEnd: readString(response, 'currentPeriodEnd') ?? iso(subscription.currentPeriodEnd),
         trialEnd: readString(response, 'trialEnd') ?? iso(subscription.trialEnd),
+        scheduledPlanChange: null,
       }),
     );
   }
@@ -2514,7 +3489,7 @@ export class BillingService {
       });
       return doc;
     });
-    await invalidateUsageOverviewCacheSafely(userId, {
+    await invalidateBillingDependentCachesSafely(userId, {
       source: 'pauseSubscription',
       subscriptionId: updated._id.toString(),
       status: updated.status,
@@ -2593,7 +3568,7 @@ export class BillingService {
       });
       return doc;
     });
-    await invalidateUsageOverviewCacheSafely(userId, {
+    await invalidateBillingDependentCachesSafely(userId, {
       source: 'resumeSubscription',
       subscriptionId: updated._id.toString(),
       status: updated.status,
@@ -2701,24 +3676,53 @@ export class BillingService {
   }
 
   async getProrationPreview(userId: Types.ObjectId, input: ProrationPreviewQuery): Promise<ProrationPreviewResponse> {
-    const subscription = await billingRepository.findLatestSubscriptionByUserId(userId, ACTIVE_SUBSCRIPTION_STATUSES);
     const targetPrice = getPlanPrice(input.planId, input.billingCycle);
     if (!targetPrice) {
       throw new AppError('Plan is not available.', 422, 'PLAN_NOT_AVAILABLE');
     }
-    const now = new Date();
-    const currentRemainingMinor = subscription?.currentPeriodEnd && subscription.currentPeriodStart
-      ? Money.of(subscription.amountMinor, subscription.currency).prorate(
-        Math.max(0, subscription.currentPeriodEnd.getTime() - now.getTime()),
-        Math.max(1, subscription.currentPeriodEnd.getTime() - subscription.currentPeriodStart.getTime()),
-      ).amountMinor
-      : 0;
-    const amountDueToday = Math.max(0, targetPrice.amountMinor - currentRemainingMinor);
+
+    const currency = targetPrice.currency;
+    const fullPriceResponse: ProrationPreviewResponse = {
+      amountDueToday: { amountMinor: targetPrice.amountMinor, currency },
+      newRecurringAmount: { amountMinor: targetPrice.amountMinor, currency },
+      creditApplied: { amountMinor: 0, currency },
+      description: 'Full plan price applies — no active subscription to prorate from.',
+    };
+
+    const subscription = await billingRepository.findLatestSubscriptionByUserId(userId, ACTIVE_SUBSCRIPTION_STATUSES);
+    if (!subscription?.providerSubscriptionId || !targetPrice.providerPriceId) {
+      return fullPriceResponse;
+    }
+
+    const customer = await billingRepository.findCustomerByUserId(userId);
+    if (!customer?.providerCustomerId) {
+      return fullPriceResponse;
+    }
+
+    const preview = await this.gateway.previewUpcomingInvoice({
+      providerCustomerId: customer.providerCustomerId,
+      providerSubscriptionId: subscription.providerSubscriptionId,
+      newProviderPriceId: targetPrice.providerPriceId,
+    });
+
+    const amountDueToday = preview.amountDueMinor;
+    const creditAppliedMinor = preview.creditAppliedMinor;
+    const responseCurrency = normalizeCurrency(preview.currency);
+
+    let description: string;
+    if (creditAppliedMinor > 0 && amountDueToday === 0) {
+      description = `No charge today — a $${(creditAppliedMinor / 100).toFixed(2)} credit from your current plan's remaining value covers the upgrade and will be applied to your Stripe balance.`;
+    } else if (creditAppliedMinor > 0) {
+      description = `You are credited $${(creditAppliedMinor / 100).toFixed(2)} for unused time on your current plan.`;
+    } else {
+      description = 'Full plan price applies for the current billing period.';
+    }
+
     return {
-      amountDueToday: { amountMinor: amountDueToday, currency: targetPrice.currency },
-      newRecurringAmount: { amountMinor: targetPrice.amountMinor, currency: targetPrice.currency },
-      creditApplied: { amountMinor: currentRemainingMinor, currency: targetPrice.currency },
-      description: 'Proration preview based on the remaining value of the current billing period.',
+      amountDueToday: { amountMinor: amountDueToday, currency: responseCurrency },
+      newRecurringAmount: { amountMinor: targetPrice.amountMinor, currency },
+      creditApplied: { amountMinor: creditAppliedMinor, currency: responseCurrency },
+      description,
     };
   }
 
