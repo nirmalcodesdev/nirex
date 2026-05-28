@@ -3,7 +3,6 @@ import { Types } from 'mongoose';
 import {
   DEFAULT_BILLING_CURRENCY,
   CREDITS_PER_DOLLAR,
-  FREE_INCLUDED_CREDITS,
   getPlanIncludedCredits,
   getPlanRequestQuota,
   getTopUpPack,
@@ -1078,7 +1077,7 @@ export class WebhookService {
         {
           $set: {
             planId: 'free',
-            includedCredits: FREE_INCLUDED_CREDITS,
+            includedCredits: 0,
             monthlyRequestCount: 0,
           },
         },
@@ -1092,7 +1091,7 @@ export class WebhookService {
           await CreditTransactionModel.create(
             [{
               userId,
-              amount: FREE_INCLUDED_CREDITS,
+              amount: 0,
               type: 'adjustment',
               source: 'included',
               includedCreditsBefore: userBefore.includedCredits ?? 0,
@@ -1198,10 +1197,11 @@ export class WebhookService {
     } else if (changeType === 'downgrade') {
       const key = `plan:downgrade:${providerEventId}:${prevPlanCode}:${newPlanCode}`;
       const exists = await CreditTransactionModel.findOne({ idempotencyKey: key }).session(session).exec();
+      const downgradeIncludedCredits = validPlanId === 'free' ? 0 : newIncludedCredits;
       if (!exists) {
         const userBefore = await UserModel.findOneAndUpdate(
           { _id: userId },
-          { $set: { planId: validPlanId, includedCredits: newIncludedCredits } },
+          { $set: { planId: validPlanId, includedCredits: downgradeIncludedCredits } },
           { session, returnDocument: 'before', new: false },
         ).exec();
 
@@ -1209,7 +1209,7 @@ export class WebhookService {
           await CreditTransactionModel.create(
             [{
               userId,
-              amount: newIncludedCredits,
+              amount: downgradeIncludedCredits,
               type: 'downgrade',
               source: 'included',
               includedCreditsBefore: userBefore.includedCredits ?? 0,
@@ -1716,29 +1716,31 @@ export class WebhookService {
             );
           }
 
-          const userBefore = await UserModel.findOneAndUpdate(
-            { _id: customer.userId },
-            { $set: { includedCredits: newIncludedCredits, monthlyRequestCount: 0 } },
-            { session, returnDocument: 'before', new: false },
-          ).exec();
+          if (planCode !== 'free') {
+            const userBefore = await UserModel.findOneAndUpdate(
+              { _id: customer.userId },
+              { $set: { includedCredits: newIncludedCredits, monthlyRequestCount: 0 } },
+              { session, returnDocument: 'before', new: false },
+            ).exec();
 
-          if (userBefore) {
-            const idempotencyKey = `renewal:invoice:${readString(data, 'id') ?? event.id}`;
-            const existing = await CreditTransactionModel.findOne({ idempotencyKey }).session(session).exec();
-            if (!existing) {
-              await CreditTransactionModel.create(
-                [{
-                  userId: customer.userId,
-                  amount: newIncludedCredits,
-                  type: 'renewal',
-                  source: 'included',
-                  includedCreditsBefore: userBefore.includedCredits ?? 0,
-                  topupBalanceBefore: userBefore.topupBalance ?? 0,
-                  idempotencyKey,
-                  metadata: { planCode, providerEventId: event.id, billingReason },
-                }],
-                { session },
-              );
+            if (userBefore) {
+              const idempotencyKey = `renewal:invoice:${readString(data, 'id') ?? event.id}`;
+              const existing = await CreditTransactionModel.findOne({ idempotencyKey }).session(session).exec();
+              if (!existing) {
+                await CreditTransactionModel.create(
+                  [{
+                    userId: customer.userId,
+                    amount: newIncludedCredits,
+                    type: 'renewal',
+                    source: 'included',
+                    includedCreditsBefore: userBefore.includedCredits ?? 0,
+                    topupBalanceBefore: userBefore.topupBalance ?? 0,
+                    idempotencyKey,
+                    metadata: { planCode, providerEventId: event.id, billingReason },
+                  }],
+                  { session },
+                );
+              }
             }
           }
         }

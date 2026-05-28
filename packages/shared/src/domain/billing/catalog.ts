@@ -12,7 +12,8 @@ export const PLUS_YEARLY_DEFAULT_CENTS = 50000;   // $500
 export const MAX_MONTHLY_DEFAULT_CENTS = 20000;   // $200
 
 // Plan credit allotments (per billing period)
-export const FREE_INCLUDED_CREDITS = 500;
+export const FREE_SIGNUP_BONUS_CREDITS = 500;
+export const FREE_INCLUDED_CREDITS = 0;
 export const GO_INCLUDED_CREDITS = 1000;
 export const PRO_INCLUDED_CREDITS = 3000;
 export const PLUS_INCLUDED_CREDITS = 7500;
@@ -46,7 +47,7 @@ export const BILLING_PLAN_CATALOG: Record<
     name: 'Free',
     description: 'Get started with Nirex at no cost.',
     features: [
-      '$5 included balance/mo',
+      '$5 one-time included balance',
       '5,000 monthly requests',
       'Top-ups available to unlock unlimited requests',
       'Access to free AI models',
