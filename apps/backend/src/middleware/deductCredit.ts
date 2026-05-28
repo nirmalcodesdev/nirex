@@ -60,7 +60,7 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
             : windowStatus.window7d.firstSlotFreesAt;
 
           throw new AppError(
-            `Request limit reached for the ${window} window (${limit} requests). First slot frees at ${firstSlotFreesAt.toISOString()}. Top up to lift this limit.`,
+            `Request limit reached for the ${window} window (${limit} requests). First slot frees at ${firstSlotFreesAt?.toISOString() ?? 'unknown'}. Top up to lift this limit.`,
             429,
             'ROLLING_WINDOW_EXCEEDED',
           );

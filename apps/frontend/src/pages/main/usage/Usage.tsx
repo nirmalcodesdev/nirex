@@ -328,7 +328,12 @@ export function Usage() {
                     <div>
                       <p className="text-sm font-medium">5-Hour Rolling Window</p>
                       <p className="text-xs text-muted-foreground">
-                        Resets in {formatTimeRemaining(window5hResetsAt)}
+                        {window5hResetsAt
+                          ? `Resets in ${formatTimeRemaining(window5hResetsAt)}`
+                          : window5hUsed === 0
+                            ? "No active requests"
+                            : "Calculating..."
+                        }
                       </p>
                     </div>
                     <div className="text-right">
@@ -370,7 +375,12 @@ export function Usage() {
                     <div>
                       <p className="text-sm font-medium">7-Day Rolling Window</p>
                       <p className="text-xs text-muted-foreground">
-                        Resets in {formatTimeRemaining(window7dResetsAt)}
+                        {window7dResetsAt
+                          ? `Resets in ${formatTimeRemaining(window7dResetsAt)}`
+                          : window7dUsed === 0
+                            ? "No active requests"
+                            : "Calculating..."
+                        }
                       </p>
                     </div>
                     <div className="text-right">

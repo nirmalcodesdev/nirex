@@ -17,8 +17,8 @@ interface WindowCheck {
   used: number;
   limit: number;
   remaining: number;
-  resetsAt: Date;
-  firstSlotFreesAt: Date;
+  resetsAt: Date | null;
+  firstSlotFreesAt: Date | null;
   exceeded: boolean;
 }
 
@@ -222,17 +222,17 @@ export class RollingWindowService {
 
     const resetsAt5h = bounds5h.newest !== null
       ? new Date(bounds5h.newest + ROLLING_WINDOW_5H_MS)
-      : new Date(now);
+      : null;
     const resetsAt7d = bounds7d.newest !== null
       ? new Date(bounds7d.newest + ROLLING_WINDOW_7D_MS)
-      : new Date(now);
+      : null;
 
     const firstSlotFreesAt5h = bounds5h.oldest !== null
       ? new Date(bounds5h.oldest + ROLLING_WINDOW_5H_MS)
-      : new Date(now);
+      : null;
     const firstSlotFreesAt7d = bounds7d.oldest !== null
       ? new Date(bounds7d.oldest + ROLLING_WINDOW_7D_MS)
-      : new Date(now);
+      : null;
 
     return {
       window5h: {
@@ -287,13 +287,13 @@ export class RollingWindowService {
         used: status.window5h.used,
         limit: status.window5h.limit === Infinity ? null : status.window5h.limit,
         remaining: status.window5h.remaining === Infinity ? null : status.window5h.remaining,
-        resetsAt: status.window5h.resetsAt.toISOString(),
+        resetsAt: status.window5h.resetsAt?.toISOString() ?? null,
       },
       window7d: {
         used: status.window7d.used,
         limit: status.window7d.limit === Infinity ? null : status.window7d.limit,
         remaining: status.window7d.remaining === Infinity ? null : status.window7d.remaining,
-        resetsAt: status.window7d.resetsAt.toISOString(),
+        resetsAt: status.window7d.resetsAt?.toISOString() ?? null,
       },
     };
   }
