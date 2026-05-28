@@ -8,8 +8,8 @@ import {
   type IProvider,
   type IUser,
 } from '../../types/index.js';
+import { FREE_SIGNUP_BONUS_CREDITS } from '@nirex/shared';
 
-const FREE_INCLUDED_CREDITS_DEFAULT = 500;
 
 // Re-export shared types for Mongoose-specific extensions
 export type { LocalProviderData, GoogleProviderData, GithubProviderData, ProviderData, IProvider };
@@ -110,7 +110,7 @@ const UserSchema = new Schema<IUserDocument>(
     twoFactor: { type: TwoFactorSchema, default: () => ({ enabled: false, backupCodes: [] }) },
     // Billing / credit tracking (atomic, updated transactionally)
     planId: { type: String, enum: ['free', 'go', 'pro', 'plus', 'max'], default: 'free', required: true },
-    includedCredits: { type: Number, default: FREE_INCLUDED_CREDITS_DEFAULT, min: 0, required: true },
+    includedCredits: { type: Number, default: FREE_SIGNUP_BONUS_CREDITS, min: 0, required: true },
     topupBalance: { type: Number, default: 0, min: 0, required: true },
     monthlyRequestCount: { type: Number, default: 0, min: 0, required: true },
   },

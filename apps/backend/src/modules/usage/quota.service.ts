@@ -158,6 +158,9 @@ export class QuotaService {
     userId: Types.ObjectId,
     context: QuotaContext
   ): Promise<IQuotaBucketDocument> {
+    const userDoc = await UserModel.findById(userId).select('includedCredits').lean().exec();
+    const bucketLimit = Math.max(context.includedCredits, userDoc?.includedCredits ?? 0);
+
     const existingBucket = await QuotaBucketModel.findOneAndUpdate(
       {
         user_id: userId,
@@ -166,7 +169,7 @@ export class QuotaService {
       {
         $set: {
           period_end: context.creditPeriod.periodEndExclusive,
-          limit_credits: context.includedCredits,
+          limit_credits: bucketLimit,
         },
       },
       { new: true }
@@ -193,7 +196,7 @@ export class QuotaService {
       {
         $set: {
           period_end: context.creditPeriod.periodEndExclusive,
-          limit_credits: context.includedCredits,
+          limit_credits: bucketLimit,
         },
         $setOnInsert: {
           user_id: userId,
@@ -306,7 +309,7 @@ export class QuotaService {
           used_credits: credits,
         },
         $set: {
-          limit_credits: context.includedCredits,
+          limit_credits: Math.max(context.includedCredits, bucket.limit_credits || 0),
           period_end: context.creditPeriod.periodEndExclusive,
         },
       },
