@@ -40,10 +40,6 @@ function windowStartMs(windowMs: number): number {
   return nowMs() - windowMs;
 }
 
-function windowResetsAt(windowMs: number): Date {
-  return new Date(nowMs() + windowMs);
-}
-
 async function redisCount(
   userId: Types.ObjectId,
   windowMs: number,
@@ -93,7 +89,7 @@ async function redisGetOldestTimestamp(
 
     // Get the oldest (lowest score) member from the sorted set
     const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
-    if (!oldest || oldest.length < 2) {
+    if (!oldest || oldest.length < 2 || !oldest[1]) {
       return null;
     }
 
@@ -197,23 +193,17 @@ export class RollingWindowService {
     const exceeded = exceeded5h || exceeded7d;
     const exceededWindow = exceeded5h ? '5h' : exceeded7d ? '7d' : null;
 
-    // Calculate accurate reset times based on oldest request in window
-    let resetsAt5h = new Date(now + ROLLING_WINDOW_5H_MS);
-    let resetsAt7d = new Date(now + ROLLING_WINDOW_7D_MS);
+    const [oldest5h, oldest7d] = await Promise.all([
+      used5h > 0 ? redisGetOldestTimestamp(userId, WINDOW_5H_KEY) : Promise.resolve(null),
+      used7d > 0 ? redisGetOldestTimestamp(userId, WINDOW_7D_KEY) : Promise.resolve(null),
+    ]);
 
-    if (exceeded5h || exceeded7d) {
-      const [oldest5h, oldest7d] = await Promise.all([
-        exceeded5h ? redisGetOldestTimestamp(userId, WINDOW_5H_KEY) : Promise.resolve(null),
-        exceeded7d ? redisGetOldestTimestamp(userId, WINDOW_7D_KEY) : Promise.resolve(null),
-      ]);
-
-      if (oldest5h !== null) {
-        resetsAt5h = new Date(oldest5h + ROLLING_WINDOW_5H_MS);
-      }
-      if (oldest7d !== null) {
-        resetsAt7d = new Date(oldest7d + ROLLING_WINDOW_7D_MS);
-      }
-    }
+    const resetsAt5h = oldest5h !== null
+      ? new Date(oldest5h + ROLLING_WINDOW_5H_MS)
+      : new Date(now);
+    const resetsAt7d = oldest7d !== null
+      ? new Date(oldest7d + ROLLING_WINDOW_7D_MS)
+      : new Date(now);
 
     return {
       window5h: {
