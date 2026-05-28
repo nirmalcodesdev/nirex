@@ -55,12 +55,12 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
           const limit = windowStatus.exceededWindow === '5h'
             ? windowStatus.window5h.limit
             : windowStatus.window7d.limit;
-          const resetsAt = windowStatus.exceededWindow === '5h'
-            ? windowStatus.window5h.resetsAt
-            : windowStatus.window7d.resetsAt;
+          const firstSlotFreesAt = windowStatus.exceededWindow === '5h'
+            ? windowStatus.window5h.firstSlotFreesAt
+            : windowStatus.window7d.firstSlotFreesAt;
 
           throw new AppError(
-            `Request limit reached for the ${window} window (${limit} requests). First slot frees at ${resetsAt.toISOString()}. Top up to lift this limit.`,
+            `Request limit reached for the ${window} window (${limit} requests). First slot frees at ${firstSlotFreesAt.toISOString()}. Top up to lift this limit.`,
             429,
             'ROLLING_WINDOW_EXCEEDED',
           );

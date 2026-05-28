@@ -18,6 +18,7 @@ interface WindowCheck {
   limit: number;
   remaining: number;
   resetsAt: Date;
+  firstSlotFreesAt: Date;
   exceeded: boolean;
 }
 
@@ -75,32 +76,53 @@ async function redisCount(
   }
 }
 
-async function redisGetOldestTimestamp(
+async function redisGetBoundaryTimestamps(
   userId: Types.ObjectId,
   windowKey: string,
-): Promise<number | null> {
+): Promise<{ oldest: number | null; newest: number | null }> {
   if (!isRedisAvailable()) {
-    return null;
+    return { oldest: null, newest: null };
   }
 
   try {
     const redis = getRedisClient();
     const key = redisKey(userId, windowKey);
 
-    // Get the oldest (lowest score) member from the sorted set
-    const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
-    if (!oldest || oldest.length < 2 || !oldest[1]) {
-      return null;
+    const pipeline = redis.pipeline();
+    pipeline.zrange(key, 0, 0, 'WITHSCORES');
+    pipeline.zrange(key, -1, -1, 'WITHSCORES');
+
+    const results = await pipeline.exec();
+    if (!results) return { oldest: null, newest: null };
+
+    const oldestResult = results[0];
+    const newestResult = results[1];
+
+    let oldest: number | null = null;
+    let newest: number | null = null;
+
+    if (oldestResult && !oldestResult[0] && oldestResult[1]) {
+      const arr = oldestResult[1] as string[];
+      if (arr.length >= 2 && arr[1]) {
+        oldest = parseInt(arr[1], 10);
+      }
     }
 
-    return parseInt(oldest[1], 10);
+    if (newestResult && !newestResult[0] && newestResult[1]) {
+      const arr = newestResult[1] as string[];
+      if (arr.length >= 2 && arr[1]) {
+        newest = parseInt(arr[1], 10);
+      }
+    }
+
+    return { oldest, newest };
   } catch (error) {
-    logger.warn('Rolling window Redis get oldest timestamp failed.', {
+    logger.warn('Rolling window Redis get boundary timestamps failed.', {
       userId: userId.toString(),
       windowKey,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    return { oldest: null, newest: null };
   }
 }
 
@@ -193,16 +215,23 @@ export class RollingWindowService {
     const exceeded = exceeded5h || exceeded7d;
     const exceededWindow = exceeded5h ? '5h' : exceeded7d ? '7d' : null;
 
-    const [oldest5h, oldest7d] = await Promise.all([
-      used5h > 0 ? redisGetOldestTimestamp(userId, WINDOW_5H_KEY) : Promise.resolve(null),
-      used7d > 0 ? redisGetOldestTimestamp(userId, WINDOW_7D_KEY) : Promise.resolve(null),
+    const [bounds5h, bounds7d] = await Promise.all([
+      used5h > 0 ? redisGetBoundaryTimestamps(userId, WINDOW_5H_KEY) : Promise.resolve({ oldest: null, newest: null }),
+      used7d > 0 ? redisGetBoundaryTimestamps(userId, WINDOW_7D_KEY) : Promise.resolve({ oldest: null, newest: null }),
     ]);
 
-    const resetsAt5h = oldest5h !== null
-      ? new Date(oldest5h + ROLLING_WINDOW_5H_MS)
+    const resetsAt5h = bounds5h.newest !== null
+      ? new Date(bounds5h.newest + ROLLING_WINDOW_5H_MS)
       : new Date(now);
-    const resetsAt7d = oldest7d !== null
-      ? new Date(oldest7d + ROLLING_WINDOW_7D_MS)
+    const resetsAt7d = bounds7d.newest !== null
+      ? new Date(bounds7d.newest + ROLLING_WINDOW_7D_MS)
+      : new Date(now);
+
+    const firstSlotFreesAt5h = bounds5h.oldest !== null
+      ? new Date(bounds5h.oldest + ROLLING_WINDOW_5H_MS)
+      : new Date(now);
+    const firstSlotFreesAt7d = bounds7d.oldest !== null
+      ? new Date(bounds7d.oldest + ROLLING_WINDOW_7D_MS)
       : new Date(now);
 
     return {
@@ -211,6 +240,7 @@ export class RollingWindowService {
         limit: limit5h,
         remaining: remaining5h,
         resetsAt: resetsAt5h,
+        firstSlotFreesAt: firstSlotFreesAt5h,
         exceeded: exceeded5h,
       },
       window7d: {
@@ -218,6 +248,7 @@ export class RollingWindowService {
         limit: limit7d,
         remaining: remaining7d,
         resetsAt: resetsAt7d,
+        firstSlotFreesAt: firstSlotFreesAt7d,
         exceeded: exceeded7d,
       },
       exceeded,

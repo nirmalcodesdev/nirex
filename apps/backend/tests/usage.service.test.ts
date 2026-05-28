@@ -14,8 +14,8 @@ vi.mock('../src/modules/usage/rolling-window.service.js', () => ({
       window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: new Date().toISOString() },
     }),
     checkWindow: vi.fn().mockResolvedValue({
-      window5h: { used: 0, limit: 500, remaining: 500, resetsAt: new Date(), exceeded: false },
-      window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: new Date(), exceeded: false },
+      window5h: { used: 0, limit: 500, remaining: 500, resetsAt: new Date(), firstSlotFreesAt: new Date(), exceeded: false },
+      window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: new Date(), firstSlotFreesAt: new Date(), exceeded: false },
       exceeded: false,
       exceededWindow: null,
     }),
