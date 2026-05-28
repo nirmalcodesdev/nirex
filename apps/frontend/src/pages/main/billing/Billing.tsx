@@ -627,9 +627,11 @@ export function Billing() {
             const balanceUsd = usage.balanceUsd ?? 0;
             const includedCredits = usage.includedCredits ?? 0;
             const topupBalance = usage.topupBalance ?? 0;
-            const requestQuota = usage.requestQuota;
-            const monthlyRequestCount = usage.monthlyRequestCount ?? 0;
-            const isMaxPlan = overview.currentPlan.id === 'max';
+            const rollingWindow = usage.rollingWindow;
+            const window5hUsed = rollingWindow?.window5h.used ?? 0;
+            const window5hLimit = rollingWindow?.window5h.limit;
+            const window7dUsed = rollingWindow?.window7d.used ?? 0;
+            const window7dLimit = rollingWindow?.window7d.limit;
             return (
               <Card className="border-primary/20 bg-primary/5">
                 <CardContent className="py-5">
@@ -640,13 +642,11 @@ export function Billing() {
                         ${balanceUsd.toFixed(2)}
                       </p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {isMaxPlan
-                          ? "Unlimited requests · Max plan"
-                          : topupBalance > 0
-                            ? `${monthlyRequestCount.toLocaleString()} requests this month · limit lifted by top-up`
-                            : requestQuota
-                              ? `${monthlyRequestCount.toLocaleString()} / ${requestQuota.toLocaleString()} requests this month`
-                              : ""}
+                        {topupBalance > 0
+                          ? `${window5hUsed} / ${window5hLimit ?? '∞'} (5h) · ${window7dUsed} / ${window7dLimit ?? '∞'} (7d) · limit lifted`
+                          : window5hLimit !== null && window7dLimit !== null
+                            ? `${window5hUsed} / ${window5hLimit} (5h) · ${window7dUsed} / ${window7dLimit} (7d)`
+                            : ""}
                       </p>
                     </div>
                     <div className="flex flex-col gap-1 text-sm">

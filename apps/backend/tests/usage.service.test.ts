@@ -2,10 +2,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import { UsageService } from '../src/modules/usage/usage.service.js';
 import { usageRepository, type DateRange } from '../src/modules/usage/usage.repository.js';
-import { quotaService } from '../src/modules/usage/quota.service.js';
 import { billingRepository } from '../src/modules/billing/billing.repository.js';
 import { clearUsageOverviewMemoryCache } from '../src/modules/usage/usage.cache.js';
+import { UserModel } from '../src/modules/user/user.model.js';
 import type { IBillingSubscriptionDocument } from '../src/modules/billing/billing.model.js';
+
+vi.mock('../src/modules/usage/rolling-window.service.js', () => ({
+  rollingWindowService: {
+    getUsageSnapshot: vi.fn().mockResolvedValue({
+      window5h: { used: 0, limit: 500, remaining: 500, resetsAt: new Date().toISOString() },
+      window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: new Date().toISOString() },
+    }),
+    checkWindow: vi.fn().mockResolvedValue({
+      window5h: { used: 0, limit: 500, remaining: 500, resetsAt: new Date(), exceeded: false },
+      window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: new Date(), exceeded: false },
+      exceeded: false,
+      exceededWindow: null,
+    }),
+    recordUsage: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 function subscriptionFixture(input: Partial<IBillingSubscriptionDocument> = {}): IBillingSubscriptionDocument {
   return {
@@ -41,6 +57,19 @@ describe('UsageService', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-18T12:00:00.000Z'));
 
+    vi.spyOn(UserModel, 'findById').mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        lean: vi.fn().mockReturnValue({
+          exec: vi.fn().mockResolvedValue({
+            planId: 'pro',
+            includedCredits: 3000,
+            topupBalance: 0,
+            monthlyRequestCount: 0,
+          }),
+        }),
+      }),
+    } as any);
+
     vi.spyOn(billingRepository, 'findLatestSubscriptionByUserId').mockResolvedValue(
       subscriptionFixture({ userId }),
     );
@@ -64,15 +93,6 @@ describe('UsageService', () => {
       }
       return { credits: 7, requests: 1 };
     });
-    vi.spyOn(quotaService, 'getStatus').mockResolvedValue({
-      planId: 'pro',
-      creditsUsed: 42,
-      includedCredits: 50_000,
-      remainingCredits: 49_958,
-      overQuota: false,
-      periodStart: new Date('2026-06-17T10:15:00.000Z'),
-      periodEnd: new Date('2026-07-17T10:15:00.000Z'),
-    });
   });
 
   afterEach(() => {
@@ -90,7 +110,9 @@ describe('UsageService', () => {
     expect(overview.current_plan.credits_expire_at).toBe('2026-07-17T10:15:00.000Z');
     expect(overview.current_plan.cancel_at_period_end).toBe(false);
     expect(overview.current_plan.trial_end).toBeNull();
+    // credits_used comes from analytics (UsageEvent collection)
     expect(overview.summary.credits_used).toBe(42);
+    expect(overview.summary.credits_remaining).toBe(3000);
     expect(overview.chart.map((point) => point.date)).toEqual(['2026-06-17', '2026-06-18']);
     expect(requestedEventRanges).toEqual(
       expect.arrayContaining([
@@ -102,22 +124,26 @@ describe('UsageService', () => {
     );
   });
 
-  it('uses quota bucket status for spendable remaining credits when analytics is stale', async () => {
-    vi.mocked(quotaService.getStatus).mockResolvedValue({
-      planId: 'pro',
-      creditsUsed: 50_000,
-      includedCredits: 50_000,
-      remainingCredits: 0,
-      overQuota: true,
-      periodStart: new Date('2026-06-17T10:15:00.000Z'),
-      periodEnd: new Date('2026-07-17T10:15:00.000Z'),
-    });
+  it('reads spendable credits from user document instead of quota bucket', async () => {
+    vi.mocked(UserModel.findById).mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        lean: vi.fn().mockReturnValue({
+          exec: vi.fn().mockResolvedValue({
+            planId: 'pro',
+            includedCredits: 2500,
+            topupBalance: 0,
+            monthlyRequestCount: 0,
+          }),
+        }),
+      }),
+    } as any);
 
     const overview = await service.getOverview(userId, 'month_to_date');
 
-    expect(overview.summary.credits_used).toBe(50_000);
-    expect(overview.summary.credits_limit).toBe(50_000);
-    expect(overview.summary.credits_remaining).toBe(0);
-    expect(overview.summary.credits_used_pct).toBe(100);
+    // credits_used comes from analytics (42), credits_remaining from user document (2500)
+    expect(overview.summary.credits_used).toBe(42);
+    expect(overview.summary.credits_limit).toBe(3000);
+    expect(overview.summary.credits_remaining).toBe(2500);
+    expect(overview.summary.credits_used_pct).toBeCloseTo(1.4, 1);
   });
 });

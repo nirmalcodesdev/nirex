@@ -29,6 +29,14 @@ export const MAX_REQUEST_QUOTA = Infinity; // No cap
 // 1 credit = $0.01
 export const CREDITS_PER_DOLLAR = 100;
 
+export const ROLLING_WINDOW_5H_MS = 5 * 60 * 60 * 1000;
+export const ROLLING_WINDOW_7D_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface RollingWindowCaps {
+  window5h: number;
+  window7d: number;
+}
+
 export type BillingCatalogPlanId = Exclude<BillingPlanId, 'custom'>;
 
 export type BillingPlanCatalogEntry = Pick<
@@ -36,6 +44,7 @@ export type BillingPlanCatalogEntry = Pick<
   'id' | 'name' | 'description' | 'features' | 'includedCredits' | 'trialDays' | 'active'
 > & {
   requestQuota: number;
+  rollingWindowCaps: RollingWindowCaps;
 };
 
 export const BILLING_PLAN_CATALOG: Record<
@@ -48,12 +57,13 @@ export const BILLING_PLAN_CATALOG: Record<
     description: 'Get started with Nirex at no cost.',
     features: [
       '$5 one-time included balance',
-      '5,000 monthly requests',
+      '100 requests per 5 hours · 500 per 7 days',
       'Top-ups available to unlock unlimited requests',
       'Access to free AI models',
     ],
     includedCredits: FREE_INCLUDED_CREDITS,
     requestQuota: FREE_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: 100, window7d: 500 },
     trialDays: 0,
     active: true,
   },
@@ -63,13 +73,14 @@ export const BILLING_PLAN_CATALOG: Record<
     description: 'For individuals getting started.',
     features: [
       '$10 included balance/mo',
-      '10,000 monthly requests',
+      '200 requests per 5 hours · 1,000 per 7 days',
       'Top-ups available to unlock unlimited requests',
       'Access to go + free AI models',
       'Save $10/yr with annual billing ($50/yr)',
     ],
     includedCredits: GO_INCLUDED_CREDITS,
     requestQuota: GO_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: 200, window7d: 1000 },
     trialDays: 0,
     active: true,
   },
@@ -79,13 +90,14 @@ export const BILLING_PLAN_CATALOG: Record<
     description: 'For professional developers and growing teams.',
     features: [
       '$30 included balance/mo',
-      '30,000 monthly requests',
+      '500 requests per 5 hours · 3,000 per 7 days',
       'Top-ups available to unlock unlimited requests',
       'Access to pro + free AI models',
       'Save $40/yr with annual billing',
     ],
     includedCredits: PRO_INCLUDED_CREDITS,
     requestQuota: PRO_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: 500, window7d: 3000 },
     trialDays: 0,
     active: true,
   },
@@ -95,13 +107,14 @@ export const BILLING_PLAN_CATALOG: Record<
     description: 'For power users who need more.',
     features: [
       '$75 included balance/mo',
-      '100,000 monthly requests',
+      '1,000 requests per 5 hours · 10,000 per 7 days',
       'Top-ups available to unlock unlimited requests',
       'Access to plus + pro + free AI models',
       'Save $100/yr with annual billing',
     ],
     includedCredits: PLUS_INCLUDED_CREDITS,
     requestQuota: PLUS_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: 1000, window7d: 10000 },
     trialDays: 0,
     active: true,
   },
@@ -111,13 +124,14 @@ export const BILLING_PLAN_CATALOG: Record<
     description: 'Unlimited power for high-volume usage.',
     features: [
       '$300 included balance/mo',
-      'Unlimited requests — no cap, ever',
-      'Top-ups for extra balance',
+      '3,000 requests per 5 hours · 30,000 per 7 days',
+      'Top-ups available to unlock unlimited requests',
       'Access to all AI models',
       'Priority support',
     ],
     includedCredits: MAX_INCLUDED_CREDITS,
     requestQuota: MAX_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: 3000, window7d: 30000 },
     trialDays: 0,
     active: true,
   },
@@ -134,6 +148,7 @@ export const BILLING_PLAN_CATALOG: Record<
     ],
     includedCredits: null,
     requestQuota: MAX_REQUEST_QUOTA,
+    rollingWindowCaps: { window5h: Infinity, window7d: Infinity },
     trialDays: 0,
     active: false,
   },
@@ -187,4 +202,8 @@ export function getPlanIncludedCredits(planId: BillingPlanId): number {
 
 export function getPlanRequestQuota(planId: BillingPlanId): number {
   return getPlanConfig(planId).requestQuota;
+}
+
+export function getPlanRollingWindowCaps(planId: BillingPlanId): RollingWindowCaps {
+  return getPlanConfig(planId).rollingWindowCaps;
 }

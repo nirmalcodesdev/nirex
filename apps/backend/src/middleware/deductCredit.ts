@@ -4,19 +4,23 @@ import { getPlanRequestQuota } from '@nirex/shared';
 import { UserModel } from '../modules/user/user.model.js';
 import { CreditTransactionModel } from '../modules/billing/billing.model.js';
 import { AppError } from '../types/index.js';
+import { rollingWindowService } from '../modules/usage/rolling-window.service.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Atomically deducts 1 credit from the user on every API request.
  *
- * Deduction logic (per spec):
- *   1. Quota check: if plan != 'max' AND topupBalance == 0, enforce monthly request quota.
- *   2. Deduct from includedCredits first, then topupBalance.
- *   3. If both are 0, reject the request.
- *   4. Increment monthlyRequestCount.
- *   5. Log a CreditTransaction record.
+ * Deduction logic:
+ *   1. Rolling window check: enforce 5h and 7d rolling window limits when using included credits.
+ *   2. Quota check: if plan != 'max' AND topupBalance == 0, enforce monthly request quota.
+ *   3. Deduct from includedCredits first, then topupBalance.
+ *   4. If both are 0, reject the request.
+ *   5. Increment monthlyRequestCount.
+ *   6. Log a CreditTransaction record.
+ *   7. Record usage in rolling window counters (only when deducted from includedCredits).
  *
- * All steps run inside a MongoDB session transaction so that concurrent
- * requests cannot double-deduct or bypass the quota check.
+ * Rolling window checks use Redis sorted sets for O(log N) performance.
+ * Credit deduction runs inside a MongoDB transaction for atomicity.
  */
 export async function deductCredit(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.userId) {
@@ -24,21 +28,68 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
   }
 
   const userId = new Types.ObjectId(req.userId);
+
+  const userForPlan = await UserModel.findById(userId).select('planId includedCredits topupBalance').lean().exec();
+  if (!userForPlan) {
+    throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  const planId = userForPlan.planId ?? 'free';
+  const includedCredits = userForPlan.includedCredits ?? 0;
+  const topupBalance = userForPlan.topupBalance ?? 0;
+
+  let forceTopup = false;
+
+  if (includedCredits > 0) {
+    try {
+      const windowStatus = await rollingWindowService.checkWindow(userId, planId);
+      if (windowStatus.exceeded) {
+        if (topupBalance > 0) {
+          forceTopup = true;
+          logger.info('Rolling window exceeded, forcing topup deduction.', {
+            userId: userId.toString(),
+            exceededWindow: windowStatus.exceededWindow,
+          });
+        } else {
+          const window = windowStatus.exceededWindow === '5h' ? '5-hour' : '7-day';
+          const limit = windowStatus.exceededWindow === '5h'
+            ? windowStatus.window5h.limit
+            : windowStatus.window7d.limit;
+          const resetsAt = windowStatus.exceededWindow === '5h'
+            ? windowStatus.window5h.resetsAt
+            : windowStatus.window7d.resetsAt;
+
+          throw new AppError(
+            `Request limit reached for the ${window} window (${limit} requests). First slot frees at ${resetsAt.toISOString()}. Top up to lift this limit.`,
+            429,
+            'ROLLING_WINDOW_EXCEEDED',
+          );
+        }
+      }
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      logger.warn('Rolling window check failed, proceeding with request.', {
+        userId: userId.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const session = await mongoose.startSession();
+
+  let deductionSource: 'included' | 'topup' = 'included';
 
   try {
     await session.withTransaction(async () => {
-      // Lock the user document for this transaction
       const user = await UserModel.findById(userId).session(session).exec();
       if (!user) {
         throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
       }
 
-      const planId = user.planId ?? 'free';
-      const requestQuota = getPlanRequestQuota(planId);
+      const currentPlanId = user.planId ?? 'free';
+      const requestQuota = getPlanRequestQuota(currentPlanId);
 
-      // Step 1: Quota check — only enforced when topupBalance is 0 and plan is not 'max'
-      if (planId !== 'max' && user.topupBalance === 0) {
+      if (currentPlanId !== 'max' && user.topupBalance === 0) {
         if (user.monthlyRequestCount >= requestQuota) {
           throw new AppError(
             'Monthly request limit reached. Top up to continue.',
@@ -48,9 +99,10 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
         }
       }
 
-      // Step 2: Determine which credit bucket to deduct from
       let source: 'included' | 'topup';
-      if (user.includedCredits > 0) {
+      if (forceTopup && user.topupBalance > 0) {
+        source = 'topup';
+      } else if (user.includedCredits > 0) {
         source = 'included';
       } else if (user.topupBalance > 0) {
         source = 'topup';
@@ -62,10 +114,11 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
         );
       }
 
+      deductionSource = source;
+
       const includedCreditsBefore = user.includedCredits;
       const topupBalanceBefore = user.topupBalance;
 
-      // Step 3: Atomic deduct + increment request counter
       const updateFields =
         source === 'included'
           ? { $inc: { includedCredits: -1, monthlyRequestCount: 1 } }
@@ -73,7 +126,6 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
 
       await UserModel.updateOne({ _id: userId }, updateFields, { session }).exec();
 
-      // Step 4: Log the credit transaction
       await CreditTransactionModel.create(
         [
           {
@@ -88,6 +140,16 @@ export async function deductCredit(req: Request, res: Response, next: NextFuncti
         { session },
       );
     });
+
+    if (deductionSource === 'included') {
+      const idempotencyKey = `req:${userId}:${Date.now()}:${Math.random().toString(36).slice(2, 11)}`;
+      await rollingWindowService.recordUsage(userId, idempotencyKey).catch((error) => {
+        logger.warn('Failed to record rolling window usage after credit deduction.', {
+          userId: userId.toString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
 
     next();
   } finally {

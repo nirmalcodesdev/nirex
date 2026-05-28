@@ -23,12 +23,16 @@ export {
   PLUS_REQUEST_QUOTA,
   MAX_REQUEST_QUOTA,
   CREDITS_PER_DOLLAR,
+  ROLLING_WINDOW_5H_MS,
+  ROLLING_WINDOW_7D_MS,
   getTopUpPack,
   getPlanConfig,
   getPlanIncludedCredits,
   getPlanRequestQuota,
+  getPlanRollingWindowCaps,
   type BillingCatalogPlanId,
   type BillingPlanCatalogEntry,
+  type RollingWindowCaps,
 } from './catalog.js';
 
 export {

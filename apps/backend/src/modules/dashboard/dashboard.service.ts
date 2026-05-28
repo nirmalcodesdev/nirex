@@ -102,6 +102,7 @@ export class DashboardService {
         included_credits: billing?.usage?.includedCredits ?? null,
         topup_balance: billing?.usage?.topupBalance ?? null,
         quota_lifted: billing?.usage?.quotaLifted ?? null,
+        rolling_window: billing?.usage?.rollingWindow ?? null,
       },
       notifications: {
         available: notificationsAvailable,

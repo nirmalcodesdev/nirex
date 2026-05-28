@@ -17,6 +17,24 @@ import {
   invalidateUsageOverviewCache,
   setCachedUsageOverview,
 } from '../src/modules/usage/usage.cache.js';
+import { rollingWindowService } from '../src/modules/usage/rolling-window.service.js';
+import { UserModel } from '../src/modules/user/user.model.js';
+
+vi.mock('../src/modules/usage/rolling-window.service.js', () => ({
+  rollingWindowService: {
+    getUsageSnapshot: vi.fn().mockResolvedValue({
+      window5h: { used: 0, limit: 100, remaining: 100, resetsAt: new Date().toISOString() },
+      window7d: { used: 0, limit: 500, remaining: 500, resetsAt: new Date().toISOString() },
+    }),
+    checkWindow: vi.fn().mockResolvedValue({
+      window5h: { used: 0, limit: 100, remaining: 100, resetsAt: new Date(), exceeded: false },
+      window7d: { used: 0, limit: 500, remaining: 500, resetsAt: new Date(), exceeded: false },
+      exceeded: false,
+      exceededWindow: null,
+    }),
+    recordUsage: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 function overviewFixture(
   creditsUsed: number = 60_000,
@@ -48,6 +66,10 @@ function overviewFixture(
       credit_period_end: null,
       next_credit_reset_at: null,
       credits_expire_at: null,
+      rolling_window: {
+        window5h: { used: 0, limit: 500, remaining: 500, resetsAt: null },
+        window7d: { used: 0, limit: 3000, remaining: 3000, resetsAt: null },
+      },
     },
   };
 }
@@ -71,6 +93,19 @@ describe('usage routes', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearUsageOverviewMemoryCache();
+
+    vi.spyOn(UserModel, 'findById').mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        lean: vi.fn().mockReturnValue({
+          exec: vi.fn().mockResolvedValue({
+            planId: 'free',
+            includedCredits: 0,
+            topupBalance: 0,
+            monthlyRequestCount: 0,
+          }),
+        }),
+      }),
+    } as any);
   });
 
   it('requires authentication for overview endpoint', async () => {
@@ -189,6 +224,7 @@ describe('usage routes', () => {
 
     const overview = await usageService.getOverview(userId, '30d');
 
+    // credits_used comes from analytics (UsageEvent collection) for historical tracking
     expect(overview.summary.credits_used).toBe(8.75);
     expect(overview.summary.total_requests).toBe(3);
     expect(overview.top_projects).toEqual([

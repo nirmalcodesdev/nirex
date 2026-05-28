@@ -22,7 +22,7 @@ import {
   invalidateUsageOverviewCache,
   setCachedUsageOverview,
 } from './usage.cache.js';
-import { quotaService, type QuotaStatus } from './quota.service.js';
+import { rollingWindowService } from './rolling-window.service.js';
 
 const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NONE'>> = [
   'TRIALING',
@@ -290,41 +290,23 @@ export class UsageService {
     };
   }
 
-  private isQuotaStatusForCurrentPlan(
-    status: QuotaStatus,
-    plan: ResolvedCurrentPlan,
-  ): boolean {
-    return (
-      status.planId === plan.planId &&
-      isSameInstant(status.periodStart, plan.creditPeriod.periodStart) &&
-      isSameInstant(status.periodEnd, plan.creditPeriod.periodEndExclusive)
-    );
-  }
-
   private async resolveSpendableCredits(
     userId: Types.ObjectId,
     plan: ResolvedCurrentPlan,
     analyticsCreditsUsed: number,
   ): Promise<SpendableCreditSnapshot> {
-    const fallbackLimit = Math.max(1, plan.includedCredits);
-
-    try {
-      const quotaStatus = await quotaService.getStatus(userId);
-      if (this.isQuotaStatusForCurrentPlan(quotaStatus, plan)) {
-        return {
-          creditsUsed: quotaStatus.creditsUsed,
-          creditsLimit: Math.max(1, quotaStatus.includedCredits),
-          creditsRemaining: quotaStatus.remainingCredits,
-        };
-      }
-    } catch {
-      // Usage analytics should remain available even if quota status cannot be read.
-    }
+    const user = await UserModel.findById(userId).select('includedCredits').lean().exec();
+    const creditsRemaining = user?.includedCredits ?? plan.includedCredits;
+    const creditsLimit = Math.max(1, plan.includedCredits);
+    
+    // Always use analytics data for credits_used (historical tracking)
+    // User document tracks remaining balance for enforcement
+    const creditsUsed = round(analyticsCreditsUsed, 2);
 
     return {
-      creditsUsed: analyticsCreditsUsed,
-      creditsLimit: fallbackLimit,
-      creditsRemaining: round(Math.max(0, fallbackLimit - analyticsCreditsUsed), 2),
+      creditsUsed,
+      creditsLimit,
+      creditsRemaining: round(Math.max(0, creditsRemaining), 2),
     };
   }
 
@@ -539,7 +521,21 @@ export class UsageService {
         const liveplanId = (userDoc?.planId ?? currentPlan.planId) as string;
         const requestQuota = getPlanRequestQuota(liveplanId as Parameters<typeof getPlanRequestQuota>[0]);
         const monthlyRequestCount = userDoc?.monthlyRequestCount ?? 0;
-        const quotaLifted = topupBalance > 0 || liveplanId === 'max';
+        const quotaLifted = topupBalance > 0;
+
+        let rollingWindow;
+        try {
+          rollingWindow = await rollingWindowService.getUsageSnapshot(
+            userId,
+            liveplanId as Parameters<typeof rollingWindowService.getUsageSnapshot>[1],
+          );
+        } catch {
+          rollingWindow = {
+            window5h: { used: 0, limit: null, remaining: null, resetsAt: null },
+            window7d: { used: 0, limit: null, remaining: null, resetsAt: null },
+          };
+        }
+
         return {
           plan_id: currentPlan.planId,
           plan_name: currentPlan.planName,
@@ -559,6 +555,7 @@ export class UsageService {
           monthly_request_count: monthlyRequestCount,
           request_quota: Number.isFinite(requestQuota) ? requestQuota : null,
           quota_lifted: quotaLifted,
+          rolling_window: rollingWindow,
         };
       })(),
     };

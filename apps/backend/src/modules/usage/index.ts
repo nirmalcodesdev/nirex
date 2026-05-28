@@ -33,6 +33,10 @@ export {
   type QuotaStatus,
 } from './quota.service.js';
 export {
+  rollingWindowService,
+  RollingWindowService,
+} from './rolling-window.service.js';
+export {
   assertWithinQuota,
   getQuotaStatus,
   quotaGuard,

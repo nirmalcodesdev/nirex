@@ -6,8 +6,10 @@ import {
   ArrowUpRight,
   Clock,
   Download,
+  Gauge,
   Layers,
   RefreshCw,
+  Shield,
   Zap,
 } from "lucide-react";
 import {
@@ -22,10 +24,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, Dropdown, DropdownItem, KpiCard, PageHeader, type KpiChangeType } from "@nirex/ui";
 import { CardSkeleton, ChartSkeleton } from "@nirex/ui/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
-import {
-  getCreditPeriodDateLabel,
-  getCreditUsageFootnote,
-} from "../../../features/billing/billingDisplay";
+import { getCreditPeriodDateLabel } from "../../../features/billing/billingDisplay";
 import { useUsageExportMutation, useUsageOverviewQuery } from "../../../features/usage";
 
 const usageRangeLabels: Record<UsageRange, string> = {
@@ -72,6 +71,42 @@ function triggerFileDownload(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(blobUrl);
 }
 
+function formatTimeRemaining(resetsAt: string | null): string {
+  if (!resetsAt) return "";
+  const now = new Date();
+  const reset = new Date(resetsAt);
+  const diff = reset.getTime() - now.getTime();
+  
+  if (diff <= 0) return "Resetting...";
+  
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
+function getWindowBarColor(percentage: number, isLifted: boolean): string {
+  if (isLifted) return "bg-nirex-success";
+  if (percentage >= 90) return "bg-destructive";
+  if (percentage >= 75) return "bg-warning";
+  return "bg-primary";
+}
+
+function getWindowStatusText(percentage: number, isLifted: boolean): string {
+  if (isLifted) return "Limit lifted";
+  if (percentage >= 90) return "Critical";
+  if (percentage >= 75) return "Warning";
+  if (percentage >= 50) return "Moderate";
+  return "Healthy";
+}
+
 export function Usage() {
   const { toast } = useToast();
   const [usageRange, setUsageRange] = useState<UsageRange>("30d");
@@ -106,10 +141,20 @@ export function Usage() {
   const totalCredits = overview?.current_plan.total_credits ?? 0;
   const remainingIncluded = overview?.current_plan.remaining_included_credits ?? 0;
   const topupBalance = overview?.current_plan.topup_balance ?? 0;
-  const requestQuota = overview?.current_plan.request_quota ?? null;
   const monthlyRequestCount = overview?.current_plan.monthly_request_count ?? 0;
-  const isMaxPlan = overview?.current_plan.plan_id === 'max';
-  const liftedByTopup = !isMaxPlan && topupBalance > 0;
+  const liftedByTopup = topupBalance > 0;
+
+  // Rolling window data
+  const rollingWindow = overview?.current_plan.rolling_window;
+  const window5hUsed = rollingWindow?.window5h.used ?? 0;
+  const window5hLimit = rollingWindow?.window5h.limit;
+  const window5hResetsAt = rollingWindow?.window5h.resetsAt ?? null;
+  const window5hPct: number = window5hLimit ? (window5hUsed / window5hLimit) * 100 : 0;
+  
+  const window7dUsed = rollingWindow?.window7d.used ?? 0;
+  const window7dLimit = rollingWindow?.window7d.limit;
+  const window7dResetsAt = rollingWindow?.window7d.resetsAt ?? null;
+  const window7dPct: number = window7dLimit ? (window7dUsed / window7dLimit) * 100 : 0;
 
   const handleExport = async (format: UsageExportFormat) => {
     try {
@@ -208,13 +253,11 @@ export function Usage() {
                   <p className="text-sm text-muted-foreground">Available Balance</p>
                   <p className="text-2xl font-bold">${balanceUsd.toFixed(2)}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {isMaxPlan
-                      ? "Unlimited requests · Max plan"
-                      : liftedByTopup
-                        ? `${monthlyRequestCount.toLocaleString()} requests this month · limit lifted by top-up`
-                        : requestQuota
-                          ? `${monthlyRequestCount.toLocaleString()} / ${requestQuota.toLocaleString()} requests/mo`
-                          : ""}
+                    {liftedByTopup
+                      ? `${window5hUsed} / ${window5hLimit ?? '∞'} (5h) · ${window7dUsed} / ${window7dLimit ?? '∞'} (7d) · limit lifted by top-up`
+                      : window5hLimit !== null && window7dLimit !== null
+                        ? `${window5hUsed} / ${window5hLimit} (5h) · ${window7dUsed} / ${window7dLimit} (7d)`
+                        : `${monthlyRequestCount.toLocaleString()} requests this month`}
                   </p>
                 </div>
                 <div className="flex gap-6 text-sm">
@@ -261,6 +304,120 @@ export function Usage() {
               icon={Clock}
             />
           </div>
+
+          {/* Rolling Window Request Limits - Full Width Card */}
+          <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="h-5 w-5 text-primary" />
+                    <CardTitle>Request Limits</CardTitle>
+                  </div>
+                  {liftedByTopup && (
+                    <div className="flex items-center gap-1.5 rounded-full bg-nirex-success/10 px-3 py-1 text-xs font-medium text-nirex-success">
+                      <Shield className="h-3.5 w-3.5" />
+                      Limits lifted by top-up
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* 5-hour window */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">5-Hour Rolling Window</p>
+                      <p className="text-xs text-muted-foreground">
+                        Resets in {formatTimeRemaining(window5hResetsAt)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold">
+                        {formatNumber(window5hUsed)}
+                        {window5hLimit !== null && (
+                          <span className="text-base font-normal text-muted-foreground">
+                            {" "}/ {formatNumber(window5hLimit!)}
+                          </span>
+                        )}
+                      </p>
+                      <p className={`text-xs font-medium ${
+                        liftedByTopup ? "text-nirex-success" :
+                        window5hPct >= 90 ? "text-destructive" :
+                        window5hPct >= 75 ? "text-warning" :
+                        "text-muted-foreground"
+                      }`}>
+                        {getWindowStatusText(window5hPct, liftedByTopup)}
+                        {window5hLimit !== null && !liftedByTopup && ` · ${window5hPct.toFixed(1)}%`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="relative h-4 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full transition-all duration-500 ${getWindowBarColor(window5hPct, liftedByTopup)}`}
+                      style={{ width: `${Math.min(100, window5hPct)}%` }}
+                    />
+                    {window5hPct >= 15 && (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
+                        {window5hPct.toFixed(0)}%
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 7-day window */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">7-Day Rolling Window</p>
+                      <p className="text-xs text-muted-foreground">
+                        Resets in {formatTimeRemaining(window7dResetsAt)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold">
+                        {formatNumber(window7dUsed)}
+                        {window7dLimit !== null && (
+                          <span className="text-base font-normal text-muted-foreground">
+                            {" "}/ {formatNumber(window7dLimit!)}
+                          </span>
+                        )}
+                      </p>
+                      <p className={`text-xs font-medium ${
+                        liftedByTopup ? "text-nirex-success" :
+                        window7dPct >= 90 ? "text-destructive" :
+                        window7dPct >= 75 ? "text-warning" :
+                        "text-muted-foreground"
+                      }`}>
+                        {getWindowStatusText(window7dPct, liftedByTopup)}
+                        {window7dLimit !== null && !liftedByTopup && ` · ${window7dPct.toFixed(1)}%`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="relative h-4 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full transition-all duration-500 ${getWindowBarColor(window7dPct, liftedByTopup)}`}
+                      style={{ width: `${Math.min(100, window7dPct)}%` }}
+                    />
+                    {window7dPct >= 15 && (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
+                        {window7dPct.toFixed(0)}%
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Info footer */}
+                {!liftedByTopup && (
+                  <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">How rolling windows work</p>
+                    <p className="mt-1">
+                      Your request limits reset continuously over time. The 5-hour window tracks recent activity, 
+                      while the 7-day window prevents sustained overuse. Top up your balance to lift these limits.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
           <Card>
             <CardHeader>
@@ -364,47 +521,6 @@ export function Usage() {
                   </div>
                 </div>
 
-                {/* Request quota */}
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Requests this month</span>
-                    <span>{formatNumber(monthlyRequestCount)}{requestQuota ? ` / ${formatNumber(requestQuota)}` : ""}</span>
-                  </div>
-                  {isMaxPlan ? (
-                    <p className="text-xs text-nirex-success">Unlimited requests · included with Max plan</p>
-                  ) : liftedByTopup ? (
-                    <>
-                      <div className="h-2 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-muted-foreground/30"
-                          style={{ width: `${requestQuota ? Math.min(100, (monthlyRequestCount / requestQuota) * 100) : 0}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-nirex-success">✓ Monthly limit lifted · top-up balance is above $0</p>
-                      {requestQuota && (
-                        <p className="text-xs text-muted-foreground">
-                          Plan base limit is {formatNumber(requestQuota)} req/mo — resumes if top-up runs out
-                        </p>
-                      )}
-                    </>
-                  ) : requestQuota ? (
-                    <>
-                      <div className="h-2 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-primary"
-                          style={{ width: `${Math.min(100, (monthlyRequestCount / requestQuota) * 100)}%` }}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {getCreditUsageFootnote(
-                          { ...creditLifecycle, usagePct: overview.summary.credits_used_pct },
-                          formatDateLabel,
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground/70">Top up to remove this monthly limit</p>
-                    </>
-                  ) : null}
-                </div>
               </CardContent>
             </Card>
           </div>
