@@ -533,7 +533,7 @@ export class UsageService {
           .select('planId includedCredits topupBalance monthlyRequestCount')
           .lean()
           .exec();
-        const remainingIncluded = userDoc?.includedCredits ?? spendableCredits.creditsRemaining;
+        const remainingIncluded = spendableCredits.creditsRemaining;
         const topupBalance = userDoc?.topupBalance ?? 0;
         const totalCredits = remainingIncluded + topupBalance;
         const liveplanId = (userDoc?.planId ?? currentPlan.planId) as string;

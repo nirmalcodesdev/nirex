@@ -2,6 +2,7 @@ import { Router, raw } from 'express';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
 import { authenticateUser, requireApiKeyScopes } from '../../middleware/authenticateUser.js';
 import { validate } from '../../middleware/validate.js';
+import { deductCredit } from '../../middleware/deductCredit.js';
 import {
   apiLimiter,
   messageLimiter,
@@ -239,6 +240,7 @@ router.post(
   '/:id/messages',
   messageLimiter, // Stricter rate limit for messages
   requireApiKeyScopes(['sessions:write']),
+  asyncWrapper(deductCredit),
   validate(sessionIdParamSchema, 'params'),
   validate(addMessageSchema),
   asyncWrapper(chatSessionController.addMessage)

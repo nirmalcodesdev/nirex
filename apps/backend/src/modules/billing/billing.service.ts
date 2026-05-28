@@ -84,6 +84,7 @@ import { Money } from './domain/money.js';
 import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
+import { quotaService } from '../usage/quota.service.js';
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import type {
   GatewayEvent,
@@ -2644,14 +2645,25 @@ export class BillingService {
         entitlement: deriveEntitlement(subscription, planId),
         paymentMethod: defaultPaymentMethod ? mapOverviewPaymentMethod(defaultPaymentMethod) : null,
         paymentMethods: paymentMethods.map(mapPaymentMethod),
-        usage: (() => {
-          const includedCredits = userDoc?.includedCredits ?? getPlanIncludedCredits(planId);
+        usage: await (async () => {
+          const planIncluded = getPlanIncludedCredits(planId);
           const topupBalance = userDoc?.topupBalance ?? 0;
-          const totalCredits = includedCredits + topupBalance;
           const monthlyRequestCount = userDoc?.monthlyRequestCount ?? 0;
           const requestQuota = getPlanRequestQuota(planId);
-          const planIncluded = getPlanIncludedCredits(planId);
-          const creditsUsed = Math.max(0, planIncluded - includedCredits);
+
+          let remainingIncluded: number;
+          let creditsUsed: number;
+          try {
+            const quotaStatus = await quotaService.getStatus(userId);
+            remainingIncluded = quotaStatus.remainingCredits;
+            creditsUsed = quotaStatus.creditsUsed;
+          } catch {
+            remainingIncluded = userDoc?.includedCredits ?? planIncluded;
+            creditsUsed = Math.max(0, planIncluded - remainingIncluded);
+          }
+
+          const includedCredits = remainingIncluded;
+          const totalCredits = includedCredits + topupBalance;
           const creditsUsagePct = planIncluded > 0 ? creditsUsed / planIncluded : null;
           return {
             creditsUsed,
@@ -2661,7 +2673,6 @@ export class BillingService {
             creditPeriodEnd: creditPeriod?.periodEndExclusive.toISOString() ?? null,
             nextCreditResetAt: creditPeriod?.nextCreditResetAt.toISOString() ?? null,
             creditsExpireAt: creditPeriod?.creditsExpireAt.toISOString() ?? null,
-            // Flat credit balance fields for UI display
             includedCredits,
             topupBalance,
             totalCredits,
