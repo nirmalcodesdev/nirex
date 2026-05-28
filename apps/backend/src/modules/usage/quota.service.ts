@@ -19,6 +19,7 @@ import {
 } from './quota.model.js';
 import { notificationsService } from '../notifications/notifications.service.js';
 import { userRepository } from '../user/user.repository.js';
+import { UserModel } from '../user/user.model.js';
 import { sendUsageThresholdEmail } from '../../utils/mailer.js';
 import { sendNotificationEmailSafely } from '../../utils/notify-email.js';
 
@@ -43,6 +44,7 @@ export interface QuotaStatus {
   creditsUsed: number;
   includedCredits: number;
   remainingCredits: number;
+  topupBalance: number;
   overQuota: boolean;
   periodStart: Date;
   periodEnd: Date;
@@ -53,6 +55,7 @@ export interface QuotaDebit {
   idempotencyKey?: string;
   credits: number;
   duplicate: boolean;
+  source?: 'included' | 'topup';
 }
 
 export interface ConsumeQuotaInput {
@@ -219,12 +222,18 @@ export class QuotaService {
     const includedCredits = Math.max(1, bucket.limit_credits || context.includedCredits);
     const remainingCredits = roundCredits(Math.max(0, includedCredits - creditsUsed));
 
+    const userDoc = await UserModel.findById(userId).select('topupBalance').lean().exec();
+    const topupBalance = userDoc?.topupBalance ?? 0;
+
+    const overQuota = creditsUsed >= includedCredits && topupBalance <= 0;
+
     return {
       planId: context.planId,
       creditsUsed,
       includedCredits,
       remainingCredits,
-      overQuota: creditsUsed >= includedCredits,
+      topupBalance,
+      overQuota,
       periodStart: bucket.period_start,
       periodEnd: bucket.period_end,
     };
@@ -260,13 +269,23 @@ export class QuotaService {
     }).exec();
 
     if (existingDebit) {
+      const source = (existingDebit.metadata?.source as 'included' | 'topup' | undefined) ?? 'included';
       return {
         debitId: existingDebit._id.toString(),
         idempotencyKey: existingDebit.idempotency_key,
         credits: existingDebit.credits,
         duplicate: true,
+        source,
       };
     }
+
+    logger.info('Quota consume: trying included pool', {
+      userId: input.userId.toString(),
+      credits,
+      bucketLimit: bucket.limit_credits,
+      bucketUsed: bucket.used_credits,
+      remaining: roundCredits(Math.max(0, (bucket.limit_credits || 0) - (bucket.used_credits || 0))),
+    });
 
     const updatedBucket = await QuotaBucketModel.findOneAndUpdate(
       {
@@ -297,7 +316,13 @@ export class QuotaService {
     ).exec();
 
     if (!updatedBucket) {
-      throw quotaExceededError();
+      logger.info('Quota consume: included pool exhausted, falling back to topup', {
+        userId: input.userId.toString(),
+        credits,
+        bucketLimit: bucket.limit_credits,
+        bucketUsed: bucket.used_credits,
+      });
+      return this.consumeFromTopup(input, credits, context, bucket);
     }
 
     try {
@@ -311,13 +336,11 @@ export class QuotaService {
         status: 'committed',
         metadata: {
           plan_id: context.planId,
+          source: 'included',
           ...(input.metadata || {}),
         },
       });
 
-      // Detect threshold crossings AFTER the bucket has been mutated. Notifications
-      // are deduplicated per (bucket, threshold) so the user sees one ping per
-      // crossing per period regardless of how many requests crossed it.
       void this.notifyThresholdCrossings({
         userId: input.userId,
         bucket: updatedBucket,
@@ -330,6 +353,7 @@ export class QuotaService {
         idempotencyKey: debit.idempotency_key,
         credits,
         duplicate: false,
+        source: 'included',
       };
     } catch (error) {
       await QuotaBucketModel.updateOne(
@@ -345,11 +369,106 @@ export class QuotaService {
         }).exec();
 
         if (debit) {
+          const source = (debit.metadata?.source as 'included' | 'topup' | undefined) ?? 'included';
           return {
             debitId: debit._id.toString(),
             idempotencyKey: debit.idempotency_key,
             credits: debit.credits,
             duplicate: true,
+            source,
+          };
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  private async consumeFromTopup(
+    input: ConsumeQuotaInput,
+    credits: number,
+    context: QuotaContext,
+    bucket: IQuotaBucketDocument
+  ): Promise<QuotaDebit> {
+    const userBefore = await UserModel.findById(input.userId).select('topupBalance').lean().exec();
+    logger.info('Quota consume: attempting topup debit', {
+      userId: input.userId.toString(),
+      credits,
+      currentTopupBalance: userBefore?.topupBalance ?? 0,
+    });
+
+    const updatedUser = await UserModel.findOneAndUpdate(
+      {
+        _id: input.userId,
+        $expr: {
+          $gte: ['$topupBalance', credits],
+        },
+      },
+      {
+        $inc: { topupBalance: -credits },
+      },
+      { new: true }
+    ).exec();
+
+    if (!updatedUser) {
+      logger.warn('Quota consume: topup balance insufficient', {
+        userId: input.userId.toString(),
+        credits,
+        currentTopupBalance: userBefore?.topupBalance ?? 0,
+      });
+      throw quotaExceededError();
+    }
+
+    try {
+      const debit = await QuotaDebitModel.create({
+        user_id: input.userId,
+        bucket_id: bucket._id,
+        period_start: context.creditPeriod.periodStart,
+        period_end: context.creditPeriod.periodEndExclusive,
+        idempotency_key: input.idempotencyKey,
+        credits,
+        status: 'committed',
+        metadata: {
+          plan_id: context.planId,
+          source: 'topup',
+          ...(input.metadata || {}),
+        },
+      });
+
+      logger.info('Consumed credits from topup balance', {
+        userId: input.userId.toString(),
+        credits,
+        remainingTopup: updatedUser.topupBalance,
+      });
+
+      return {
+        debitId: debit._id.toString(),
+        idempotencyKey: debit.idempotency_key,
+        credits,
+        duplicate: false,
+        source: 'topup',
+      };
+    } catch (error) {
+      await UserModel.updateOne(
+        { _id: input.userId },
+        { $inc: { topupBalance: credits } }
+      ).exec();
+
+      if (isDuplicateKeyError(error)) {
+        const debit = await QuotaDebitModel.findOne({
+          user_id: input.userId,
+          idempotency_key: input.idempotencyKey,
+          status: 'committed',
+        }).exec();
+
+        if (debit) {
+          const source = (debit.metadata?.source as 'included' | 'topup' | undefined) ?? 'included';
+          return {
+            debitId: debit._id.toString(),
+            idempotencyKey: debit.idempotency_key,
+            credits: debit.credits,
+            duplicate: true,
+            source,
           };
         }
       }
@@ -382,10 +501,19 @@ export class QuotaService {
       return;
     }
 
-    await QuotaBucketModel.updateOne(
-      { _id: updatedDebit.bucket_id },
-      { $inc: { used_credits: -roundCredits(updatedDebit.credits) } }
-    ).exec();
+    const source = (updatedDebit.metadata?.source as 'included' | 'topup' | undefined) ?? 'included';
+
+    if (source === 'topup') {
+      await UserModel.updateOne(
+        { _id: updatedDebit.user_id },
+        { $inc: { topupBalance: roundCredits(updatedDebit.credits) } }
+      ).exec();
+    } else {
+      await QuotaBucketModel.updateOne(
+        { _id: updatedDebit.bucket_id },
+        { $inc: { used_credits: -roundCredits(updatedDebit.credits) } }
+      ).exec();
+    }
   }
 
   private async notifyThresholdCrossings(input: {
