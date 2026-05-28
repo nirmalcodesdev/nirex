@@ -337,9 +337,22 @@ export function Home() {
                 <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Balance</p>
                   <p className="mt-1 text-2xl font-bold">${overview.billing.balance_usd.toFixed(2)}</p>
-                  {overview.billing.quota_lifted && (
-                    <p className="mt-1 text-xs text-muted-foreground">Unlimited requests</p>
-                  )}
+                  {(() => {
+                    const rw = overview.billing.rolling_window;
+                    const w5hUsed = rw?.window5h.used ?? 0;
+                    const w5hLimit = rw?.window5h.limit;
+                    const w7dUsed = rw?.window7d.used ?? 0;
+                    const w7dLimit = rw?.window7d.limit;
+                    return (
+                      <p className={`mt-1 text-xs ${overview.billing.quota_lifted ? "text-nirex-success" : "text-muted-foreground"}`}>
+                        {overview.billing.quota_lifted
+                          ? `${w5hUsed}/${w5hLimit ?? '∞'} (5h) · ${w7dUsed}/${w7dLimit ?? '∞'} (7d) · no limit`
+                          : w5hLimit !== null && w7dLimit !== null
+                            ? `${w5hUsed}/${w5hLimit} (5h) · ${w7dUsed}/${w7dLimit} (7d)`
+                            : ""}
+                      </p>
+                    );
+                  })()}
                   <div className="mt-2 space-y-1 border-t border-primary/10 pt-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">Included</span>

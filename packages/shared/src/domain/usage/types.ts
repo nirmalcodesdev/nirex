@@ -2,6 +2,8 @@
  * Usage Analytics Types
  */
 
+import type { RollingWindowUsage } from '../billing/types.js';
+
 export type UsageRange = '30d' | '90d' | 'month_to_date';
 export type UsageExportFormat = 'json' | 'csv';
 
@@ -52,6 +54,7 @@ export interface UsageCurrentPlan {
   monthly_request_count: number;
   request_quota: number | null;
   quota_lifted: boolean;
+  rolling_window: RollingWindowUsage;
 }
 
 export interface UsageOverviewResponse {

@@ -152,8 +152,11 @@ export function DesktopSidebar() {
     const topupBalance = billingOverview?.usage?.topupBalance ?? 0;
     const isMaxPlan = currentPlanId === "max";
     const quotaLifted = billingOverview?.usage?.quotaLifted ?? false;
-    const monthlyRequestCount = billingOverview?.usage?.monthlyRequestCount ?? 0;
-    const requestQuota = billingOverview?.usage?.requestQuota ?? null;
+    const rollingWindow = billingOverview?.usage?.rollingWindow;
+    const window5hUsed = rollingWindow?.window5h.used ?? 0;
+    const window5hLimit = rollingWindow?.window5h.limit;
+    const window7dUsed = rollingWindow?.window7d.used ?? 0;
+    const window7dLimit = rollingWindow?.window7d.limit;
     const upgradeLabel = isMaxPlan
       ? "Max plan"
       : currentPlanId === "plus"
@@ -414,14 +417,12 @@ export function DesktopSidebar() {
                                             <span>Included: ${((includedCredits) / 100).toFixed(2)}</span>
                                             <span>Top-up: ${((topupBalance) / 100).toFixed(2)}</span>
                                         </div>
-                                        <p className={`text-[10px] mb-2 ${isMaxPlan || quotaLifted ? "text-nirex-success" : "text-muted-foreground"}`}>
-                                            {isMaxPlan
-                                                ? "Unlimited requests · Max plan"
-                                                : quotaLifted
-                                                    ? `${monthlyRequestCount.toLocaleString()} req this month · no limit`
-                                                    : requestQuota
-                                                        ? `${monthlyRequestCount.toLocaleString()} / ${requestQuota.toLocaleString()} requests this month`
-                                                        : ""}
+                                        <p className={`text-[10px] mb-2 ${quotaLifted ? "text-nirex-success" : "text-muted-foreground"}`}>
+                                            {quotaLifted
+                                                ? `${window5hUsed}/${window5hLimit ?? '∞'} (5h) · ${window7dUsed}/${window7dLimit ?? '∞'} (7d) · no limit`
+                                                : window5hLimit !== null && window7dLimit !== null
+                                                    ? `${window5hUsed}/${window5hLimit} (5h) · ${window7dUsed}/${window7dLimit} (7d)`
+                                                    : ""}
                                         </p>
                                         {!isMaxPlan && (
                                             <button

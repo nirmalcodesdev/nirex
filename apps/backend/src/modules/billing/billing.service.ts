@@ -84,6 +84,7 @@ import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import { quotaService } from '../usage/quota.service.js';
+import { rollingWindowService } from '../usage/rolling-window.service.js';
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import type {
   GatewayEvent,
@@ -2667,6 +2668,17 @@ export class BillingService {
           const includedCredits = remainingIncluded;
           const totalCredits = includedCredits + topupBalance;
           const creditsUsagePct = planIncluded > 0 ? creditsUsed / planIncluded : null;
+
+          let rollingWindow;
+          try {
+            rollingWindow = await rollingWindowService.getUsageSnapshot(userId, planId);
+          } catch {
+            rollingWindow = {
+              window5h: { used: 0, limit: null, remaining: null, resetsAt: null },
+              window7d: { used: 0, limit: null, remaining: null, resetsAt: null },
+            };
+          }
+
           return {
             creditsUsed,
             creditsIncluded: planIncluded,
@@ -2681,7 +2693,8 @@ export class BillingService {
             balanceUsd: totalCredits / CREDITS_PER_DOLLAR,
             monthlyRequestCount,
             requestQuota: isFinite(requestQuota) ? requestQuota : null,
-            quotaLifted: topupBalance > 0 || planId === 'max',
+            quotaLifted: topupBalance > 0,
+            rollingWindow,
           };
         })(),
         kpis: {

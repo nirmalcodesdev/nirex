@@ -35,6 +35,21 @@ export interface CreateTopUpSessionResponse {
   checkoutUrl: string;
 }
 
+export interface RollingWindowUsage {
+  window5h: {
+    used: number;
+    limit: number | null;
+    remaining: number | null;
+    resetsAt: string | null;
+  };
+  window7d: {
+    used: number;
+    limit: number | null;
+    remaining: number | null;
+    resetsAt: string | null;
+  };
+}
+
 export interface CreditBalanceResponse {
   planId: BillingPlanId;
   includedCredits: number;
@@ -44,6 +59,7 @@ export interface CreditBalanceResponse {
   monthlyRequestCount: number;
   requestQuota: number | null;
   quotaLifted: boolean;
+  rollingWindow: RollingWindowUsage;
 }
 
 export type BillingSubscriptionStatus =
@@ -257,6 +273,7 @@ export interface BillingOverviewUsage {
   monthlyRequestCount: number;
   requestQuota: number | null;
   quotaLifted: boolean;
+  rollingWindow: RollingWindowUsage;
 }
 
 export interface BillingOverviewKpis {

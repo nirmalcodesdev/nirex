@@ -1,5 +1,6 @@
 import type { UsageRange, UsageSummary } from '../usage/types.js';
 import type { NotificationItem } from '../notifications/types.js';
+import type { RollingWindowUsage } from '../billing/types.js';
 
 export type DashboardHealthStatus = 'healthy' | 'degraded' | 'critical';
 
@@ -32,6 +33,7 @@ export interface DashboardBillingOverview {
   included_credits: number | null;
   topup_balance: number | null;
   quota_lifted: boolean | null;
+  rolling_window: RollingWindowUsage | null;
 }
 
 export interface DashboardNotificationsOverview {

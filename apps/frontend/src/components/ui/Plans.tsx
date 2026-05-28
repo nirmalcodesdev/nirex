@@ -282,7 +282,7 @@ export function Plans() {
           </div>
 
           <p className="text-xs text-muted-foreground text-center max-w-lg pb-10">
-            All plans support balance top-ups. While your top-up balance is above $0, monthly request limits are lifted.
+            All plans support balance top-ups. While your top-up balance is above $0, rolling window request limits are lifted.
             Included balance resets each billing period; top-up balance never expires.
           </p>
         </div>
