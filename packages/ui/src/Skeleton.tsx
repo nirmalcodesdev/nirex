@@ -11,10 +11,10 @@ export function Skeleton({ className, variant = "default", style }: SkeletonProp
     const baseStyles = "animate-pulse bg-muted";
 
     const variants = {
-        default: "rounded-md",
-        circle: "rounded-full",
-        text: "rounded-sm",
-        card: "rounded-xl",
+        default: "",
+        circle: "",
+        text: "",
+        card: "",
     };
 
     return (
@@ -31,7 +31,7 @@ export function SkeletonShimmer({ className }: { className?: string }) {
     return (
         <div
             className={cn(
-                "relative overflow-hidden rounded-md bg-muted",
+                "relative overflow-hidden  bg-muted",
                 className
             )}
             aria-hidden="true"
@@ -44,9 +44,9 @@ export function SkeletonShimmer({ className }: { className?: string }) {
 // Pre-built skeleton layouts
 export function CardSkeleton() {
     return (
-        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+        <div className="bg-card border border-border p-5 space-y-4">
             <div className="flex items-center gap-3">
-                <Skeleton className="h-8 w-8 rounded-lg" variant="default" />
+                <Skeleton className="h-8 w-8 " variant="default" />
                 <Skeleton className="h-4 w-24" variant="text" />
             </div>
             <Skeleton className="h-8 w-32" variant="text" />
@@ -71,10 +71,10 @@ export function TableRowSkeleton({ columns = 6 }: { columns?: number }) {
 
 export function ChartSkeleton() {
     return (
-        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+        <div className="bg-card border border-border p-5 space-y-4">
             <div className="flex items-center justify-between">
                 <Skeleton className="h-6 w-32" variant="text" />
-                <Skeleton className="h-8 w-8 rounded-lg" variant="default" />
+                <Skeleton className="h-8 w-8 " variant="default" />
             </div>
             <Skeleton className="h-[220px] w-full" variant="card" />
         </div>

@@ -25,7 +25,7 @@ export default function HowItWorks() {
                             <div>
                                 <h3 className="font-display font-semibold text-xl text-nirex-text-primary mb-2">{step.title}</h3>
                                 <p className="body-m text-nirex-text-secondary mb-4">{step.description}</p>
-                                <div className="inline-block bg-nirex-void/50 rounded-md px-4 py-2 font-mono text-xs">
+                                <div className="inline-block bg-nirex-void/50 px-4 py-2 font-mono text-xs">
                                     <span className="t-prompt">$ </span>
                                     <span className="t-cmd">{step.code.replace('$ ', '')}</span>
                                 </div>

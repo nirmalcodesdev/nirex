@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
   Copy,
@@ -137,16 +136,16 @@ export function ApiKeysSettings({
 
   return (
     <>
-      <section className="overflow-hidden rounded-xl border border-border bg-card">
+      <section className="overflow-hidden border border-border bg-card">
         <div className="flex flex-col gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>
-            <h2 className="text-lg font-medium">API Keys</h2>
+            <h2 className="text-lg font-medium font-display">API Keys</h2>
             <p className="mt-1 text-sm text-muted-foreground">Manage active credentials.</p>
           </div>
           <button
             type="button"
             onClick={() => openFlow({ mode: "create" })}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="inline-flex items-center justify-center gap-2 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             <Plus size={16} />
             Create key
@@ -162,18 +161,18 @@ export function ApiKeysSettings({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search keys"
-              className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="w-full border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
           {isLoading ? (
-            <div className="rounded-lg border border-border bg-background p-4 text-sm text-muted-foreground">
+            <div className=" border border-border bg-background p-4 text-sm text-muted-foreground">
               Loading API keys...
             </div>
           ) : activeKeys.length === 0 ? (
             <EmptyState hasQuery={query.trim().length > 0} onCreate={() => openFlow({ mode: "create" })} />
           ) : (
-            <div className="overflow-hidden rounded-lg border border-border">
+            <div className="overflow-hidden border border-border">
               <div className="hidden min-w-[760px] grid-cols-[minmax(220px,1.2fr)_minmax(220px,1fr)_140px_140px_112px] border-b border-border bg-muted/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground md:grid">
                 <span>Name</span>
                 <span>Scopes</span>
@@ -200,22 +199,20 @@ export function ApiKeysSettings({
         </div>
       </section>
 
-      <AnimatePresence>
-        {flow ? (
-          <KeyDialog
-            flow={flow}
-            onClose={closeFlow}
-            onSuccess={(message) => toast(message, "success")}
-          />
-        ) : null}
-        {revokeTarget ? (
-          <RevokeDialog
-            apiKey={revokeTarget}
-            onClose={() => setRevokeTarget(null)}
-            onSuccess={(message) => toast(message, "success")}
-          />
-        ) : null}
-      </AnimatePresence>
+      {flow ? (
+        <KeyDialog
+          flow={flow}
+          onClose={closeFlow}
+          onSuccess={(message) => toast(message, "success")}
+        />
+      ) : null}
+      {revokeTarget ? (
+        <RevokeDialog
+          apiKey={revokeTarget}
+          onClose={() => setRevokeTarget(null)}
+          onSuccess={(message) => toast(message, "success")}
+        />
+      ) : null}
     </>
   );
 }
@@ -230,25 +227,25 @@ function ApiKeyRow({
   onRevoke: () => void;
 }) {
   return (
-    <div className="grid gap-4 bg-background p-4 md:min-w-[760px] md:grid-cols-[minmax(220px,1.2fr)_minmax(220px,1fr)_140px_140px_112px] md:items-center">
+    <div className="grid gap-4 border-b border-border p-4 md:min-w-[760px] md:grid-cols-[minmax(220px,1.2fr)_minmax(220px,1fr)_140px_140px_112px] md:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-sm font-medium">{apiKey.name}</p>
           <KeyStatus apiKey={apiKey} />
         </div>
         <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-          {apiKey.keyPrefix}....{apiKey.last4}
+          {apiKey.keyPrefix}••••{apiKey.last4}
         </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
         {apiKey.scopes.slice(0, 4).map((scope) => (
-          <span key={scope} className="rounded-md border border-border bg-card px-2 py-1 font-mono text-[11px]">
+          <span key={scope} className=" border border-border bg-card px-2 py-1 font-mono text-[11px]">
             {scope}
           </span>
         ))}
         {apiKey.scopes.length > 4 ? (
-          <span className="rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground">
+          <span className=" border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground">
             +{apiKey.scopes.length - 4}
           </span>
         ) : null}
@@ -364,7 +361,7 @@ function KeyDialog({
 
   return (
     <ModalShell onClose={onClose}>
-      <div className="flex max-h-[min(760px,calc(100vh-32px))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-elevated)]">
+      <div className="flex max-h-[min(760px,calc(100vh-32px))] flex-col overflow-hidden border border-border bg-card shadow-[var(--shadow-elevated)]">
         <DialogHeader
           title={createdSecret ? "API key created" : isRotate ? "Rotate API key" : "Create API key"}
           onClose={onClose}
@@ -386,15 +383,15 @@ function KeyDialog({
             />
           ) : isRotate ? (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-background p-4">
+              <div className=" border border-border bg-background p-4">
                 <p className="text-sm font-medium">{flow.key.name}</p>
-                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {flow.key.keyPrefix}....{flow.key.last4}
-                </p>
+        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+          {flow.key.keyPrefix}••••{flow.key.last4}
+        </p>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {flow.key.scopes.map((scope) => (
-                  <span key={scope} className="rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px]">
+                  <span key={scope} className=" border border-border bg-background px-2 py-1 font-mono text-[11px]">
                     {scope}
                   </span>
                 ))}
@@ -408,7 +405,7 @@ function KeyDialog({
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="Production CLI"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
 
@@ -433,13 +430,13 @@ function KeyDialog({
                         {scopes.map((scope) => (
                           <label
                             key={scope.scope}
-                            className="flex min-h-11 items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            className="flex min-h-11 items-center gap-2 border border-border bg-background px-3 py-2 text-sm"
                           >
                             <input
                               type="checkbox"
                               checked={selectedScopes.includes(scope.scope)}
                               onChange={() => toggleScope(scope.scope)}
-                              className="h-4 w-4 rounded border-border"
+                              className="h-4 w-4 border-border"
                             />
                             <span className="min-w-0">
                               <span className="block truncate">{scope.label}</span>
@@ -468,9 +465,7 @@ function KeyDialog({
                       key={value}
                       type="button"
                       onClick={() => setExpiry(value as "default" | "30d" | "90d" | "custom")}
-                      className={`rounded-lg border px-3 py-2 text-sm ${
-                        expiry === value ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-muted"
-                      }`}
+                      className={`border px-3 py-2 text-sm ${ expiry === value ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-muted" }`}
                     >
                       {label}
                     </button>
@@ -482,7 +477,7 @@ function KeyDialog({
                     value={customExpiry}
                     min={new Date().toISOString().slice(0, 16)}
                     onChange={(event) => setCustomExpiry(event.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                   />
                 ) : null}
               </div>
@@ -496,7 +491,7 @@ function KeyDialog({
               type="button"
               onClick={onClose}
               disabled={!secretSaved}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className=" bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               Close
             </button>
@@ -505,7 +500,7 @@ function KeyDialog({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+                className=" border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
               >
                 Cancel
               </button>
@@ -513,7 +508,7 @@ function KeyDialog({
                 type="button"
                 onClick={() => void (isRotate ? submitRotate() : submitCreate())}
                 disabled={isWorking}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                className=" bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 {isWorking ? "Saving..." : isRotate ? "Rotate key" : "Create key"}
               </button>
@@ -560,11 +555,11 @@ function RevokeDialog({
 
   return (
     <ModalShell onClose={onClose} maxWidthClassName="max-w-lg">
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-elevated)]">
+      <div className="overflow-hidden border border-border bg-card shadow-[var(--shadow-elevated)]">
         <DialogHeader title="Revoke API key" onClose={onClose} />
         <div className="space-y-4 p-5 sm:p-6">
           {error ? <InlineError message={error} /> : null}
-          <div className="rounded-lg border border-border bg-background p-4">
+          <div className=" border border-border bg-background p-4">
             <p className="text-sm font-medium">{apiKey.name}</p>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
               {apiKey.keyPrefix}....{apiKey.last4}
@@ -577,7 +572,7 @@ function RevokeDialog({
               onChange={(event) => setReason(event.target.value)}
               rows={3}
               placeholder="Optional"
-              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="w-full resize-none border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
@@ -585,7 +580,7 @@ function RevokeDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+            className=" border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
           >
             Cancel
           </button>
@@ -593,7 +588,7 @@ function RevokeDialog({
             type="button"
             onClick={() => void submit()}
             disabled={revokeMutation.isPending}
-            className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+            className=" bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
           >
             {revokeMutation.isPending ? "Revoking..." : "Revoke key"}
           </button>
@@ -626,34 +621,34 @@ function SecretView({
     <div className="space-y-4">
       <div>
         <p className="text-sm font-medium">{name}</p>
-        <div className="mt-3 rounded-lg border border-border bg-slate-950 p-3">
-          <code className="block break-all font-mono text-sm leading-6 text-slate-100">
+        <div className="mt-3 border border-border bg-muted p-3">
+          <code className="block break-all font-mono text-sm leading-6 text-foreground">
             {showSecret ? secret : `${secret.slice(0, 16)}${"*".repeat(Math.max(8, secret.length - 16))}`}
           </code>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onToggleShow} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">
+        <button type="button" onClick={onToggleShow} className="inline-flex items-center gap-2 border border-border px-3 py-2 text-sm hover:bg-muted">
           {showSecret ? <EyeOff size={15} /> : <Eye size={15} />}
           {showSecret ? "Hide" : "Show"}
         </button>
-        <button type="button" onClick={onCopy} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">
+        <button type="button" onClick={onCopy} className="inline-flex items-center gap-2 border border-border px-3 py-2 text-sm hover:bg-muted">
           <Copy size={15} />
           Copy
         </button>
-        <button type="button" onClick={onDownload} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">
+        <button type="button" onClick={onDownload} className="inline-flex items-center gap-2 border border-border px-3 py-2 text-sm hover:bg-muted">
           <Download size={15} />
           Download
         </button>
       </div>
 
-      <label className="flex items-start gap-3 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">
+      <label className="flex items-start gap-3 border border-border bg-background p-3 text-sm text-muted-foreground">
         <input
           type="checkbox"
           checked={secretSaved}
           onChange={(event) => onToggleSaved(event.target.checked)}
-          className="mt-1 h-4 w-4 rounded border-border"
+          className="mt-1 h-4 w-4 border-border"
         />
         <span>I saved this key.</span>
       </label>
@@ -663,16 +658,17 @@ function SecretView({
 
 function EmptyState({ hasQuery, onCreate }: { hasQuery: boolean; onCreate: () => void }) {
   return (
-    <div className="rounded-lg border border-dashed border-border bg-background p-6 text-center">
-      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <KeyRound size={18} />
+          <div className=" border border-dashed border-border bg-background p-8 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center bg-muted text-muted-foreground mb-3">
+        <KeyRound size={20} />
       </div>
-      <p className="mt-3 text-sm font-medium">{hasQuery ? "No matching keys" : "No active API keys"}</p>
+      <p className="text-sm font-medium">{hasQuery ? "No matching keys" : "No active API keys"}</p>
+      <p className="text-xs text-muted-foreground mt-1">{hasQuery ? "Try adjusting your search." : "Create an API key to get started with the CLI."}</p>
       {!hasQuery ? (
         <button
           type="button"
           onClick={onCreate}
-          className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          className="mt-4 inline-flex items-center justify-center gap-2 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <Plus size={16} />
           Create key
@@ -693,22 +689,15 @@ function ModalShell({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
-      <motion.button
+      <button
         type="button"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        className="absolute inset-0 bg-background/60"
         onClick={onClose}
+        aria-label="Close modal"
       />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.98, y: 8 }}
-        className={`relative w-full ${maxWidthClassName}`}
-      >
+      <div className={`relative w-full ${maxWidthClassName}`}>
         {children}
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -720,7 +709,7 @@ function DialogHeader({ title, onClose }: { title: string; onClose: () => void }
       <button
         type="button"
         onClick={onClose}
-        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        className=" p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <X size={18} />
       </button>
@@ -745,11 +734,7 @@ function IconButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
-        destructive
-          ? "border-destructive/30 text-destructive hover:bg-destructive/10"
-          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-      }`}
+      className={`inline-flex h-9 w-9 items-center justify-center border transition-colors ${ destructive ? "border-destructive/30 text-destructive hover:bg-destructive/10" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground" }`}
     >
       {children}
     </button>
@@ -758,14 +743,14 @@ function IconButton({
 
 function KeyStatus({ apiKey }: { apiKey: ApiKeyItem }) {
   if (isExpired(apiKey)) {
-    return <span className="rounded-md bg-destructive/10 px-2 py-0.5 text-xs text-destructive">Expired</span>;
+    return <span className=" bg-destructive/10 px-2 py-0.5 text-xs text-destructive">Expired</span>;
   }
 
   if (expiresSoon(apiKey)) {
-    return <span className="rounded-md bg-nirex-warning/10 px-2 py-0.5 text-xs text-nirex-warning">Expiring</span>;
+    return <span className=" bg-nirex-warning/10 px-2 py-0.5 text-xs text-nirex-warning">Expiring</span>;
   }
 
-  return <span className="rounded-md bg-nirex-success/10 px-2 py-0.5 text-xs text-nirex-success">Active</span>;
+  return <span className=" bg-nirex-success/10 px-2 py-0.5 text-xs text-nirex-success">Active</span>;
 }
 
 function MetaLine({ label, value }: { label: string; value: string }) {
@@ -779,7 +764,7 @@ function MetaLine({ label, value }: { label: string; value: string }) {
 
 function InlineError({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div className="flex items-center gap-2 border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       <AlertCircle size={16} className="shrink-0" />
       <span>{message}</span>
     </div>

@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { TooltipProvider } from "@nirex/ui/tooltip";
 import { SonnerToaster } from "@nirex/ui";
-import CustomCursor from "@nirex/ui/CustomCursor";
 
 // Layouts
 import { Layout } from "./components/main/Layout";
@@ -20,8 +19,6 @@ import { ROUTES } from "./constant/routes";
 // Pages - Direct imports for core dashboard to ensure immediate availability
 import {
   Home,
-  Sessions,
-  SessionDetails,
   Usage,
   Billing,
   Notifications,
@@ -50,10 +47,10 @@ const queryClient = new QueryClient();
 
 // Professional loading fallback
 const PageLoader = () => (
-  <div className="h-screen w-full flex items-center justify-center bg-background">
+  <div className="h-screen w-full flex items-center justify-center bg-background" role="status" aria-live="polite">
     <div className="flex flex-col items-center gap-4">
-      <div className="w-10 h-10 border-4 border-nirex-accent/20 border-t-nirex-accent rounded-full animate-spin" />
-      <span className="text-sm font-medium text-muted-foreground">Loading...</span>
+      <div className="w-10 h-10 border-4 border-primary/20 border-t-primary animate-spin" aria-hidden="true" />
+      <span className="text-sm font-medium text-muted-foreground">Loading page...</span>
     </div>
   </div>
 );
@@ -79,7 +76,6 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <ToastProvider> {/* ToastProvider moved here to be globally available */}
-        <CustomCursor />
         <TooltipProvider> {/* Added closing tag for TooltipProvider */}
           <SonnerToaster />
           <BrowserRouter>
@@ -108,8 +104,6 @@ const App = () => (
                   {/* Core Application (Protected Area) */}
                   <Route path={ROUTES.DASHBOARD.ROOT} element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
                     <Route index element={<RouteTransition><Home /></RouteTransition>} />
-                    <Route path="sessions" element={<RouteTransition><Sessions /></RouteTransition>} />
-                    <Route path={ROUTES.DASHBOARD.SESSION_DETAILS_RAW} element={<RouteTransition><SessionDetails /></RouteTransition>} />
                     <Route path="usage" element={<RouteTransition><Usage /></RouteTransition>} />
                     <Route path="billing" element={<RouteTransition><Billing /></RouteTransition>} />
                     <Route path="notifications" element={<RouteTransition><Notifications /></RouteTransition>} />

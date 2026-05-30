@@ -29,12 +29,7 @@ export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
             {Array.from({ length: totalSteps - 1 }).map((_, i) => (
               <div
                 key={i}
-                className={`h-1.5 rounded-full transition-all duration-500 ease-out ${i + 1 === currentStep
-                  ? "w-8 bg-nirex-accent shadow-[0_0_8px_hsl(var(--nirex-accent)/0.5)]"
-                  : i + 1 < currentStep
-                    ? "w-2 bg-nirex-accent/40"
-                    : "w-2 bg-nirex-accent/10"
-                  }`}
+                className={`h-1.5 transition-all duration-500 ease-out ${i + 1 === currentStep ? "w-8 bg-nirex-accent shadow-[0_0_8px_hsl(var(--nirex-accent)/0.5)]" : i + 1 < currentStep ? "w-2 bg-nirex-accent/40" : "w-2 bg-nirex-accent/10" }`}
               />
             ))}
           </div>

@@ -12,7 +12,7 @@ export default function Testimonials() {
                     {testimonials.map((t, i) => (
                         <div
                             key={t.handle}
-                            className="bg-nirex-surface border border-border rounded-lg p-6"
+                            className="bg-nirex-surface border border-border p-6"
                             data-reveal="fade-up"
                             data-reveal-delay={`${i * 0.1}`}
                         >

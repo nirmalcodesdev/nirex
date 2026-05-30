@@ -5,14 +5,13 @@ import {
   Check,
   CheckCircle2,
   CircleAlert,
-  Clock,
   Inbox,
-  MailOpen,
   MoreVertical,
   RefreshCw,
+  Shield,
   XCircle,
 } from "lucide-react";
-import { Dropdown, DropdownItem, KpiCard, PageHeader, Skeleton, CardSkeleton } from "@nirex/ui";
+import { Dropdown, DropdownItem, KpiCard, PageHeader, Skeleton, CardSkeleton, SectionCard, StatusBadge } from "@nirex/ui";
 import { useToast } from "../../../components/ToastProvider";
 import {
   useMarkAllNotificationsReadMutation,
@@ -38,21 +37,21 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 function NotificationsSkeleton() {
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-5 px-3 mx-auto">
-      <Skeleton className="h-8 w-40" variant="text" />
+    <div className="flex flex-col gap-6 lg:gap-8 py-4 sm:py-6 lg:py-8 px-3 mx-auto max-w-[1600px]">
+      <Skeleton className="h-10 w-48" variant="text" />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((item) => (
           <CardSkeleton key={item} />
         ))}
       </div>
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="bg-card border border-border overflow-hidden">
         <div className="p-4 sm:p-6 border-b border-border">
           <Skeleton className="h-6 w-48" variant="text" />
         </div>
         <div className="divide-y divide-border">
           {[1, 2, 3, 4, 5].map((item) => (
             <div key={item} className="p-4 sm:p-6 flex gap-4">
-              <Skeleton className="h-5 w-5 rounded-full" variant="circle" />
+              <Skeleton className="h-5 w-5 " variant="circle" />
               <div className="flex-1 space-y-2">
                 <div className="flex items-center justify-between">
                   <Skeleton className="h-4 w-32" variant="text" />
@@ -78,45 +77,43 @@ function ErrorState({
   isRetrying: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 py-2 sm:py-4 lg:py-5 px-3 mx-auto">
+    <div className="flex flex-col gap-6 lg:gap-8 py-4 sm:py-6 lg:py-8 px-3 mx-auto max-w-[1600px]">
       <PageHeader
         title="Notifications"
-        description="Stay updated with your account and project activity."
+        description="Account notifications."
       />
-      <section className="rounded-xl border border-nirex-error/30 bg-nirex-error/5 p-6">
-        <div className="flex items-start gap-3">
-          <AlertTriangle size={20} className="mt-0.5 text-nirex-error" />
-          <div className="space-y-3">
-            <div>
-              <h2 className="text-lg font-medium">Unable to load notifications</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{message}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onRetry}
-              disabled={isRetrying}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
-              <RefreshCw size={14} className={isRetrying ? "animate-spin" : ""} />
-              {isRetrying ? "Retrying..." : "Retry"}
-            </button>
+      <div className="bg-card border border-border overflow-hidden">
+        <div className="p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex items-center justify-center w-10 h-10 bg-red-500/10 shrink-0">
+            <AlertTriangle size={20} className="text-red-500" />
           </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">Unable to load notifications</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">{message}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={isRetrying}
+            className="inline-flex items-center gap-2 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors shrink-0"
+          >
+            <RefreshCw size={14} className={isRetrying ? "animate-spin" : ""} />
+            {isRetrying ? "Retrying..." : "Retry"}
+          </button>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="p-12 flex flex-col items-center justify-center text-center">
-      <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
-        <Bell size={24} className="text-muted-foreground" />
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <div className="flex items-center justify-center w-12 h-12 bg-muted/60 mb-3">
+        <Inbox size={24} className="text-muted-foreground/50" />
       </div>
-      <h2 className="text-lg font-medium mb-2">No notifications</h2>
-      <p className="text-sm text-muted-foreground max-w-md">
-        You&apos;re all caught up. New system and account updates will show up here.
-      </p>
+      <p className="text-sm font-medium text-foreground">No notifications</p>
+      <p className="text-xs text-muted-foreground mt-1">You&apos;re all caught up</p>
     </div>
   );
 }
@@ -124,13 +121,13 @@ function EmptyState() {
 function getSeverityMeta(severity: NotificationItem["severity"]) {
   switch (severity) {
     case "success":
-      return { icon: CheckCircle2, colorClass: "text-nirex-success" };
+      return { icon: CheckCircle2, colorClass: "text-emerald-500", bgClass: "bg-emerald-500/10", badgeVariant: "success" as const };
     case "warning":
-      return { icon: AlertTriangle, colorClass: "text-nirex-warning" };
+      return { icon: AlertTriangle, colorClass: "text-amber-500", bgClass: "bg-amber-500/10", badgeVariant: "warning" as const };
     case "error":
-      return { icon: XCircle, colorClass: "text-nirex-error" };
+      return { icon: XCircle, colorClass: "text-red-500", bgClass: "bg-red-500/10", badgeVariant: "error" as const };
     default:
-      return { icon: CircleAlert, colorClass: "text-nirex-accent" };
+      return { icon: CircleAlert, colorClass: "text-sky-500", bgClass: "bg-sky-500/10", badgeVariant: "info" as const };
   }
 }
 
@@ -148,50 +145,56 @@ function NotificationRow({
   observeRef,
 }: NotificationRowProps) {
   const isRead = Boolean(notification.read_at);
-  const { icon: Icon, colorClass } = getSeverityMeta(notification.severity);
+  const { icon: Icon, colorClass, bgClass, badgeVariant } = getSeverityMeta(notification.severity);
   const relativeCreatedAt = formatRelativeTime(notification.created_at);
 
   return (
     <article
       ref={(el) => observeRef(el, notification.id, !isRead)}
-      className={`p-4 sm:p-6 flex gap-4 transition-colors group ${
-        isRead ? "bg-background" : "bg-muted/10"
-      }`}
+      className={`p-4 sm:p-5 flex gap-3 transition-colors group border-b border-border last:border-0 ${ !isRead ? "border-l-2 border-l-primary pl-[calc(1rem-2px)]" : "" } hover:bg-muted/60`}
     >
-      <div className="shrink-0 mt-1">
-        <Icon size={18} className={colorClass} />
+      <div className={`flex items-center justify-center w-8 h-8 shrink-0 mt-0.5 ${bgClass}`}>
+        <Icon size={16} className={colorClass} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1">
-          <h3 className="text-sm font-medium">{notification.title}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium font-display">{notification.title}</h3>
+            {!isRead && (
+              <StatusBadge label="New" variant={badgeVariant} />
+            )}
+          </div>
           <span
-            className="text-xs text-muted-foreground whitespace-nowrap"
+            className="text-xs text-muted-foreground whitespace-nowrap font-mono"
             title={formatTimestamp(notification.created_at)}
           >
             {relativeCreatedAt}
           </span>
         </div>
-        <p className="text-sm text-muted-foreground mb-3">{notification.message}</p>
+        <p className="text-sm text-muted-foreground mb-2">{notification.message}</p>
 
-        {isRead ? (
-          <button
-            type="button"
-            onClick={() => onMarkUnread(notification)}
-            disabled={isWorking}
-            className="text-xs font-medium text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
-          >
-            Mark as unread
-          </button>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            Marks as read once viewed
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {isRead ? (
+            <button
+              type="button"
+              onClick={() => onMarkUnread(notification)}
+              disabled={isWorking}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+            >
+              Mark as unread
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Shield size={10} />
+              Marked as read once viewed
+            </span>
+          )}
+        </div>
       </div>
       <div className="shrink-0 flex items-start gap-2">
         {!isRead ? (
-          <div className="flex items-center justify-center w-2 mt-2">
-            <div className="w-2 h-2 bg-nirex-accent rounded-full" />
+          <div className="flex items-center justify-center w-2 mt-3">
+            <div className="w-2 h-2 bg-nirex-accent" />
           </div>
         ) : null}
         {isRead ? (
@@ -201,7 +204,7 @@ function NotificationRow({
               <button
                 type="button"
                 disabled={isWorking}
-                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors sm:opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors sm:opacity-0 group-hover:opacity-100 disabled:opacity-50"
               >
                 <MoreVertical size={16} />
               </button>
@@ -284,7 +287,7 @@ export function Notifications() {
   };
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8 py-2 sm:py-4 lg:py-5 px-3 mx-auto">
+    <div className="flex flex-col gap-6 lg:gap-8 py-4 sm:py-6 lg:py-8 px-3 mx-auto max-w-[1600px]">
       <PageHeader
         title="Notifications"
         description="Stay updated with your account and project activity."
@@ -297,10 +300,11 @@ export function Notifications() {
                 void refetch();
               }}
               disabled={isFetching}
-              className="flex items-center gap-2 bg-card border border-border hover:bg-muted/50 rounded-lg px-4 py-2 text-sm font-medium transition-colors shadow-sm disabled:opacity-60"
+              className="inline-flex items-center justify-center w-9 h-9 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 border border-border"
+              title="Refresh"
+              aria-label="Refresh notifications"
             >
-              <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">{isFetching ? "Refreshing" : "Refresh"}</span>
+              <RefreshCw size={15} className={isFetching ? "animate-spin" : ""} />
             </button>
             {unreadCount > 0 ? (
               <button
@@ -309,7 +313,7 @@ export function Notifications() {
                   void handleMarkAllAsRead();
                 }}
                 disabled={markAllReadMutation.isPending}
-                className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium transition-colors shadow-sm disabled:opacity-60"
+                className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60"
               >
                 <Check size={16} />
                 <span className="hidden sm:inline">
@@ -327,7 +331,6 @@ export function Notifications() {
           value={formatNumber(notifications.length)}
           change="Current feed"
           changeType="neutral"
-          icon={Inbox}
           changeContext="latest 50"
         />
         <KpiCard
@@ -335,15 +338,13 @@ export function Notifications() {
           value={formatNumber(unreadCount)}
           change={unreadCount > 0 ? "Needs attention" : "All caught up"}
           changeType={unreadCount > 0 ? "negative" : "positive"}
-          icon={MailOpen}
-          changeContext={unreadCount > 0 ? `${formatNumber(unreadCount)} pending` : "No action needed"}
+          changeContext={unreadCount > 0 ? `${formatNumber(unreadCount)} unread` : "No action needed"}
         />
         <KpiCard
           title="Alerts"
           value={formatNumber(alertCount)}
           change={alertCount > 0 ? "Requires action" : "No alerts"}
           changeType={alertCount > 0 ? "negative" : "positive"}
-          icon={AlertTriangle}
           changeContext={alertCount > 0 ? "High priority" : "System healthy"}
         />
         <KpiCard
@@ -351,16 +352,34 @@ export function Notifications() {
           value={lastActivity}
           change="Most recent update"
           changeType="neutral"
-          icon={Clock}
           changeContext="notification stream"
         />
       </div>
 
-      <section className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+      <SectionCard
+        title="Notification Feed"
+        icon={Bell}
+        headerAction={
+          unreadCount > 0 ? (
+            <StatusBadge
+              label={`${formatNumber(unreadCount)} unread`}
+              variant="info"
+              icon={Bell}
+            />
+          ) : (
+            <StatusBadge
+              label="All read"
+              variant="success"
+              icon={Check}
+            />
+          )
+        }
+
+      >
         {notifications.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border -mx-4">
             {notifications.map((notification) => (
               <NotificationRow
                 key={notification.id}
@@ -374,7 +393,7 @@ export function Notifications() {
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
     </div>
   );
 }

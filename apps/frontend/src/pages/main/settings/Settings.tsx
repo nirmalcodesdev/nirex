@@ -6,9 +6,11 @@ import {
   Clipboard,
   Key,
   Laptop,
+  LogOut,
   Menu,
   Monitor,
   Moon,
+  RefreshCw,
   Shield,
   Smartphone,
   Sun,
@@ -17,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { PageHeader } from "@nirex/ui";
+import { PageHeader, SectionCard, StatusBadge } from "@nirex/ui";
 import {
   changePasswordSchema,
   PASSWORD_POLICY,
@@ -74,41 +76,54 @@ export function Settings() {
     setIsMobileMenuOpen(false);
   };
 
+  const activeNavItem = settingsNav.find((n) => n.id === activeTab);
+
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8 pb-8 sm:pb-12 py-2 sm:py-4 lg:py-5 px-3 mx-auto">
-      <PageHeader title="Settings" description="Manage your account settings and preferences." />
+    <div className="flex flex-col gap-6 lg:gap-8 py-4 sm:py-6 lg:py-8 px-3 mx-auto max-w-[1600px]">
+      <PageHeader title="Settings" description="Account settings." />
 
       <div className="flex flex-col md:flex-row gap-6 sm:gap-8 relative">
-        <div className="md:hidden flex items-center justify-between bg-card border border-border rounded-lg p-3">
-          <div className="flex items-center gap-2 font-medium">
-            {(() => {
-              const activeItem = settingsNav.find((n) => n.id === activeTab);
-              if (!activeItem) return null;
-              const Icon = activeItem.icon;
-              return (
-                <>
-                  <Icon size={18} />
-                  {activeItem.label}
-                </>
-              );
-            })()}
+        {/* Mobile Tab Selector */}
+        <div className="md:hidden">
+          <div className="flex items-center justify-between bg-card border border-border p-3">
+            <div className="flex items-center gap-2 font-medium">
+              {activeNavItem && <activeNavItem.icon size={18} />}
+              {activeNavItem?.label}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-1.5 hover:bg-muted transition-colors"
+              aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={isMobileMenuOpen}
+            >
+              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="p-1.5 hover:bg-muted rounded-md transition-colors"
-          >
-            {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+
+          {isMobileMenuOpen && (
+            <div className="mt-2 bg-card border border-border p-2 z-20">
+              {settingsNav.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleTabChange(item.id)}
+                    className={`flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors w-full text-left ${ isActive ? "bg-nirex-accent/10 text-nirex-accent" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground" }`}
+                  >
+                    <Icon size={16} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        <div
-          className={`md:w-64 flex-col gap-1 shrink-0 ${
-            isMobileMenuOpen
-              ? "flex absolute top-14 left-0 right-0 z-10 bg-card border border-border p-2 rounded-lg"
-              : "hidden md:flex"
-          }`}
-        >
+        {/* Desktop Sidebar */}
+        <div className="hidden md:flex md:w-64 flex-col gap-1 shrink-0">
           {settingsNav.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -117,13 +132,11 @@ export function Settings() {
                 key={item.id}
                 type="button"
                 onClick={() => handleTabChange(item.id)}
-                className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-nirex-accent/10 text-nirex-accent"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                }`}
+                className={`flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors text-left border-l-2 ${ isActive ? "border-l-primary bg-muted/60 text-foreground" : "border-l-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground" }`}
               >
-                <Icon size={16} />
+                <div className={`flex items-center justify-center w-6 h-6 ${isActive ? 'bg-primary/10' : 'bg-muted/60'}`}>
+                  <Icon size={14} className={isActive ? "text-primary" : "text-muted-foreground"} />
+                </div>
                 {item.label}
               </button>
             );
@@ -179,61 +192,70 @@ function ProfileSettings() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border">
-        <h2 className="text-lg sm:text-xl font-medium mb-1">Profile Settings</h2>
-        <p className="text-sm text-muted-foreground">Update your account identity.</p>
-      </div>
-
-      <div className="p-5 sm:p-6 flex flex-col gap-6">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-          <UserAvatar className="w-20 h-20 text-2xl" name={user?.fullName} />
-          <div>
-            <p className="text-sm font-medium">{user?.email ?? "Signed in account"}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {user?.isEmailVerified ? "Email verified" : "Email verification pending"}
-            </p>
+    <SectionCard
+      title="Profile Settings"
+      icon={User}
+      footer={
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground text-center sm:text-left">
+            Changes apply immediately across signed-in sessions.
+          </p>
+          <div className="flex items-center gap-4 w-full sm:w-auto">
+            {saved && (
+              <span className="hidden sm:flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={16} /> Saved
+              </span>
+            )}
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : "Save Changes"}
+            </button>
           </div>
         </div>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+            <UserAvatar className="w-20 h-20 text-2xl" name={user?.fullName} />
+            <div>
+              <p className="text-sm font-medium">{user?.email ?? "Signed in account"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {user?.isEmailVerified ? (
+                  <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 size={12} /> Email verified
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                    <AlertCircle size={12} /> Email verification pending
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
 
-        {error && <InlineError message={error} />}
+          {error && <InlineError message={error} />}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          <InputField
-            label="Full name"
-            value={fullName}
-            onChange={setFullName}
-            autoComplete="name"
-          />
-          <ReadOnlyField label="Email address" value={user?.email ?? ""} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <InputField
+              label="Full name"
+              value={fullName}
+              onChange={setFullName}
+              autoComplete="name"
+            />
+            <ReadOnlyField label="Email address" value={user?.email ?? ""} />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <ReadOnlyField label="Account created" value={formatDate(user?.createdAt)} />
+            <ReadOnlyField label="Last profile update" value={formatDate(user?.updatedAt)} />
+          </div>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          <ReadOnlyField label="Account created" value={formatDate(user?.createdAt)} />
-          <ReadOnlyField label="Last profile update" value={formatDate(user?.updatedAt)} />
-        </div>
-      </div>
-
-      <div className="p-5 sm:p-6 border-t border-border bg-muted/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground text-center sm:text-left">
-          Changes apply immediately across signed-in sessions.
-        </p>
-        <div className="flex items-center gap-4 w-full sm:w-auto">
-          {saved && (
-            <span className="hidden sm:flex items-center gap-1.5 text-sm font-medium text-nirex-success">
-              <CheckCircle2 size={16} /> Saved
-            </span>
-          )}
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-6 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {isSaving ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
-      </div>
-    </form>
+      </form>
+    </SectionCard>
   );
 }
 
@@ -250,12 +272,11 @@ function AppearanceSettings({ theme, setTheme }: AppearanceSettingsProps) {
   ] as const;
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border">
-        <h2 className="text-lg sm:text-xl font-medium mb-1">Appearance</h2>
-        <p className="text-sm text-muted-foreground">Customize the look and feel of your dashboard.</p>
-      </div>
-      <div className="p-5 sm:p-6 flex flex-col gap-6">
+    <SectionCard
+      title="Appearance"
+      icon={Monitor}
+    >
+      <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-4">
           <label className="text-sm font-medium">Theme Preference</label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -264,20 +285,21 @@ function AppearanceSettings({ theme, setTheme }: AppearanceSettingsProps) {
                 key={item.id}
                 type="button"
                 onClick={() => setTheme(item.id)}
-                className={`flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all ${
-                  theme === item.id
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50 bg-background"
-                }`}
+                className={`flex flex-col items-center gap-3 p-4 border-2 transition-all ${ theme === item.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 bg-background" }`}
               >
-                <item.icon size={24} className={theme === item.id ? "text-primary" : "text-muted-foreground"} />
+                <div className={`flex items-center justify-center w-10 h-10 ${theme === item.id ? 'bg-primary/10' : 'bg-muted/60'}`}>
+                  <item.icon size={22} className={theme === item.id ? "text-primary" : "text-muted-foreground"} />
+                </div>
                 <span className="text-sm font-medium">{item.label}</span>
+                {theme === item.id && (
+                  <span className="text-[10px] uppercase tracking-wider text-primary font-medium">Active</span>
+                )}
               </button>
             ))}
           </div>
         </div>
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -330,46 +352,49 @@ function PasswordSettings() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border">
-        <h2 className="text-lg sm:text-xl font-medium mb-1">Password</h2>
-        <p className="text-sm text-muted-foreground">Update your password. Other sessions are terminated after a change.</p>
-      </div>
-      <div className="p-5 sm:p-6 flex flex-col gap-4 max-w-xl">
-        {error && <InlineError message={error} />}
-        <InputField label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" spellCheck={false} />
-        <InputField
-          label="New password"
-          type="password"
-          value={newPassword}
-          onChange={setNewPassword}
-          autoComplete="new-password"
-          minLength={PASSWORD_POLICY.minLength}
-          maxLength={PASSWORD_POLICY.maxLength}
-          spellCheck={false}
-        />
-        <PasswordPolicyFeedback password={newPassword} compact />
-        <InputField
-          label="Confirm new password"
-          type="password"
-          value={confirmPassword}
-          onChange={setConfirmPassword}
-          autoComplete="new-password"
-          minLength={PASSWORD_POLICY.minLength}
-          maxLength={PASSWORD_POLICY.maxLength}
-          spellCheck={false}
-        />
-      </div>
-      <div className="p-5 sm:p-6 border-t border-border bg-muted/20 flex justify-end">
-        <button
-          type="submit"
-          disabled={isSaving}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-6 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-        >
-          {isSaving ? "Updating..." : "Update Password"}
-        </button>
-      </div>
-    </form>
+    <SectionCard
+      title="Password"
+      icon={Shield}
+      footer={
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {isSaving ? "Updating..." : "Update Password"}
+          </button>
+        </div>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <div className="flex flex-col gap-4 max-w-xl">
+          {error && <InlineError message={error} />}
+          <InputField label="Current password" type="password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" spellCheck={false} />
+          <InputField
+            label="New password"
+            type="password"
+            value={newPassword}
+            onChange={setNewPassword}
+            autoComplete="new-password"
+            minLength={PASSWORD_POLICY.minLength}
+            maxLength={PASSWORD_POLICY.maxLength}
+            spellCheck={false}
+          />
+          <PasswordPolicyFeedback password={newPassword} compact />
+          <InputField
+            label="Confirm new password"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            minLength={PASSWORD_POLICY.minLength}
+            maxLength={PASSWORD_POLICY.maxLength}
+            spellCheck={false}
+          />
+        </div>
+      </form>
+    </SectionCard>
   );
 }
 
@@ -467,14 +492,16 @@ function TwoFactorSettings() {
   };
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg sm:text-xl font-medium mb-1">Two-Factor Authentication</h2>
-          <p className="text-sm text-muted-foreground">Protect sign-in with an authenticator app or backup code.</p>
-        </div>
-        <StatusPill active={!!status?.enabled} loading={isLoading} />
-      </div>
+    <SectionCard
+      title="Two-Factor Authentication"
+      icon={Shield}
+      headerAction={
+        <StatusBadge
+          label={isLoading ? "Checking" : status?.enabled ? "Enabled" : "Disabled"}
+          variant={isLoading ? "neutral" : status?.enabled ? "success" : "neutral"}
+        />
+      }
+    >
 
       <div className="p-5 sm:p-6 space-y-5">
         {error && <InlineError message={error} />}
@@ -489,7 +516,7 @@ function TwoFactorSettings() {
               type="button"
               onClick={() => void beginSetup()}
               disabled={isWorking || isLoading}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
             >
               {isWorking ? "Starting..." : "Enable 2FA"}
             </button>
@@ -497,9 +524,9 @@ function TwoFactorSettings() {
         )}
 
         {setup && (
-          <div className="space-y-5 border border-border rounded-lg p-4 bg-background">
+          <div className="space-y-5 border border-border p-4 bg-background">
             <div className="grid gap-5 lg:grid-cols-[260px_1fr] lg:items-center">
-              <div className="mx-auto rounded-xl border border-border bg-white p-4 shadow-sm">
+              <div className="mx-auto border border-border bg-background p-4">
                 <QRCodeSVG
                   value={setup.otpauthUrl}
                   size={224}
@@ -512,10 +539,10 @@ function TwoFactorSettings() {
               <div>
                 <p className="text-sm font-medium">Scan the QR code</p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Use an authenticator app such as 1Password, Google Authenticator, Microsoft Authenticator, or Authy. After scanning, enter the 6-digit code generated by the app.
+                  Use an authenticator app. After scanning, enter the 6-digit code.
                 </p>
                 <p className="text-xs text-muted-foreground mt-3">
-                  This setup session expires {formatDate(setup.expiresAt)}. Start again if the code is rejected after expiry.
+                  Expires {formatDate(setup.expiresAt)}.
                 </p>
               </div>
             </div>
@@ -528,8 +555,8 @@ function TwoFactorSettings() {
               placeholder="123456"
             />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setSetup(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted">Cancel</button>
-              <button type="button" onClick={() => void verifySetup()} disabled={isWorking} className="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
+              <button type="button" onClick={() => setSetup(null)} className=" border border-border px-4 py-2 text-sm font-medium hover:bg-muted">Cancel</button>
+              <button type="button" onClick={() => void verifySetup()} disabled={isWorking} className=" bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50">
                 {isWorking ? "Verifying..." : "Verify and Enable"}
               </button>
             </div>
@@ -537,18 +564,18 @@ function TwoFactorSettings() {
         )}
 
         {backupCodes.length > 0 && (
-          <div className="border border-nirex-warning/30 rounded-lg p-4 bg-nirex-warning/10">
+          <div className="border border-nirex-warning/30 p-4 bg-nirex-warning/10">
             <p className="text-sm font-medium mb-2">Save these backup codes now</p>
             <p className="text-xs text-muted-foreground mb-3">
               Each backup code can be used once if you lose access to your authenticator app. They will not be shown again.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {backupCodes.map((code) => (
-                <code key={code} className="rounded bg-background px-3 py-2 text-sm font-mono">{code}</code>
+                <code key={code} className=" bg-background px-3 py-2 text-sm font-mono">{code}</code>
               ))}
             </div>
             <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-3">
-              <button type="button" onClick={() => void copyBackupCodes()} className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm hover:bg-muted">
+              <button type="button" onClick={() => void copyBackupCodes()} className="inline-flex items-center justify-center gap-2 border border-border bg-background px-3 py-2 text-sm hover:bg-muted">
                 <Clipboard size={14} /> Copy backup codes
               </button>
               <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -556,7 +583,7 @@ function TwoFactorSettings() {
                   type="checkbox"
                   checked={backupCodesSaved}
                   onChange={(event) => setBackupCodesSaved(event.target.checked)}
-                  className="h-4 w-4 rounded border-border text-nirex-accent focus:ring-nirex-accent"
+                  className="h-4 w-4 border-border text-nirex-accent focus:ring-nirex-accent"
                 />
                 I have saved these backup codes
               </label>
@@ -564,7 +591,7 @@ function TwoFactorSettings() {
                 type="button"
                 disabled={!backupCodesSaved}
                 onClick={() => setBackupCodes([])}
-                className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                className=" bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 Done
               </button>
@@ -584,7 +611,7 @@ function TwoFactorSettings() {
                 type="button"
                 onClick={() => void disableTwoFactor()}
                 disabled={isWorking}
-                className="mt-3 rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+                className="mt-3 border border-destructive/30 text-destructive hover:bg-destructive/10 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
               >
                 {isWorking ? "Disabling..." : "Disable 2FA"}
               </button>
@@ -592,7 +619,7 @@ function TwoFactorSettings() {
           </div>
         )}
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -606,6 +633,7 @@ function DeviceSettings() {
   const navigate = useNavigate();
 
   const activeDevices = useMemo(() => devices.filter((device) => device.isActive), [devices]);
+  const otherActiveDevices = useMemo(() => activeDevices.filter((device) => !device.isCurrent), [activeDevices]);
 
   const loadDevices = useCallback(async () => {
     setIsLoading(true);
@@ -646,10 +674,10 @@ function DeviceSettings() {
   };
 
   const signOutOtherDevices = async () => {
-    const deviceIds = devices.filter((device) => !device.isCurrent && device.isActive).map((device) => device.id);
+    const deviceIds = otherActiveDevices.map((device) => device.id);
     const parsed = terminateDevicesSchema.safeParse({ deviceIds, reason: "User requested sign-out from settings" });
 
-    if (!parsed.success) {
+    if (!parsed.success || deviceIds.length === 0) {
       setError("There are no other active devices to sign out.");
       return;
     }
@@ -661,7 +689,7 @@ function DeviceSettings() {
         deviceIds: parsed.data.deviceIds,
         ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
       });
-      toast(`Terminated ${response.summary.terminated} device session(s).`, "success");
+      toast(`${response.summary.terminated} device session(s) signed out.`, "success");
       await loadDevices();
     } catch (err) {
       setError(getErrorMessage(err, "Unable to sign out other devices."));
@@ -676,47 +704,64 @@ function DeviceSettings() {
     try {
       await authApi.signOutAll();
       dispatch(signedOutLocally());
-      toast("All sessions terminated.", "success");
+      toast("Signed out from all devices.", "success");
       navigate(ROUTES.AUTH.SIGNIN, { replace: true });
     } catch (err) {
-      setError(getErrorMessage(err, "Unable to terminate all sessions."));
+      setError(getErrorMessage(err, "Unable to sign out from all devices."));
       setWorkingId(null);
     }
   };
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="p-5 sm:p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg sm:text-xl font-medium mb-1">Active Devices</h2>
-          <p className="text-sm text-muted-foreground">Review and revoke browser sessions tied to your account.</p>
-        </div>
+    <SectionCard
+      title="Active Devices"
+      icon={Laptop}
+      headerAction={
         <div className="flex gap-2">
-          <button type="button" onClick={() => void loadDevices()} disabled={isLoading} className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50">
-            Refresh
+          <button type="button" onClick={() => void loadDevices()} disabled={isLoading} className="inline-flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50" title="Refresh" aria-label="Refresh device list">
+            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
           </button>
-          <button type="button" onClick={() => void signOutOtherDevices()} disabled={workingId !== null || activeDevices.length <= 1} className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50">
-            Sign Out Others
+          <button type="button" onClick={() => void signOutOtherDevices()} disabled={workingId !== null || otherActiveDevices.length === 0} className="inline-flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50" title="Sign out others" aria-label="Sign out other devices">
+            <LogOut size={14} />
           </button>
         </div>
-      </div>
-
-      <div className="p-5 sm:p-6 space-y-4">
+      }
+      footer={
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">Sign out everywhere if you suspect unauthorized access.</p>
+          <button
+            type="button"
+            onClick={() => void signOutEverywhere()}
+            disabled={workingId !== null || devices.length === 0}
+            className=" bg-destructive text-destructive-foreground px-4 py-2 text-sm font-medium hover:bg-destructive/90 disabled:opacity-50"
+          >
+            {workingId === "all" ? "Signing out..." : "Sign Out Everywhere"}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
         {error && <InlineError message={error} />}
         {isLoading && <p className="text-sm text-muted-foreground">Loading active devices...</p>}
-        {!isLoading && devices.length === 0 && <p className="text-sm text-muted-foreground">No active device sessions found.</p>}
+        {!isLoading && devices.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Laptop size={24} className="mb-2 text-muted-foreground/60" />
+            <p className="text-sm font-medium text-muted-foreground">No active devices</p>
+            <p className="text-xs text-muted-foreground mt-1">Sessions from this browser and the CLI will appear here.</p>
+          </div>
+        )}
 
         <div className="space-y-3">
           {devices.map((device) => (
-            <div key={device.id} className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 rounded-lg border border-border bg-background p-4">
+            <div key={device.id} className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border border-border bg-background p-4">
               <div className="flex gap-3 min-w-0">
-                <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                <div className="h-10 w-10 bg-muted flex items-center justify-center shrink-0">
                   {device.deviceInfo.toLowerCase().includes("mobile") ? <Smartphone size={18} /> : <Laptop size={18} />}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium truncate">{device.deviceInfo}</p>
-                    {device.isCurrent && <span className="rounded-full bg-nirex-accent/10 px-2 py-0.5 text-[11px] font-medium text-nirex-accent">Current</span>}
+                    {device.isCurrent && <StatusBadge label="Current" variant="info" />}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {device.ipAddress} {device.country ? `- ${device.country}` : ""} - Last used {formatDate(device.lastUsedAt)}
@@ -728,7 +773,7 @@ function DeviceSettings() {
                 type="button"
                 onClick={() => void revokeDevice(device)}
                 disabled={workingId !== null}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 border border-destructive/30 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
               >
                 <Trash2 size={14} />
                 {workingId === device.id ? "Revoking..." : device.isCurrent ? "Sign Out" : "Revoke"}
@@ -737,40 +782,16 @@ function DeviceSettings() {
           ))}
         </div>
       </div>
-
-      <div className="p-5 sm:p-6 border-t border-border bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">Use this if you suspect account access from an unknown device.</p>
-        <button
-          type="button"
-          onClick={() => void signOutEverywhere()}
-          disabled={workingId !== null}
-          className="rounded-lg bg-destructive text-destructive-foreground px-4 py-2 text-sm font-medium hover:bg-destructive/90 disabled:opacity-50"
-        >
-          {workingId === "all" ? "Terminating..." : "Sign Out Everywhere"}
-        </button>
-      </div>
-    </div>
+    </SectionCard>
   );
 }
 
 function InlineError({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive flex items-center gap-2">
+    <div className=" border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive flex items-center gap-2">
       <AlertCircle size={16} className="shrink-0" />
       <span>{message}</span>
     </div>
-  );
-}
-
-function StatusPill({ active, loading }: { active: boolean; loading: boolean }) {
-  if (loading) {
-    return <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">Checking</span>;
-  }
-
-  return (
-    <span className={`rounded-full px-3 py-1 text-xs font-medium ${active ? "bg-nirex-success/10 text-nirex-success" : "bg-muted text-muted-foreground"}`}>
-      {active ? "Enabled" : "Disabled"}
-    </span>
   );
 }
 
@@ -812,7 +833,7 @@ function InputField({
         maxLength={maxLength}
         spellCheck={spellCheck}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+        className="bg-background border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
       />
     </div>
   );
@@ -826,7 +847,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
         type="text"
         value={value}
         readOnly
-        className="bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm text-muted-foreground"
+        className="bg-muted/50 border border-border px-3 py-2 text-sm text-muted-foreground"
       />
     </div>
   );

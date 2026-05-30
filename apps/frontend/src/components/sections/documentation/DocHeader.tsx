@@ -18,7 +18,7 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                 <div className="flex items-center gap-4">
                     <button
                         onClick={onMenuToggle}
-                        className="lg:hidden p-2 -ml-2 hover:bg-muted rounded-lg"
+                        className="lg:hidden p-2 -ml-2 hover:bg-muted "
                     >
                         {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
                     </button>
@@ -39,11 +39,11 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                 <div className="flex-1 max-w-md mx-4 hidden md:block">
                     <button
                         onClick={onSearchOpen}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground transition-colors text-sm"
+                        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground transition-colors text-sm"
                     >
                         <Search size={16} />
                         <span className="flex-1 text-left">Search documentation...</span>
-                        <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-background border border-border rounded text-[10px] font-mono">
+                        <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-background border border-border text-[10px] font-mono">
                             <Command size={10} /> K
                         </kbd>
                     </button>
@@ -53,13 +53,13 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                 <div className="flex items-center gap-2 ml-auto">
                     <button
                         onClick={onSearchOpen}
-                        className="md:hidden p-2 hover:bg-muted rounded-lg text-muted-foreground"
+                        className="md:hidden p-2 hover:bg-muted text-muted-foreground"
                     >
                         <Search size={20} />
                     </button>
                     <button
                         onClick={toggleTheme}
-                        className="p-2 hover:bg-muted rounded-lg text-muted-foreground"
+                        className="p-2 hover:bg-muted text-muted-foreground"
                     >
                         {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
                     </button>
@@ -67,13 +67,13 @@ export function DocHeader({ onMenuToggle, mobileMenuOpen, onSearchOpen }: DocHea
                         href="https://github.com/nirex"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="hidden sm:flex p-2 hover:bg-muted rounded-lg text-muted-foreground"
+                        className="hidden sm:flex p-2 hover:bg-muted text-muted-foreground"
                     >
                         <BsGithub size={20} />
                     </a>
                     <Link
                         to={ROUTES.DASHBOARD.ROOT}
-                        className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                        className="hidden sm:flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
                     >
                         Dashboard
                     </Link>

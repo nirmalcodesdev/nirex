@@ -12,10 +12,7 @@ export function TableOfContents({ sections, activeSection }: TableOfContentsProp
                         <li key={section.id}>
                             <a
                                 href={`#${section.id}`}
-                                className={`block text-sm py-1 px-2 rounded-md transition-colors ${activeSection === section.id
-                                    ? "text-nirex-accent font-medium"
-                                    : "text-muted-foreground hover:text-foreground"
-                                    }`}
+                                className={`block text-sm py-1 px-2 transition-colors ${activeSection === section.id ? "text-nirex-accent font-medium" : "text-muted-foreground hover:text-foreground" }`}
                             >
                                 {section.title}
                             </a>

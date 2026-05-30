@@ -21,7 +21,7 @@ export function StepWelcome({ onNext, cursorVisible }: StepWelcomeProps) {
       {/* Left: Value Prop */}
       <div className="space-y-6">
         <motion.div variants={itemVariants} className="space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-nirex-accent/10 text-nirex-accent text-xs font-medium border border-nirex-accent/20">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-nirex-accent/10 text-nirex-accent text-xs font-medium border border-nirex-accent/20">
             <Sparkles size={12} />
             Now with AI-powered deployments
           </div>
@@ -39,7 +39,7 @@ export function StepWelcome({ onNext, cursorVisible }: StepWelcomeProps) {
         <motion.div variants={itemVariants} className="flex flex-wrap gap-4">
           <button
             onClick={onNext}
-            className="inline-flex items-center gap-2 bg-nirex-accent text-white hover:bg-nirex-accent-hi rounded-lg px-6 py-3 font-medium transition-all shadow-lg shadow-nirex-accent/20 hover:shadow-xl hover:shadow-nirex-accent/30"
+            className="inline-flex items-center gap-2 bg-nirex-accent text-white hover:bg-nirex-accent-hi px-6 py-3 font-medium transition-all shadow-lg shadow-nirex-accent/20 hover:shadow-xl hover:shadow-nirex-accent/30"
           >
             Get Started Free
             <ArrowRight size={18} />
@@ -72,13 +72,13 @@ export function StepWelcome({ onNext, cursorVisible }: StepWelcomeProps) {
       {/* Right: CLI Preview */}
       <motion.div
         variants={itemVariants}
-        className="bg-nirex-surface/50 backdrop-blur-sm border border-nirex-accent/10 rounded-2xl p-1 overflow-hidden shadow-terminal"
+        className="bg-nirex-surface/50 backdrop-blur-sm border border-nirex-accent/10 p-1 overflow-hidden shadow-terminal"
       >
-        <div className="bg-nirex-void rounded-xl p-4 font-mono text-sm border border-white/5">
+        <div className="bg-nirex-void p-4 font-mono text-sm border border-white/5">
           <div className="flex items-center gap-2 mb-4 text-nirex-text-muted">
-            <div className="w-3 h-3 rounded-full bg-nirex-error/80" />
-            <div className="w-3 h-3 rounded-full bg-nirex-warning/80" />
-            <div className="w-3 h-3 rounded-full bg-nirex-success/80" />
+            <div className="w-3 h-3 bg-nirex-error/80" />
+            <div className="w-3 h-3 bg-nirex-warning/80" />
+            <div className="w-3 h-3 bg-nirex-success/80" />
             <span className="ml-2 text-[10px] uppercase tracking-widest font-bold opacity-50">terminal</span>
           </div>
           <div className="space-y-1.5 text-nirex-text-primary/90">

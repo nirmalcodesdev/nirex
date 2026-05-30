@@ -5,17 +5,12 @@ export default function Problem() {
         <section className="nirex-section" id="problem">
             <div className="nirex-container">
                 {/* Tab illustration */}
-                <div className="max-w-2xl mx-auto mb-16 overflow-hidden rounded-lg border border-border" data-reveal="fade-up">
+                <div className="max-w-2xl mx-auto mb-16 overflow-hidden border border-border" data-reveal="fade-up">
                     <div className="bg-nirex-elevated p-3 flex items-center gap-1 overflow-hidden">
                         {tabs.map((tab, i) => (
                             <div
                                 key={tab}
-                                className={`flex-shrink-0 px-3 py-1.5 rounded-md text-[11px] font-mono border border-border whitespace-nowrap ${i === tabs.length - 1
-                                    ? 'text-nirex-text-muted opacity-50 -mr-4'
-                                    : i === 0
-                                        ? 'bg-nirex-surface text-nirex-text-secondary'
-                                        : 'text-nirex-text-muted'
-                                    }`}
+                                className={`flex-shrink-0 px-3 py-1.5 text-[11px] font-mono border border-border whitespace-nowrap ${i === tabs.length - 1 ? 'text-nirex-text-muted opacity-50 -mr-4' : i === 0 ? 'bg-nirex-surface text-nirex-text-secondary' : 'text-nirex-text-muted' }`}
                             >
                                 {tab}
                             </div>

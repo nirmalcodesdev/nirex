@@ -21,8 +21,7 @@ export function DocSidebar({
     return (
         <>
             <aside
-                className={`fixed lg:sticky top-16 left-0 z-30 w-72 h-[calc(100vh-4rem)] border-r border-border bg-background overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border hover:scrollbar-thumb-muted-foreground/30 lg:translate-x-0 transition-transform ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-                    }`}
+                className={`fixed lg:sticky top-16 left-0 z-30 w-72 h-[calc(100vh-4rem)] border-r border-border bg-background overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border hover:scrollbar-thumb-muted-foreground/30 lg:translate-x-0 transition-transform ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full" }`}
             >
                 <div className="p-4">
                     <nav className="space-y-1">
@@ -38,10 +37,7 @@ export function DocSidebar({
                                 <div key={section.id}>
                                     <button
                                         onClick={() => hasItems && onToggleSection(section.id)}
-                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${isActive
-                                            ? "text-nirex-accent"
-                                            : "text-foreground hover:bg-muted"
-                                            }`}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${isActive ? "text-nirex-accent" : "text-foreground hover:bg-muted" }`}
                                     >
                                         <Icon
                                             size={16}
@@ -51,8 +47,7 @@ export function DocSidebar({
                                         {hasItems && (
                                             <ChevronDown
                                                 size={14}
-                                                className={`text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : ""
-                                                    }`}
+                                                className={`text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : "" }`}
                                             />
                                         )}
                                     </button>
@@ -75,10 +70,7 @@ export function DocSidebar({
                                                                 onCloseMobile();
                                                                 window.scrollTo({ top: 0, behavior: "smooth" });
                                                             }}
-                                                            className={`w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors ${activeDoc === item.id
-                                                                ? "text-nirex-accent font-medium"
-                                                                : "text-muted-foreground hover:text-foreground"
-                                                                }`}
+                                                            className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${activeDoc === item.id ? "text-nirex-accent font-medium" : "text-muted-foreground hover:text-foreground" }`}
                                                         >
                                                             {item.title}
                                                         </button>
@@ -93,7 +85,7 @@ export function DocSidebar({
                     </nav>
 
                     {/* Support Card */}
-                    <div className="mt-8 p-4 rounded-xl border border-border bg-gradient-to-br from-nirex-accent/5 to-transparent">
+                    <div className="mt-8 p-4 border border-border bg-gradient-to-br from-nirex-accent/5 to-transparent">
                         <MessageCircle
                             size={20}
                             className="text-nirex-accent mb-2"

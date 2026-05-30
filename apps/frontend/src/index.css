@@ -10,57 +10,79 @@ html {
 
 @layer base {
   :root {
-    --radius: 0.5rem;
+    --radius: 0rem;
   }
 
-  /* DARK MODE — default */
+  /* ========================================================= */
+  /* DARK MODE — Border-Only Premium                             */
+  /* Inspired by Linear, Vercel Dashboard, Stripe                */
+  /* No solid card fills. Surfaces sit flush on the canvas.    */
+  /* Separation via 1px borders + spacing + typography only.   */
+  /* ========================================================= */
   [data-theme="dark"] {
-    --bg-void: 213 25% 3%;
-    --bg-base: 213 25% 5%;
-    --bg-surface: 213 21% 7%;
-    --bg-elevated: 213 20% 11%;
-    --bg-overlay: 213 20% 16%;
-    --bg-border: 0 0% 100% / 0.07;
-    --bg-border-hi: 0 0% 100% / 0.12;
+    /* Single canvas — everything sits on this base */
+    --bg-void:   220 10% 3.5%;   /* #07080b */
+    --bg-base:   220 8% 5.5%;    /* #0b0c0f — page background */
+    --bg-surface: 220 7% 7%;     /* #0e1014 — subtle hover tint, NOT card fill */
+    --bg-elevated: 220 6% 9%;   /* #12141a — dropdowns only */
+    --bg-overlay: 220 5% 11%;   /* #15171d — modals only */
+    --bg-highest: 220 5% 14%;   /* #1a1c22 — highest floating layer */
 
-    --text-primary: 213 30% 95%;
-    --text-secondary: 213 14% 59%;
-    --text-muted: 213 14% 36%;
-    --text-inverse: 213 25% 5%;
+    /* Borders — slightly stronger since there's no bg contrast */
+    --bg-border:  220 10% 100% / 0.065;
+    --bg-border-hi: 220 10% 100% / 0.10;
+    --bg-border-focus: 220 10% 100% / 0.16;
 
-    --nirex-accent: 158 82% 50%;
-    --nirex-accent-hi: 158 100% 68%;
-    --nirex-accent-dim: 158 82% 50% / 0.12;
-    --nirex-accent-glow: 158 82% 50% / 0.06;
+    /* Hover tints — barely-there overlays on the base bg */
+    --bg-hover: 220 10% 100% / 0.025;
+    --bg-hover-strong: 220 10% 100% / 0.045;
 
-    --term-bg: 213 40% 3%;
-    --term-border: 0 0% 100% / 0.09;
-    --term-chrome: 213 25% 9%;
+    /* Text — warm white spectrum */
+    --text-primary:   220 10% 97%;   /* #f6f7f8 */
+    --text-secondary: 220 6% 68%;   /* #a5a7ab — slightly softer than before */
+    --text-muted:     220 5% 46%;   /* #6e7077 */
+    --text-faint:     220 4% 34%;   /* #52545a */
+    --text-inverse:   220 12% 4%;   /* #08090c */
 
-    --color-success: 142 71% 45%;
-    --color-warning: 38 92% 50%;
-    --color-error: 0 84% 60%;
+    /* Accent — refined teal, restrained saturation */
+    --nirex-accent:     165 65% 52%;
+    --nirex-accent-hi:  165 75% 60%;
+    --nirex-accent-dim: 165 65% 52% / 0.12;
+    --nirex-accent-glow: 165 65% 52% / 0.06;
 
-    --grain-opacity: 0.035;
+    /* Terminal */
+    --term-bg:    220 8% 4%;
+    --term-border: 220 10% 100% / 0.08;
+    --term-chrome: 220 7% 7%;
 
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
-    --shadow-terminal: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px hsl(var(--term-border));
-    --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px hsl(var(--bg-border-hi));
+    /* Status — intentionally muted so they don't scream */
+    --color-success:  145 55% 44%;
+    --color-warning:  42 85% 52%;
+    --color-error:    0 68% 62%;
+    --color-info:     210 65% 60%;
 
-    /* Map to shadcn */
+    /* Shadows — ultra-subtle layered elevation (Stripe/Linear style) */
+    /* Two layers: tight soft + wide diffuse. Barely visible but creates depth */
+    --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.10);
+    --shadow-card:   0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.06);
+    --shadow-elevated: 0 2px 4px rgba(0, 0, 0, 0.10), 0 8px 16px rgba(0, 0, 0, 0.08);
+    --shadow-terminal: 0 12px 40px rgba(0, 0, 0, 0.45);
+    --shadow-modal:   0 16px 48px rgba(0, 0, 0, 0.35), 0 0 0 1px hsl(var(--bg-border-hi));
+
+    /* Map to shadcn — card is FLUSH with background */
     --background: var(--bg-base);
     --foreground: var(--text-primary);
-    --card: var(--bg-surface);
+    --card: var(--bg-base);           /* NO fill — transparent card */
     --card-foreground: var(--text-primary);
-    --popover: var(--bg-surface);
+    --popover: var(--bg-elevated);    /* dropdowns still need slight lift */
     --popover-foreground: var(--text-primary);
     --primary: var(--nirex-accent);
     --primary-foreground: var(--text-inverse);
-    --secondary: var(--bg-elevated);
-    --secondary-foreground: var(--text-primary);
-    --muted: var(--bg-elevated);
+    --secondary: var(--bg-hover);      /* secondary buttons — barely-there tint */
+    --secondary-foreground: var(--text-secondary);
+    --muted: var(--bg-hover);
     --muted-foreground: var(--text-muted);
-    --accent: var(--bg-elevated);
+    --accent: var(--bg-surface);       /* accent uses slight tint */
     --accent-foreground: var(--text-primary);
     --destructive: var(--color-error);
     --destructive-foreground: var(--text-primary);
@@ -72,76 +94,100 @@ html {
     --input: var(--bg-border);
     --ring: var(--nirex-accent);
 
-    --sidebar-background: var(--bg-surface);
+    --sidebar-background: var(--bg-base);  /* sidebar flush with page */
     --sidebar-foreground: var(--text-secondary);
     --sidebar-primary: var(--nirex-accent);
     --sidebar-primary-foreground: var(--text-inverse);
-    --sidebar-accent: var(--bg-elevated);
+    --sidebar-accent: var(--bg-surface);
     --sidebar-accent-foreground: var(--text-primary);
     --sidebar-border: var(--bg-border);
     --sidebar-ring: var(--nirex-accent);
   }
 
-  /* LIGHT MODE */
+  /* ========================================================= */
+  /* LIGHT MODE — Border-Only Premium                            */
+  /* Inspired by Notion, Linear Light, Apple System Settings     */
+  /* No card fills. Whitespace + 1px lines separate content.     */
+  /* ========================================================= */
   [data-theme="light"] {
-    --bg-void: 216 20% 90%;
-    --bg-base: 213 33% 96%;
-    --bg-surface: 0 0% 100%;
-    --bg-elevated: 213 33% 98%;
-    --bg-overlay: 0 0% 100%;
-    --bg-border: 0 0% 0% / 0.08;
-    --bg-border-hi: 0 0% 0% / 0.15;
+    /* Single warm canvas */
+    --bg-void:   40 8% 94%;       /* #eeede9 */
+    --bg-base:   40 5% 98%;       /* #faf9f7 — page background */
+    --bg-surface: 40 4% 96%;      /* #f4f3f1 — hover tint */
+    --bg-elevated: 0 0% 100%;     /* #ffffff — dropdowns pop up to white */
+    --bg-overlay: 0 0% 100%;      /* #ffffff — modals */
+    --bg-highest: 0 0% 100%;      /* #ffffff */
 
-    --text-primary: 213 48% 7%;
-    --text-secondary: 213 12% 37%;
-    --text-muted: 213 8% 65%;
-    --text-inverse: 0 0% 100%;
+    /* Borders — hairline, warm undertone */
+    --bg-border:  40 10% 0% / 0.085;
+    --bg-border-hi: 40 10% 0% / 0.14;
+    --bg-border-focus: 40 10% 0% / 0.20;
 
-    --nirex-accent: 160 100% 31%;
-    --nirex-accent-hi: 160 100% 24%;
-    --nirex-accent-dim: 160 100% 31% / 0.10;
-    --nirex-accent-glow: 160 100% 31% / 0.05;
+    /* Hover tints */
+    --bg-hover: 40 10% 0% / 0.03;
+    --bg-hover-strong: 40 10% 0% / 0.055;
 
-    /* Terminal ALWAYS dark */
-    --term-bg: 213 30% 10%;
-    --term-border: 0 0% 100% / 0.08;
-    --term-chrome: 213 25% 14%;
+    /* Text — charcoal, never pure black */
+    --text-primary:   220 10% 12%;   /* #1a1b1f */
+    --text-secondary: 220 7% 40%;   /* #5c5e65 */
+    --text-muted:     220 5% 56%;   /* #86878d */
+    --text-faint:     220 4% 70%;   /* #a8a9ad */
+    --text-inverse:   0 0% 100%;    /* #ffffff */
 
-    --color-success: 142 64% 37%;
-    --color-warning: 32 95% 44%;
-    --color-error: 0 72% 51%;
+    /* Accent — deeper teal for light canvas */
+    --nirex-accent:     165 65% 38%;
+    --nirex-accent-hi:  165 70% 32%;
+    --nirex-accent-dim: 165 65% 38% / 0.10;
+    --nirex-accent-glow: 165 65% 38% / 0.04;
 
-    --grain-opacity: 0.022;
+    /* Terminal: always dark */
+    --term-bg:    220 8% 5%;
+    --term-border: 220 10% 100% / 0.08;
+    --term-chrome: 220 7% 7%;
 
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
-    --shadow-terminal: 0 24px 80px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.06);
-    --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.10), 0 0 0 1px hsl(var(--bg-border-hi));
+    /* Status */
+    --color-success:  145 55% 36%;
+    --color-warning:  42 85% 44%;
+    --color-error:    0 62% 54%;
+    --color-info:     210 60% 52%;
 
+    /* Shadows — ultra-subtle layered elevation (Stripe/Linear style) */
+    --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-card:   0 1px 2px rgba(0, 0, 0, 0.02), 0 4px 8px rgba(0, 0, 0, 0.02);
+    --shadow-elevated: 0 2px 4px rgba(0, 0, 0, 0.03), 0 8px 16px rgba(0, 0, 0, 0.03);
+    --shadow-terminal: 0 12px 40px rgba(0, 0, 0, 0.10);
+    --shadow-modal:   0 16px 48px rgba(0, 0, 0, 0.08), 0 0 0 1px hsl(var(--bg-border-hi));
+
+    /* Map to shadcn — flush card design */
     --background: var(--bg-base);
     --foreground: var(--text-primary);
-    --card: var(--bg-surface);
+    --card: var(--bg-base);
     --card-foreground: var(--text-primary);
-    --popover: var(--bg-surface);
+    --popover: var(--bg-elevated);
     --popover-foreground: var(--text-primary);
     --primary: var(--nirex-accent);
     --primary-foreground: var(--text-inverse);
-    --secondary: var(--bg-elevated);
-    --secondary-foreground: var(--text-primary);
-    --muted: var(--bg-elevated);
+    --secondary: var(--bg-hover);
+    --secondary-foreground: var(--text-secondary);
+    --muted: var(--bg-hover);
     --muted-foreground: var(--text-muted);
-    --accent: var(--bg-elevated);
+    --accent: var(--bg-surface);
     --accent-foreground: var(--text-primary);
     --destructive: var(--color-error);
     --destructive-foreground: var(--text-primary);
+    --success: var(--color-success);
+    --success-foreground: var(--text-primary);
+    --warning: var(--color-warning);
+    --warning-foreground: var(--text-primary);
     --border: var(--bg-border);
     --input: var(--bg-border);
     --ring: var(--nirex-accent);
 
-    --sidebar-background: var(--bg-surface);
+    --sidebar-background: var(--bg-base);
     --sidebar-foreground: var(--text-secondary);
     --sidebar-primary: var(--nirex-accent);
     --sidebar-primary-foreground: var(--text-inverse);
-    --sidebar-accent: var(--bg-elevated);
+    --sidebar-accent: var(--bg-surface);
     --sidebar-accent-foreground: var(--text-primary);
     --sidebar-border: var(--bg-border);
     --sidebar-ring: var(--nirex-accent);
@@ -156,14 +202,7 @@ html {
     color: hsl(var(--text-primary));
     font-family: 'Inter', sans-serif;
     font-weight: 400;
-    cursor: none;
     overflow-x: hidden;
-  }
-
-  @media (hover: none) {
-    body {
-      cursor: auto;
-    }
   }
 }
 
@@ -256,7 +295,6 @@ html {
 }
 
 /* ========================================================= */
-/* GRAIN OVERLAY                                              */
 /* ========================================================= */
 
 .grain-overlay {
@@ -269,64 +307,6 @@ html {
   background-size: 180px 180px;
   mix-blend-mode: overlay;
   transition: opacity 300ms ease;
-}
-
-/* ========================================================= */
-/* CUSTOM CURSOR                                              */
-/* ========================================================= */
-
-.cursor-dot {
-  position: fixed;
-  width: 5px;
-  height: 5px;
-  background: hsl(var(--nirex-accent));
-  border-radius: 50%;
-  top: -2.5px;
-  left: -2.5px;
-  pointer-events: none;
-  z-index: 10000;
-  will-change: transform;
-}
-
-.cursor-ring {
-  position: fixed;
-  width: 30px;
-  height: 30px;
-  border: 1.5px solid hsl(var(--nirex-accent));
-  border-radius: 50%;
-  top: -15px;
-  left: -15px;
-  pointer-events: none;
-  z-index: 10000;
-  will-change: transform;
-  transition: width 200ms ease, height 200ms ease,
-    top 200ms ease, left 200ms ease,
-    border-color 200ms ease, background 200ms ease,
-    border-radius 200ms ease;
-}
-
-body.cursor-hover .cursor-ring {
-  width: 44px;
-  height: 44px;
-  top: -22px;
-  left: -22px;
-  background: hsl(var(--nirex-accent-dim));
-}
-
-body.cursor-terminal .cursor-ring {
-  width: 20px;
-  height: 20px;
-  border-radius: 2px;
-  top: -10px;
-  left: -10px;
-}
-
-@media (hover: none) {
-
-  .cursor-dot,
-  .cursor-ring {
-    display: none;
-  }
 }
 
 /* ========================================================= */
@@ -379,7 +359,7 @@ body.cursor-terminal .cursor-ring {
 .eyebrow-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: 0%;
   background: hsl(var(--nirex-accent));
   animation: dot-pulse 2s ease-in-out infinite;
 }
@@ -431,7 +411,7 @@ body.cursor-terminal .cursor-ring {
 .terminal {
   background: hsl(var(--term-bg));
   border: 1px solid hsl(var(--term-border));
-  border-radius: 10px;
+  border-radius: 0px;
   box-shadow: var(--shadow-terminal);
   overflow: hidden;
 }
@@ -453,7 +433,7 @@ body.cursor-terminal .cursor-ring {
 .terminal-dot {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: 0%;
 }
 
 .terminal-title {
@@ -473,61 +453,61 @@ body.cursor-terminal .cursor-ring {
   min-height: 200px;
 }
 
-/* Terminal syntax colors */
+/* Terminal syntax colors — refined for premium dark palette */
 .t-prompt {
   color: hsl(var(--nirex-accent));
 }
 
 .t-cmd {
-  color: #eef2f7;
+  color: #d8d9db;
 }
 
 .t-flag {
-  color: #5effc9;
+  color: #4fd1a8;
 }
 
 .t-string {
-  color: #e3b341;
+  color: #d4a843;
 }
 
 .t-path {
-  color: #58a6ff;
+  color: #5a9fd4;
 }
 
 .t-linenum {
-  color: #4a5a6b;
+  color: #4a505e;
 }
 
 .t-output {
-  color: #8896a7;
+  color: #7a8491;
 }
 
 .t-success {
-  color: #3fb950;
+  color: #3bb16b;
 }
 
 .t-error {
-  color: #ff7b72;
+  color: #e8736f;
 }
 
 .t-warning {
-  color: #e3b341;
+  color: #d4a843;
 }
 
 .t-add {
-  color: #3fb950;
+  color: #3bb16b;
 }
 
 .t-remove {
-  color: #ff7b72;
+  color: #e8736f;
 }
 
 .t-comment {
-  color: #4a5a6b;
+  color: #5a6270;
 }
 
 .t-label {
-  color: #d2a8ff;
+  color: #b8a0d8;
 }
 
 @keyframes blink {
@@ -574,7 +554,7 @@ body.cursor-terminal .cursor-ring {
   color: hsl(var(--text-inverse));
   font-family: 'DM Sans', sans-serif;
   font-size: 14px;
-  border-radius: 4px;
+  border-radius: 0px;
 }
 
 .skip-link:focus {
@@ -631,6 +611,7 @@ body.cursor-terminal .cursor-ring {
     opacity: 1 !important;
     transform: none !important;
   }
+
 }
 
 /* ========================================================= */
@@ -651,12 +632,12 @@ body.cursor-terminal .cursor-ring {
 
 .scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
-  border-radius: 3px;
+  border-radius: 0px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: hsl(var(--border));
-  border-radius: 3px;
+  border-radius: 0px;
   transition: background 0.2s ease;
 }
 

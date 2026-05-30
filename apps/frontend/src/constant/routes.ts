@@ -24,9 +24,6 @@ export const ROUTES = {
   // Dashboard / Protected Routes
   DASHBOARD: {
     ROOT: "/",
-    SESSIONS: "/sessions",
-    SESSION_DETAILS: (id: string) => `/sessions/${id}`,
-    SESSION_DETAILS_RAW: "/sessions/:id",
     USAGE: "/usage",
     BILLING: "/billing",
     NOTIFICATIONS: "/notifications",

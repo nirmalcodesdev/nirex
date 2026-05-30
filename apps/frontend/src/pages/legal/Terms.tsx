@@ -56,7 +56,7 @@ export function Terms() {
                     transition={{ duration: 0.4 }}
                 >
                     <div className="text-center mb-12">
-                        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                        <div className="w-12 h-12 bg-primary/10 flex items-center justify-center mx-auto mb-4">
                             <FileText className="h-6 w-6 text-primary" />
                         </div>
                         <h1 className="text-3xl font-semibold tracking-tight text-foreground mb-3">
@@ -70,7 +70,7 @@ export function Terms() {
                     <div className="prose prose-zinc dark:prose-invert max-w-none">
                         <section className="mb-10">
                             <div className="flex items-center gap-3 mb-4">
-                                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                                <div className="w-8 h-8 bg-muted flex items-center justify-center">
                                     <Shield className="h-4 w-4 text-muted-foreground" />
                                 </div>
                                 <h2 className="text-xl font-semibold text-foreground m-0">1. Acceptance of Terms</h2>
@@ -84,7 +84,7 @@ export function Terms() {
 
                         <section className="mb-10">
                             <div className="flex items-center gap-3 mb-4">
-                                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                                <div className="w-8 h-8 bg-muted flex items-center justify-center">
                                     <UserCheck className="h-4 w-4 text-muted-foreground" />
                                 </div>
                                 <h2 className="text-xl font-semibold text-foreground m-0">2. Account Registration</h2>
@@ -114,7 +114,7 @@ export function Terms() {
 
                         <section className="mb-10">
                             <div className="flex items-center gap-3 mb-4">
-                                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                                <div className="w-8 h-8 bg-muted flex items-center justify-center">
                                     <Scale className="h-4 w-4 text-muted-foreground" />
                                 </div>
                                 <h2 className="text-xl font-semibold text-foreground m-0">3. Acceptable Use</h2>
@@ -148,7 +148,7 @@ export function Terms() {
 
                         <section className="mb-10">
                             <div className="flex items-center gap-3 mb-4">
-                                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                                <div className="w-8 h-8 bg-muted flex items-center justify-center">
                                     <Globe className="h-4 w-4 text-muted-foreground" />
                                 </div>
                                 <h2 className="text-xl font-semibold text-foreground m-0">4. Service Availability</h2>
@@ -233,7 +233,7 @@ export function Terms() {
                             <p className="text-muted-foreground leading-relaxed">
                                 If you have any questions about these Terms of Service, please contact us at:
                             </p>
-                            <div className="mt-3 p-4 bg-muted rounded-lg">
+                            <div className="mt-3 p-4 bg-muted ">
                                 <p className="text-foreground font-medium">nirex, Inc.</p>
                                 <p className="text-muted-foreground">Email: legal@nirex.com</p>
                                 <p className="text-muted-foreground">Address: 123 Innovation Drive, San Francisco, CA 94105</p>

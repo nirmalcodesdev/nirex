@@ -2,9 +2,8 @@ import React, { useState, useEffect, useMemo, createContext, useContext, type Re
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import nirexLogo from "@nirex/assets/images/nirex.svg";
-import {
+    import {
     Activity,
-    Terminal,
     Zap,
     CreditCard,
     Settings,
@@ -72,15 +71,14 @@ import { ROUTES } from "../../constant/routes";
 function getNavGroups(unreadCount: number): NavGroup[] {
     return [
         {
-            label: "WORKSPACE",
+            label: "Workspace",
             items: [
                 { id: "home", label: "Home", path: ROUTES.DASHBOARD.ROOT, icon: Activity },
-                { id: "sessions", label: "Sessions", path: ROUTES.DASHBOARD.SESSIONS, icon: Terminal },
                 { id: "usage", label: "Usage", path: ROUTES.DASHBOARD.USAGE, icon: Zap },
             ],
         },
         {
-            label: "ACCOUNT",
+            label: "Account",
             items: [
                 { id: "billing", label: "Billing", path: ROUTES.DASHBOARD.BILLING, icon: CreditCard },
                 {
@@ -119,7 +117,7 @@ function SidebarTooltip({ children, content, show }: { children: React.ReactNode
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -8 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute left-full ml-2 px-2.5 py-1.5 bg-popover border border-border rounded-lg shadow-lg z-50 whitespace-nowrap"
+                        className="absolute left-full ml-2 px-2.5 py-1.5 bg-popover border border-border shadow-lg z-50 whitespace-nowrap"
                     >
                         <span className="text-xs font-medium text-foreground">{content}</span>
                         <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 w-2 h-2 bg-popover border-l border-b border-border rotate-45" />
@@ -185,33 +183,45 @@ export function DesktopSidebar() {
                 stiffness: 300,
                 damping: 30,
             }}
-            className="hidden lg:flex flex-col h-screen sticky top-0 shrink-0 bg-card border-r border-border overflow-hidden"
+            className="hidden lg:flex flex-col h-screen sticky top-0 shrink-0 bg-background border-r border-border overflow-hidden"
         >
             {/* Logo */}
             <div className="h-14 flex items-center px-4 border-b border-border shrink-0">
                 <div className="flex items-center justify-between w-full">
                     <Link to={ROUTES.DASHBOARD.ROOT} className="flex items-center gap-2.5">
-                        <img src={nirexLogo} alt={APP_NAME} className="w-8 h-8" />
-                        <div className="flex items-center gap-0 sm:flex">
-                            <span className="font-display font-bold text-lg">{APP_NAME}</span>
-                            {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em]">{APP_NAME_SUFFIX}</span>}
-                        </div>
+                        <img src={nirexLogo} alt={APP_NAME} className="w-8 h-8 shrink-0" />
+                        <AnimatePresence mode="popLayout">
+                            {!isCollapsed && (
+                                <motion.div
+                                    initial={{ opacity: 0, width: 0 }}
+                                    animate={{ opacity: 1, width: "auto" }}
+                                    exit={{ opacity: 0, width: 0 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="flex items-center gap-0 overflow-hidden whitespace-nowrap"
+                                >
+                                    <span className="font-display font-bold text-lg">{APP_NAME}</span>
+                                    {APP_NAME_SUFFIX && <span className="font-mono text-[0.85em]">{APP_NAME_SUFFIX}</span>}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </Link>
                     {!isCollapsed && (
-                        <button
-                            onClick={toggleCollapse}
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                            title="Collapse sidebar (Ctrl+B)"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
+                    <button
+                        onClick={toggleCollapse}
+                        className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                        title="Collapse sidebar (Ctrl+B)"
+                        aria-label="Collapse sidebar"
+                    >
+                        <ChevronLeft size={16} />
+                    </button>
                     )}
                 </div>
                 {isCollapsed && (
                     <button
                         onClick={toggleCollapse}
-                        className="absolute right-2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+                        className="absolute right-2 p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
                         title="Expand sidebar (Ctrl+B)"
+                        aria-label="Expand sidebar"
                     >
                         <ChevronRight size={16} />
                     </button>
@@ -248,8 +258,9 @@ export function DesktopSidebar() {
                                         <SidebarTooltip content={item.label} show={isCollapsed}>
                                             <NavLink
                                                 to={item.path}
+                                                aria-current={isActive ? "page" : undefined}
                                                 className={cn(
-                                                    "group relative flex items-center gap-3 h-9 px-3 rounded-md text-sm font-medium transition-all",
+                                                    "group relative flex items-center gap-3 h-9 px-3  text-sm font-medium transition-all",
                                                     isCollapsed && "justify-center px-2",
                                                     isActive
                                                         ? "text-foreground"
@@ -259,12 +270,13 @@ export function DesktopSidebar() {
                                                 {isActive && (
                                                     <motion.div
                                                         layoutId="navIndicator"
-                                                        className="absolute left-0 w-0.5 h-5 bg-nirex-accent rounded-r-full"
+                                                        className="absolute left-0 w-0.5 h-5 bg-nirex-accent -r-full"
                                                         transition={{
                                                             type: "spring",
                                                             bounce: 0.2,
                                                             duration: 0.4,
                                                         }}
+                                                        aria-hidden="true"
                                                     />
                                                 )}
                                                 <Icon
@@ -290,7 +302,7 @@ export function DesktopSidebar() {
                                                 {!isCollapsed && item.badge && (
                                                     <span
                                                         className={cn(
-                                                            "text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0",
+                                                            "text-[10px] font-semibold px-1.5 py-0.5  shrink-0",
                                                             item.badgeVariant === "accent" &&
                                                             "bg-nirex-accent text-nirex-text-inverse"
                                                         )}
@@ -299,7 +311,7 @@ export function DesktopSidebar() {
                                                     </span>
                                                 )}
                                                 {isCollapsed && item.badge && (
-                                                    <span className="absolute top-1 right-1 w-2 h-2 bg-nirex-accent rounded-full" />
+                                                    <span className="absolute top-1 right-1 w-2 h-2 bg-nirex-accent " />
                                                 )}
                                             </NavLink>
                                         </SidebarTooltip>
@@ -317,7 +329,7 @@ export function DesktopSidebar() {
                     <button
                         onClick={() => navigate(ROUTES.DOCUMENTATION)}
                         className={cn(
-                            "w-full flex items-center gap-3 h-9 px-3 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
+                            "w-full flex items-center gap-3 h-9 px-3  text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
                             isCollapsed && "justify-center px-2"
                         )}
                     >
@@ -343,7 +355,7 @@ export function DesktopSidebar() {
                     <SidebarTooltip content="Expand sidebar" show={isCollapsed}>
                         <button
                             onClick={toggleCollapse}
-                            className="w-full flex items-center justify-center gap-3 h-9 px-2 mt-1 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                            className="w-full flex items-center justify-center gap-3 h-9 px-2 mt-1 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                         >
                             <ChevronRight size={18} className="shrink-0" />
                         </button>
@@ -355,7 +367,7 @@ export function DesktopSidebar() {
                     <button
                         onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                         className={cn(
-                            "w-full flex items-center gap-3 h-11 px-2 rounded-lg border transition-all",
+                            "w-full flex items-center gap-3 h-11 px-2  border transition-all",
                             isCollapsed && "justify-center px-1",
                             isUserMenuOpen
                                 ? "bg-muted border-border"
@@ -401,7 +413,7 @@ export function DesktopSidebar() {
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: 8 }}
                                     className={cn(
-                                        "absolute left-0 bottom-full mb-2 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden",
+                                        "absolute left-0 bottom-full mb-2 bg-popover border border-border  shadow-xl z-50 overflow-hidden",
                                         isCollapsed ? "w-56" : "right-0"
                                     )}
                                 >
@@ -430,7 +442,7 @@ export function DesktopSidebar() {
                                                     openPlansDialog();
                                                     setIsUserMenuOpen(false);
                                                 }}
-                                                className="w-full py-1.5 px-3 rounded-md bg-nirex-accent text-nirex-text-inverse text-xs font-medium"
+                                                className="w-full py-1.5 px-3 bg-nirex-accent text-nirex-text-inverse text-xs font-medium"
                                             >
                                                 {upgradeLabel}
                                             </button>
@@ -442,7 +454,7 @@ export function DesktopSidebar() {
                                                 navigate(ROUTES.DASHBOARD.SETTINGS);
                                                 setIsUserMenuOpen(false);
                                             }}
-                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted rounded-md"
+                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted "
                                         >
                                             <User size={16} /> Profile
                                         </button>
@@ -451,7 +463,7 @@ export function DesktopSidebar() {
                                                 navigate(ROUTES.DASHBOARD.SETTINGS);
                                                 setIsUserMenuOpen(false);
                                             }}
-                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted rounded-md"
+                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted "
                                         >
                                             <Settings size={16} /> Settings
                                         </button>
@@ -465,7 +477,7 @@ export function DesktopSidebar() {
                                                     navigate(ROUTES.AUTH.SIGNIN, { replace: true });
                                                 });
                                             }}
-                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-nirex-error hover:bg-nirex-error/10 rounded-md"
+                                            className="w-full flex items-center gap-2 px-2.5 py-2 text-sm text-nirex-error hover:bg-nirex-error/10 "
                                         >
                                             <LogOut size={16} /> Sign out
                                         </button>
@@ -504,7 +516,7 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     return (
         <AnimatePresence>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 z-50 lg:hidden" onClick={onClose} />
-            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="fixed top-0 left-0 bottom-0 w-[280px] bg-card border-r border-border z-50 lg:hidden flex flex-col">
+            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="fixed top-0 left-0 bottom-0 w-[280px] bg-popover border-r border-border shadow-elevated z-50 lg:hidden flex flex-col">
 
 
                 <div className="p-4 border-b border-border">
@@ -528,11 +540,17 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                                     const Icon = item.icon;
                                     const isActive = location.pathname === item.path;
                                     return (
-                                        <NavLink key={item.id} to={item.path} onClick={onClose} className={cn("flex items-center gap-3 h-10 px-3 rounded-md text-sm font-medium transition-colors", isActive ? "bg-nirex-accent/10 text-nirex-accent" : "text-muted-foreground hover:text-foreground hover:bg-muted/50")}>
-                                            <Icon size={18} className={isActive ? "text-nirex-accent" : ""} />
-                                            <span className="flex-1">{item.label}</span>
-                                            {item.badge && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-nirex-accent text-nirex-text-inverse">{item.badge}</span>}
-                                        </NavLink>
+                                    <NavLink
+                                        key={item.id}
+                                        to={item.path}
+                                        onClick={onClose}
+                                        aria-current={isActive ? "page" : undefined}
+                                        className={cn("flex items-center gap-3 h-10 px-3  text-sm font-medium transition-colors", isActive ? "text-nirex-accent bg-transparent border-l-2 border-nirex-accent" : "text-muted-foreground hover:text-foreground hover:bg-muted/50")}
+                                    >
+                                        <Icon size={18} className={isActive ? "text-nirex-accent" : ""} aria-hidden="true" />
+                                        <span className="flex-1">{item.label}</span>
+                                        {item.badge && <span className="text-[10px] font-semibold px-2 py-0.5 bg-nirex-accent text-nirex-text-inverse">{item.badge}</span>}
+                                    </NavLink>
                                     );
                                 })}
                             </div>
@@ -541,9 +559,9 @@ function SidebarOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
                 </nav>
 
                 <div className="p-4 border-t border-border space-y-2">
-                    <button onClick={() => { navigate(ROUTES.DOCUMENTATION); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-border hover:bg-muted/50 font-medium"><HelpCircle size={16} /> Help & Docs</button>
-                    <button onClick={() => { openPlansDialog(); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg bg-nirex-accent text-nirex-text-inverse font-medium"><Sparkles size={16} /> Upgrade</button>
-                    <button onClick={() => { onClose(); void dispatch(signOutUser()).then(() => { toast("Signed out", "success"); navigate(ROUTES.AUTH.SIGNIN, { replace: true }); }); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-nirex-error hover:bg-nirex-error/10 font-medium"><LogOut size={16} /> Sign out</button>
+                    <button onClick={() => { navigate(ROUTES.DOCUMENTATION); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 border border-border hover:bg-muted/50 font-medium"><HelpCircle size={16} /> Help & Docs</button>
+                    <button onClick={() => { openPlansDialog(); onClose(); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 bg-nirex-accent text-nirex-text-inverse font-medium"><Sparkles size={16} /> Upgrade</button>
+                    <button onClick={() => { onClose(); void dispatch(signOutUser()).then(() => { toast("Signed out", "success"); navigate(ROUTES.AUTH.SIGNIN, { replace: true }); }); }} className="w-full flex items-center justify-center gap-2 h-10 px-4 text-nirex-error hover:bg-nirex-error/10 font-medium"><LogOut size={16} /> Sign out</button>
                 </div>
             </motion.div>
         </AnimatePresence>

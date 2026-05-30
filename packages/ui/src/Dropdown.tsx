@@ -1,10 +1,13 @@
-import { cloneElement, isValidElement, useEffect, useRef, useState, type MouseEventHandler, type ReactElement, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useRef, useState, type KeyboardEvent, type MouseEventHandler, type ReactElement, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 
 interface TriggerProps {
     onClick?: MouseEventHandler;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
     type?: "button" | "submit" | "reset";
+    "aria-haspopup"?: boolean;
+    "aria-expanded"?: boolean;
 }
 
 interface DropdownProps {
@@ -89,17 +92,40 @@ export function Dropdown({
             }
         }
 
+        function handleKeyDown(event: globalThis.KeyboardEvent) {
+            if (event.key === "Escape" && isOpen) {
+                setIsOpen(false);
+            }
+        }
+
         document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+        document.addEventListener("keydown", handleKeyDown);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [isOpen]);
+
+    const handleTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setIsOpen((prev) => !prev);
+        }
+    };
 
     const enhancedTrigger = isValidElement(trigger)
         ? cloneElement(trigger, {
-            onClick: (event) => {
+            onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
                 trigger.props.onClick?.(event);
                 setIsOpen((prev) => !prev);
             },
+            onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+                trigger.props.onKeyDown?.(event);
+                handleTriggerKeyDown(event);
+            },
             type: trigger.props.type ?? "button",
+            "aria-haspopup": true,
+            "aria-expanded": isOpen,
         })
         : trigger;
 
@@ -116,14 +142,16 @@ export function Dropdown({
             {isOpen && (
                 <motion.div
                     ref={menuRef}
+                    role="menu"
+                    aria-orientation="vertical"
                     initial={{ opacity: 0, y: side === "top" ? -8 : 8, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: side === "top" ? -8 : 8, scale: 0.95 }}
                     transition={{ duration: 0.15, ease: "easeOut" }}
                     className={
                         portal
-                            ? "fixed min-w-[200px] bg-popover border border-border rounded-xl overflow-hidden z-[9999]"
-                            : `absolute ${align === "right" ? "right-0" : "left-0"} ${side === "top" ? "bottom-full mb-2" : "mt-2"} min-w-[200px] bg-popover border border-border rounded-xl overflow-hidden z-50`
+                            ? "fixed min-w-[200px] bg-popover border border-border  overflow-hidden z-[9999]"
+                            : `absolute ${align === "right" ? "right-0" : "left-0"} ${side === "top" ? "bottom-full mb-2" : "mt-2"} min-w-[200px] bg-popover border border-border  overflow-hidden z-50`
                     }
                     style={menuStyle}
                     onClick={() => setIsOpen(false)}
@@ -148,8 +176,9 @@ export function DropdownItem({ children, onClick, className = "" }: { children: 
     return (
         <button
             type="button"
+            role="menuitem"
             onClick={onClick}
-            className={`w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted rounded-md transition-colors flex items-center gap-2 ${className}`}
+            className={`w-full text-left px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${className}`}
         >
             {children}
         </button>
