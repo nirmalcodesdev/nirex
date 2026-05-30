@@ -9,6 +9,8 @@ import {
   Wallet,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   CheckCircle2,
   XCircle,
 } from "lucide-react";
@@ -45,12 +47,12 @@ function formatTimeRemaining(resetsAt: string | null): string {
   const now = new Date();
   const reset = new Date(resetsAt);
   const diff = reset.getTime() - now.getTime();
-  
+
   if (diff <= 0) return "Resetting...";
-  
+
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  
+
   if (hours > 24) {
     const days = Math.floor(hours / 24);
     return `${days}d ${hours % 24}h`;
@@ -103,6 +105,30 @@ function truncateModel(model: string): string {
   return `${model.slice(0, 21)}...`;
 }
 
+function getProviderDot(model: string): string {
+  const m = model.toLowerCase();
+  if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3') || m.startsWith('text-')) return 'bg-emerald-500';
+  if (m.startsWith('claude-')) return 'bg-amber-500';
+  if (m.startsWith('gemini-')) return 'bg-sky-500';
+  if (m.startsWith('deepseek-')) return 'bg-blue-500';
+  if (m.startsWith('llama-') || m.startsWith('meta-')) return 'bg-indigo-500';
+  if (m.startsWith('mistral-')) return 'bg-orange-500';
+  if (m.startsWith('grok-')) return 'bg-red-500';
+  return 'bg-muted-foreground';
+}
+
+function getTimingClass(ms: number | null): string {
+  if (ms === null) return 'text-muted-foreground';
+  if (ms < 300) return 'text-emerald-600 dark:text-emerald-400';
+  if (ms < 1000) return 'text-amber-600 dark:text-amber-400';
+  return 'text-red-600 dark:text-red-400';
+}
+
+function capitalize(str: string): string {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
 export function Usage() {
   const { toast } = useToast();
   const usageQuery = useUsageOverviewQuery();
@@ -128,7 +154,7 @@ export function Usage() {
   const window5hLimit = rollingWindow?.window5h.limit;
   const window5hResetsAt = rollingWindow?.window5h.resetsAt ?? null;
   const window5hPct: number = window5hLimit ? (window5hUsed / window5hLimit) * 100 : 0;
-  
+
   const window7dUsed = rollingWindow?.window7d.used ?? 0;
   const window7dLimit = rollingWindow?.window7d.limit;
   const window7dResetsAt = rollingWindow?.window7d.resetsAt ?? null;
@@ -245,11 +271,10 @@ export function Usage() {
                       <p className="text-sm text-muted-foreground">Total Cost</p>
                       <p className="text-3xl font-bold mt-1 font-mono">${consumedIncludedUsd.toFixed(2)}</p>
                     </div>
-                    <div className={`text-xs font-medium px-2.5 py-1 border ${
-                      allBalanceUsed ? "text-destructive border-destructive/30 bg-destructive/5" :
-                      consumedPct >= 75 ? "text-warning border-warning/30 bg-warning/5" :
-                      "text-emerald-600 dark:text-emerald-400 border-emerald-500/20 bg-emerald-500/5"
-                    }`}>
+                    <div className={`text-xs font-medium px-2.5 py-1 border ${allBalanceUsed ? "text-destructive border-destructive/30 bg-destructive/5" :
+                        consumedPct >= 75 ? "text-warning border-warning/30 bg-warning/5" :
+                          "text-emerald-600 dark:text-emerald-400 border-emerald-500/20 bg-emerald-500/5"
+                      }`}>
                       {consumedPct.toFixed(0)}% consumed
                     </div>
                   </div>
@@ -265,9 +290,8 @@ export function Usage() {
                           {[0, 25, 50, 75, 100].map((pct) => (
                             <div
                               key={pct}
-                              className={`w-[2px] h-3 rounded-full transition-colors duration-500 ${
-                                consumedPct >= pct ? "bg-white/30" : "bg-border/60"
-                              }`}
+                              className={`w-[2px] h-3 rounded-full transition-colors duration-500 ${consumedPct >= pct ? "bg-white/30" : "bg-border/60"
+                                }`}
                               style={{ marginLeft: pct === 0 ? '3px' : pct === 100 ? '0' : undefined, marginRight: pct === 100 ? '3px' : undefined }}
                             />
                           ))}
@@ -326,14 +350,12 @@ export function Usage() {
                           className="absolute -top-2 -translate-y-full"
                           style={{ left: `${Math.min(100, consumedPct)}%`, transform: `translateX(-50%) translateY(-100%)` }}
                         >
-                          <div className={`text-[11px] font-bold font-mono px-2 py-0.5 rounded-md text-white shadow-lg backdrop-blur-sm ${
-                            allBalanceUsed ? "bg-red-500/90" : consumedPct >= 75 ? "bg-amber-500/90" : "bg-primary/90"
-                          }`}>
+                          <div className={`text-[11px] font-bold font-mono px-2 py-0.5 rounded-md text-white shadow-lg backdrop-blur-sm ${allBalanceUsed ? "bg-red-500/90" : consumedPct >= 75 ? "bg-amber-500/90" : "bg-primary/90"
+                            }`}>
                             {consumedPct.toFixed(0)}%
                           </div>
-                          <div className={`w-0 h-0 mx-auto border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent ${
-                            allBalanceUsed ? "border-t-red-500/90" : consumedPct >= 75 ? "border-t-amber-500/90" : "border-t-primary/90"
-                          }`} />
+                          <div className={`w-0 h-0 mx-auto border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent ${allBalanceUsed ? "border-t-red-500/90" : consumedPct >= 75 ? "border-t-amber-500/90" : "border-t-primary/90"
+                            }`} />
                         </div>
                       )}
                     </div>
@@ -343,9 +365,8 @@ export function Usage() {
                       <span className="text-muted-foreground">
                         Budget <span className="font-mono text-foreground ml-1">${budgetUsd.toFixed(2)}</span>
                       </span>
-                      <span className={`font-medium ${
-                        allBalanceUsed ? "text-destructive" : consumedPct >= 75 ? "text-warning" : "text-emerald-600 dark:text-emerald-400"
-                      }`}>
+                      <span className={`font-medium ${allBalanceUsed ? "text-destructive" : consumedPct >= 75 ? "text-warning" : "text-emerald-600 dark:text-emerald-400"
+                        }`}>
                         {allBalanceUsed
                           ? "Exhausted"
                           : consumedPct >= 75
@@ -355,11 +376,10 @@ export function Usage() {
                     </div>
 
                     {/* Status message */}
-                    <p className={`text-xs ${
-                      allBalanceUsed ? "text-destructive font-medium" :
-                      consumedPct >= 75 ? "text-warning font-medium" :
-                      "text-muted-foreground"
-                    }`}>
+                    <p className={`text-xs ${allBalanceUsed ? "text-destructive font-medium" :
+                        consumedPct >= 75 ? "text-warning font-medium" :
+                          "text-muted-foreground"
+                      }`}>
                       {allBalanceUsed
                         ? "All balance used up. Top up to continue using the service."
                         : consumedPct >= 75
@@ -388,11 +408,10 @@ export function Usage() {
                       <p className="text-sm text-muted-foreground">Total Requests</p>
                       <p className="text-2xl font-semibold mt-1 font-mono">{formatNumber(totalReq)}</p>
                     </div>
-                    <div className={`text-xs font-medium mt-2 ${
-                      requestChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
-                      requestChange.type === "negative" ? "text-red-600 dark:text-red-400" :
-                      "text-muted-foreground"
-                    }`}>
+                    <div className={`text-xs font-medium mt-2 ${requestChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
+                        requestChange.type === "negative" ? "text-red-600 dark:text-red-400" :
+                          "text-muted-foreground"
+                      }`}>
                       {totalReq > 0 ? requestChange.text : "—"}
                     </div>
                   </div>
@@ -442,11 +461,10 @@ export function Usage() {
                         </span>
                       </div>
                     </div>
-                    <div className={`text-xs font-medium mt-2 ${
-                      tokenChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
-                      tokenChange.type === "negative" ? "text-red-600 dark:text-red-400" :
-                      "text-muted-foreground"
-                    }`}>
+                    <div className={`text-xs font-medium mt-2 ${tokenChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
+                        tokenChange.type === "negative" ? "text-red-600 dark:text-red-400" :
+                          "text-muted-foreground"
+                      }`}>
                       {totalTok > 0 ? tokenChange.text : "—"}
                     </div>
                   </div>
@@ -483,89 +501,89 @@ export function Usage() {
             }
 
           >
-                {/* 5-hour window */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium font-display">5-Hour Rolling Window</p>
-                      <p className="text-xs text-muted-foreground">
-                        {window5hResetsAt
-                          ? `Resets in ${formatTimeRemaining(window5hResetsAt)}`
-                          : window5hUsed === 0
-                            ? "No active requests"
-                            : "Calculating..."
-                        }
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold font-mono">
-                        {formatNumber(window5hUsed)}
-                        {window5hLimit !== null && (
-                          <span className="text-base font-normal text-muted-foreground">
-                            {" "}/ {formatNumber(window5hLimit!)}
-                          </span>
-                        )}
-                      </p>
-                      <p className={`text-xs font-medium ${ liftedByTopup ? "text-nirex-success" : window5hPct >= 90 ? "text-destructive" : window5hPct >= 75 ? "text-warning" : "text-muted-foreground" }`}>
-                        {getWindowStatusText(window5hPct, liftedByTopup)}
-                        {window5hLimit !== null && !liftedByTopup && ` · ${window5hPct.toFixed(1)}%`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="relative h-4 w-full overflow-hidden bg-muted">
-                    <div
-                      className={`h-full transition-all duration-500 ${getWindowBarColor(window5hPct, liftedByTopup)}`}
-                      style={{ width: `${Math.min(100, window5hPct)}%` }}
-                    />
-                    {window5hPct >= 15 && (
-                      <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
-                        {window5hPct.toFixed(0)}%
-                      </div>
-                    )}
-                  </div>
+            {/* 5-hour window */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium font-display">5-Hour Rolling Window</p>
+                  <p className="text-xs text-muted-foreground">
+                    {window5hResetsAt
+                      ? `Resets in ${formatTimeRemaining(window5hResetsAt)}`
+                      : window5hUsed === 0
+                        ? "No active requests"
+                        : "Calculating..."
+                    }
+                  </p>
                 </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold font-mono">
+                    {formatNumber(window5hUsed)}
+                    {window5hLimit !== null && (
+                      <span className="text-base font-normal text-muted-foreground">
+                        {" "}/ {formatNumber(window5hLimit!)}
+                      </span>
+                    )}
+                  </p>
+                  <p className={`text-xs font-medium ${liftedByTopup ? "text-nirex-success" : window5hPct >= 90 ? "text-destructive" : window5hPct >= 75 ? "text-warning" : "text-muted-foreground"}`}>
+                    {getWindowStatusText(window5hPct, liftedByTopup)}
+                    {window5hLimit !== null && !liftedByTopup && ` · ${window5hPct.toFixed(1)}%`}
+                  </p>
+                </div>
+              </div>
+              <div className="relative h-4 w-full overflow-hidden bg-muted">
+                <div
+                  className={`h-full transition-all duration-500 ${getWindowBarColor(window5hPct, liftedByTopup)}`}
+                  style={{ width: `${Math.min(100, window5hPct)}%` }}
+                />
+                {window5hPct >= 15 && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
+                    {window5hPct.toFixed(0)}%
+                  </div>
+                )}
+              </div>
+            </div>
 
-                {/* 7-day window */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium font-display">7-Day Rolling Window</p>
-                      <p className="text-xs text-muted-foreground">
-                        {window7dResetsAt
-                          ? `Resets in ${formatTimeRemaining(window7dResetsAt)}`
-                          : window7dUsed === 0
-                            ? "No active requests"
-                            : "Calculating..."
-                        }
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold font-mono">
-                        {formatNumber(window7dUsed)}
-                        {window7dLimit !== null && (
-                          <span className="text-base font-normal text-muted-foreground">
-                            {" "}/ {formatNumber(window7dLimit!)}
-                          </span>
-                        )}
-                      </p>
-                      <p className={`text-xs font-medium ${ liftedByTopup ? "text-nirex-success" : window7dPct >= 90 ? "text-destructive" : window7dPct >= 75 ? "text-warning" : "text-muted-foreground" }`}>
-                        {getWindowStatusText(window7dPct, liftedByTopup)}
-                        {window7dLimit !== null && !liftedByTopup && ` · ${window7dPct.toFixed(1)}%`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="relative h-4 w-full overflow-hidden bg-muted">
-                    <div
-                      className={`h-full transition-all duration-500 ${getWindowBarColor(window7dPct, liftedByTopup)}`}
-                      style={{ width: `${Math.min(100, window7dPct)}%` }}
-                    />
-                    {window7dPct >= 15 && (
-                      <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
-                        {window7dPct.toFixed(0)}%
-                      </div>
-                    )}
-                  </div>
+            {/* 7-day window */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium font-display">7-Day Rolling Window</p>
+                  <p className="text-xs text-muted-foreground">
+                    {window7dResetsAt
+                      ? `Resets in ${formatTimeRemaining(window7dResetsAt)}`
+                      : window7dUsed === 0
+                        ? "No active requests"
+                        : "Calculating..."
+                    }
+                  </p>
                 </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold font-mono">
+                    {formatNumber(window7dUsed)}
+                    {window7dLimit !== null && (
+                      <span className="text-base font-normal text-muted-foreground">
+                        {" "}/ {formatNumber(window7dLimit!)}
+                      </span>
+                    )}
+                  </p>
+                  <p className={`text-xs font-medium ${liftedByTopup ? "text-nirex-success" : window7dPct >= 90 ? "text-destructive" : window7dPct >= 75 ? "text-warning" : "text-muted-foreground"}`}>
+                    {getWindowStatusText(window7dPct, liftedByTopup)}
+                    {window7dLimit !== null && !liftedByTopup && ` · ${window7dPct.toFixed(1)}%`}
+                  </p>
+                </div>
+              </div>
+              <div className="relative h-4 w-full overflow-hidden bg-muted">
+                <div
+                  className={`h-full transition-all duration-500 ${getWindowBarColor(window7dPct, liftedByTopup)}`}
+                  style={{ width: `${Math.min(100, window7dPct)}%` }}
+                />
+                {window7dPct >= 15 && (
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-sm">
+                    {window7dPct.toFixed(0)}%
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Info footer */}
             {!liftedByTopup && (
@@ -594,20 +612,56 @@ export function Usage() {
             }
           >
             {logsQuery.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-10 bg-muted animate-pulse rounded" />
-                ))}
+              <div className="overflow-x-auto -mx-4">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      {['Time', 'Model', 'Mode', 'Input', 'Output', 'Cost', 'Latency', 'Status'].map((h) => (
+                        <th key={h} className="text-left px-4 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-muted-foreground/10">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <tr key={i}>
+                        {Array.from({ length: 8 }).map((_, j) => (
+                          <td key={j} className={`px-${j === 0 ? '4' : '3'} py-3`}>
+                            <div className="h-2.5 bg-muted/60 animate-pulse rounded-sm" style={{ width: j === 0 ? '70%' : j === 1 ? '80%' : j === 7 ? '60%' : '50%' }} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : logsQuery.isError ? (
-              <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
-                <AlertTriangle size={16} className="text-destructive shrink-0" />
-                Unable to load request history. Please try again.
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="flex items-center justify-center w-12 h-12 bg-red-500/10 border border-red-500/20 mb-4">
+                  <AlertTriangle size={22} className="text-red-500" />
+                </div>
+                <p className="text-sm font-medium text-foreground">Failed to load history</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4 max-w-xs">
+                  {logsQuery.error instanceof Error ? logsQuery.error.message : "Please try again."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => logsQuery.refetch()}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-border hover:bg-muted transition-colors"
+                >
+                  <RefreshCw size={12} /> Retry
+                </button>
               </div>
             ) : !logsQuery.data || logsQuery.data.logs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-center">
-                <Activity size={20} className="text-muted-foreground/40 mb-2" />
-                <p className="text-sm text-muted-foreground">No requests in this period.</p>
+              <div className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="flex items-center justify-center w-12 h-12 bg-muted/60 border border-border mb-4">
+                  <List size={22} className="text-muted-foreground/50" />
+                </div>
+                <p className="text-sm font-medium text-foreground">No requests yet</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                  Request history will appear here once you start making API calls.
+                </p>
               </div>
             ) : (
               <>
@@ -615,52 +669,55 @@ export function Usage() {
                 <div className="overflow-x-auto -mx-4">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-border bg-muted/40">
-                        <th className="text-left px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Time</th>
-                        <th className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Model</th>
-                        <th className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Mode</th>
-                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Input</th>
-                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Output</th>
-                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Cost</th>
-                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Timing</th>
-                        <th className="text-center px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Status</th>
+                      <tr className="border-b border-border bg-muted/20">
+                        <th className="text-left px-4 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Time</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Model</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Mode</th>
+                        <th className="text-right px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Input</th>
+                        <th className="text-right px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Output</th>
+                        <th className="text-right px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Cost</th>
+                        <th className="text-right px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Latency</th>
+                        <th className="text-center px-3 py-2.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap">Status</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {logsQuery.data.logs.map((log) => (
+                    <tbody className="divide-y divide-muted-foreground/10">
+                      {logsQuery.data.logs.map((log, index) => (
                         <tr
                           key={log.id}
-                          className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                          className="group relative cursor-default odd:bg-transparent even:bg-muted/[0.04] hover:bg-primary/[0.06] transition-colors duration-100 border-l-2 border-l-muted-foreground/[0.15] hover:border-l-primary"
                         >
-                          <td className="px-4 py-2.5 font-mono text-muted-foreground whitespace-nowrap">
+                          <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap" title={new Date(log.timestamp).toISOString()}>
                             {formatTimestamp(log.timestamp)}
                           </td>
-                          <td className="px-3 py-2.5 font-mono text-foreground whitespace-nowrap" title={log.model}>
-                            {truncateModel(log.model)}
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getProviderDot(log.model)}`} />
+                              <span className="font-mono text-xs text-foreground" title={log.model}>
+                                {truncateModel(log.model)}
+                              </span>
+                            </div>
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground border border-border rounded">
-                              {log.mode || "chat"}
-                            </span>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <StatusBadge label={capitalize(log.mode || "chat")} variant="neutral" />
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                          <td className="px-3 py-3 text-right font-mono text-xs text-foreground whitespace-nowrap">
                             {formatNumber(log.input_tokens)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                          <td className="px-3 py-3 text-right font-mono text-xs text-foreground whitespace-nowrap">
                             {formatNumber(log.output_tokens)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                          <td className="px-3 py-3 text-right font-mono text-xs text-foreground whitespace-nowrap">
                             {formatCost(log.total_cost)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground whitespace-nowrap">
+                          <td className={`px-3 py-3 text-right font-mono text-xs whitespace-nowrap ${getTimingClass(log.timing_ms)}`}>
                             {formatTiming(log.timing_ms)}
                           </td>
-                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            {log.status === "success" ? (
-                              <CheckCircle2 size={13} className="inline text-emerald-500" />
-                            ) : (
-                              <XCircle size={13} className="inline text-destructive" />
-                            )}
+                          <td className="px-3 py-3 text-center whitespace-nowrap">
+                            <StatusBadge
+                              label={log.status === "success" ? "Completed" : "Failed"}
+                              variant={log.status === "success" ? "success" : "error"}
+                              icon={log.status === "success" ? CheckCircle2 : XCircle}
+                            />
                           </td>
                         </tr>
                       ))}
@@ -672,36 +729,54 @@ export function Usage() {
                 {logsQuery.data.pagination.total_pages > 1 && (
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
                     <p className="text-xs text-muted-foreground">
-                      Showing{" "}
                       <span className="font-mono font-medium text-foreground">
                         {(logsPage - 1) * 20 + 1}–{Math.min(logsPage * 20, logsQuery.data.pagination.total)}
-                      </span>{" "}
-                      of{" "}
+                      </span>
+                      {' '}of{' '}
                       <span className="font-mono font-medium text-foreground">
                         {logsQuery.data.pagination.total}
                       </span>
+                      {' '}requests
                     </p>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
+                        onClick={() => setLogsPage(1)}
+                        disabled={logsPage === 1 || logsQuery.isFetching}
+                        className="inline-flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="First page"
+                      >
+                        <ChevronsLeft size={14} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
                         disabled={logsPage === 1 || logsQuery.isFetching}
-                        className="inline-flex items-center justify-center w-7 h-7 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         aria-label="Previous page"
                       >
-                        <ChevronLeft size={13} />
+                        <ChevronLeft size={14} />
                       </button>
-                      <span className="text-xs font-mono px-2 text-muted-foreground">
+                      <span className="text-xs font-mono px-2 text-muted-foreground min-w-[3ch] text-center">
                         {logsPage} / {logsQuery.data.pagination.total_pages}
                       </span>
                       <button
                         type="button"
                         onClick={() => setLogsPage((p) => Math.min(logsQuery.data!.pagination.total_pages, p + 1))}
                         disabled={!logsQuery.data.pagination.has_more || logsQuery.isFetching}
-                        className="inline-flex items-center justify-center w-7 h-7 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         aria-label="Next page"
                       >
-                        <ChevronRight size={13} />
+                        <ChevronRight size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLogsPage(logsQuery.data!.pagination.total_pages)}
+                        disabled={!logsQuery.data.pagination.has_more || logsQuery.isFetching}
+                        className="inline-flex items-center justify-center w-8 h-8 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Last page"
+                      >
+                        <ChevronsRight size={14} />
                       </button>
                     </div>
                   </div>
