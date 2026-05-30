@@ -18,6 +18,7 @@ export interface CreateMessageData {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   sequenceNumber: number;
+  turnNumber?: number;
   tokenUsage?: Partial<TokenUsage>;
   clientMessageId?: string;
   metadata?: Record<string, unknown>;
@@ -143,6 +144,10 @@ export class MessageRepository {
 
     if (data.clientMessageId) {
       document.client_message_id = data.clientMessageId;
+    }
+
+    if (data.turnNumber !== undefined) {
+      document.turn_number = data.turnNumber;
     }
 
     return MessageModel.create(document);

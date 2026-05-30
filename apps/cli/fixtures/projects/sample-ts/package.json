@@ -1,0 +1,11 @@
+{
+  "name": "fixture-project",
+  "version": "1.0.0",
+  "description": "Sample project for Nirex CLI integration tests",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest"
+  },
+  "dependencies": {}
+}

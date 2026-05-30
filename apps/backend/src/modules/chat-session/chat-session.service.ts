@@ -1018,7 +1018,8 @@ export class ChatSessionService {
     content: string,
     tokenUsage?: Partial<TokenUsage>,
     metadata?: Record<string, unknown>,
-    clientMessageId?: string
+    clientMessageId?: string,
+    turnNumber?: number
   ): Promise<{ message: MessageDTO | ChatMessage; session: ChatSessionDTO; checkpointCreated: boolean; isDuplicate?: boolean }> {
     const existing = await this.getOwnedSession(sessionId, userId);
 
@@ -1116,6 +1117,7 @@ export class ChatSessionService {
           role,
           content: sanitizedContent,
           sequenceNumber,
+          turnNumber,
           tokenUsage: normalizedTokenUsage,
           clientMessageId,
           metadata,

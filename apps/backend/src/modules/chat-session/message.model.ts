@@ -52,6 +52,11 @@ const MessageSchema = new Schema<IMessageDocument>(
       required: true,
       index: true,
     },
+    turn_number: {
+      type: Number,
+      required: false,
+      default: undefined,
+    },
     role: {
       type: String,
       required: true,
@@ -182,6 +187,9 @@ MessageSchema.index({ session_id: 1, created_at: -1 });
 
 // Compound index for search with filters
 MessageSchema.index({ session_id: 1, role: 1, created_at: -1 });
+
+// Agent-specific: query messages by session and turn number
+MessageSchema.index({ session_id: 1, turn_number: 1 });
 
 // ============================================================================
 // Virtuals

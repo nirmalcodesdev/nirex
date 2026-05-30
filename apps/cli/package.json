@@ -18,9 +18,13 @@
   },
   "dependencies": {
     "@nirex/shared": "workspace:*",
+    "@types/react": "^19.2.15",
     "chalk": "^5.4.1",
     "commander": "^13.0.0",
+    "ink": "^7.0.5",
     "ora": "^8.1.1",
+    "react": "^19.2.4",
+    "socket.io-client": "^4.8.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {

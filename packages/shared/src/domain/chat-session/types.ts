@@ -68,6 +68,7 @@ export interface IMessage {
   session_id: string; // ObjectId as string
   user_id: string; // ObjectId as string
   sequence_number: number; // Global ordering within session
+  turn_number?: number; // Agent turn number (groups messages in a multi-step turn)
   role: MessageRole;
   content: string;
   encrypted?: boolean; // Whether content is encrypted at rest
@@ -94,6 +95,7 @@ export interface MessageDTO {
   id: string;
   session_id: string;
   sequence_number: number;
+  turn_number?: number;
   role: MessageRole;
   content: string;
   token_usage?: TokenUsage;
@@ -412,6 +414,7 @@ export interface AddMessageRequest {
   content: string;
   token_usage?: Partial<TokenUsage>;
   client_message_id?: string; // For deduplication
+  turn_number?: number; // Agent turn grouping
   metadata?: Record<string, unknown>;
 }
 
