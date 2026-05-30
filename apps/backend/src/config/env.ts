@@ -206,6 +206,49 @@ const envSchema = z.object({
       message: 'TWO_FACTOR_SETUP_TTL_MINUTES must be between 5 and 30',
     }),
 
+  // ── AI Module — Provider API Keys ────────────────────────────────────────
+  // At least one provider key must be configured for the AI proxy to work.
+
+  // OpenAI
+  OPENAI_API_KEY: z.string().optional(),
+
+  // Anthropic
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  // Google AI / Gemini
+  GOOGLE_AI_API_KEY: z.string().optional(),
+
+  // Local (Ollama / LM Studio) — optional auth key
+  LOCAL_AI_API_KEY: z.string().optional(),
+
+  // Custom OpenAI-compatible provider
+  CUSTOM_AI_BASE_URL: z.string().url().optional(),
+  CUSTOM_AI_API_KEY: z.string().optional(),
+  CUSTOM_AI_DEFAULT_MODEL: z.string().optional(),
+  CUSTOM_AI_MODELS: z.string().optional(),
+  CUSTOM_AI_TIMEOUT_MS: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined)),
+  CUSTOM_AI_MAX_RETRIES: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined)),
+  CUSTOM_AI_RATE_LIMIT_PER_MIN: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined)),
+  CUSTOM_AI_RATE_LIMIT_PER_DAY: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : undefined)),
+
+  // Encryption key for at-rest provider API key storage (64 hex chars = 32 bytes)
+  AI_API_KEY_ENCRYPTION_KEY: z
+    .string()
+    .min(64, 'AI_API_KEY_ENCRYPTION_KEY must be at least 64 hex characters (32 bytes)')
+    .optional(),
+
   // ── Socket.IO realtime gateway ──────────────────────────────────────────
   // Path the Socket.IO server is mounted on. Must match the client.
   SOCKET_IO_PATH: z.string().default('/socket.io'),

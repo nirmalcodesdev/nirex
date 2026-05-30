@@ -578,6 +578,60 @@ export type {
 } from './domain/api-keys/index.js';
 
 // ============================================================================
+// Domain: AI (Model Proxy & Provider Abstraction)
+// ============================================================================
+
+export type {
+  AIProviderId,
+  ModelCapabilities,
+  TextContentBlock,
+  ImageContentBlock,
+  OpenAIToolUseContentBlock,
+  OpenAIToolResultContentBlock,
+  ProviderContentBlock,
+  ProviderMessageRole,
+  ProviderMessage,
+  ChatRequest,
+  ChatResponse,
+  CompleteRequest,
+  CompleteResponse,
+  EmbedRequest,
+  EmbedResponse,
+  RoutingPreference,
+  RoutedModel,
+  ModelStatus,
+  AIModelInfo,
+  ProviderConfig,
+  UnifiedStreamChunkType,
+  UnifiedStreamChunk,
+  AIApiError,
+} from './domain/ai/index.js';
+
+export {
+  aiProviderIdSchema,
+  modelCapabilitiesSchema,
+  textContentBlockSchema,
+  imageContentBlockSchema,
+  openAIToolUseContentBlockSchema,
+  openAIToolResultContentBlockSchema,
+  providerContentBlockSchema,
+  providerMessageRoleSchema,
+  providerMessageSchema,
+  chatRequestSchema,
+  completeRequestSchema,
+  embedRequestSchema,
+  routingPreferenceSchema,
+  modelStatusSchema,
+  aiModelInfoSchema,
+  providerConfigSchema,
+  unifiedStreamChunkTypeSchema,
+  unifiedStreamChunkSchema,
+  aiChatRequestSchema,
+  aiChatQuerySchema,
+  type AiChatQuerySchema,
+} from './domain/ai/index.js';
+
+// ============================================================================
 // Domain: Agent (AI Coding Agent)
 // ============================================================================
 

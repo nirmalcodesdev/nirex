@@ -1,6 +1,7 @@
 export type ApiKeyScope =
   | 'sessions:read'
   | 'sessions:write'
+  | 'ai:read'
   | 'usage:read'
   | 'billing:read'
   | 'billing:write'

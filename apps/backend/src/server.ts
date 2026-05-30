@@ -4,6 +4,7 @@ import { logger } from './utils/logger.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { connectRedis, disconnectRedis } from './config/redis.js';
 import { initRealtimeGateway, closeRealtimeGateway } from './modules/realtime/realtime.gateway.js';
+import { initAIModule, shutdownAIModule } from './modules/ai/ai.module.js';
 import app from './app.js';
 
 const PORT = env.PORT;
@@ -35,6 +36,17 @@ async function bootstrap(): Promise<void> {
   // standalone single-instance mode with a warning).
   await initRealtimeGateway(server);
 
+  // ── AI Module (model proxy + providers) ──────────────────────────────────
+  // Registers enabled AI providers and starts periodic health checks.
+  // Dependencies: none required (Redis optional, MongoDB optional).
+  try {
+    initAIModule();
+  } catch (err) {
+    logger.warn('AI module failed to initialize — continuing without AI proxy', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   server.listen(PORT, () => {
     logger.info(`Server listening on port ${PORT} [${env.NODE_ENV}]`);
   });
@@ -45,6 +57,7 @@ async function bootstrap(): Promise<void> {
     server.close(async () => {
       // Drain sockets before tearing down the pub/sub clients they depend on.
       await closeRealtimeGateway();
+      shutdownAIModule();
       await disconnectDatabase();
       try {
         await disconnectRedis();
