@@ -4,10 +4,12 @@ import type {
   UsageOverviewResponse,
   UsageRange,
   UsageTopProject,
+  RequestLogsResponse,
 } from '@nirex/shared';
 import { DEFAULT_CREDITS_LIMIT, CREDITS_PER_DOLLAR, getPlanRequestQuota } from '@nirex/shared';
 import { UserModel } from '../user/user.model.js';
 import { usageRepository, type DateRange, type SessionUsageAggregate } from './usage.repository.js';
+import { requestLogRepository } from './request-log.repository.js';
 import { billingRepository } from '../billing/billing.repository.js';
 import { getBillingPlan } from '../billing/billing.catalog.js';
 import type { BillingPlanId } from '../billing/billing.types.js';
@@ -35,6 +37,9 @@ const ACTIVE_SUBSCRIPTION_STATUSES: Array<Exclude<BillingSubscriptionStatus, 'NO
 interface Snapshot {
   total_requests: number;
   credits: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
   avg_response_time_ms: number | null;
   projects: UsageTopProject[];
 }
@@ -354,6 +359,9 @@ export class UsageService {
 
     let totalRequests = eventTotals.requests || 0;
     let credits = eventTotals.credits || 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalTokens = 0;
 
     for (const meta of sessionMeta) {
       const usage = usageBySession.get(meta.session_id);
@@ -371,6 +379,9 @@ export class UsageService {
 
       totalRequests += requestDelta;
       credits += creditDelta;
+      totalInputTokens += usage.input_tokens || 0;
+      totalOutputTokens += usage.output_tokens || 0;
+      totalTokens += usage.total_tokens || 0;
 
       const existing = projectMap.get(meta.project_id) || {
         project_name: meta.project_name,
@@ -394,6 +405,9 @@ export class UsageService {
     return {
       total_requests: totalRequests,
       credits: round(credits, 4),
+      total_input_tokens: totalInputTokens,
+      total_output_tokens: totalOutputTokens,
+      total_tokens: totalTokens,
       avg_response_time_ms: responseAvg === null ? null : round(responseAvg, 2),
       projects,
     };
@@ -430,7 +444,7 @@ export class UsageService {
       this.buildSnapshot(userId, current),
       this.buildSnapshot(userId, previous),
       usageRepository.getDailyTokenTotals(userId, current),
-      usageRepository.getDailyEventTotals(userId, current, ['credits']),
+      usageRepository.getDailyEventTotals(userId, current, ['credits', 'requests']),
       this.buildSnapshot(userId, creditRange),
       this.buildSnapshot(userId, previousCreditRange),
       this.buildSnapshot(userId, { start: new Date(0), end: new Date() }),
@@ -460,23 +474,27 @@ export class UsageService {
       .sort((a, b) => b.credits - a.credits)
       .slice(0, 10);
 
-    const tokenByDate = new Map(dailyTokens.map((d) => [d.date, d.total_tokens / 1000]));
-    const eventMap = new Map<string, { credits: number }>();
+    const tokenByDate = new Map(dailyTokens.map((d) => [d.date, d.total_tokens]));
+    const eventMap = new Map<string, { credits: number; requests: number }>();
     for (const event of dailyEvents) {
-      const existing = eventMap.get(event.date) || { credits: 0 };
+      const existing = eventMap.get(event.date) || { credits: 0, requests: 0 };
       if (event.event_type === 'credits') existing.credits += event.total;
+      if (event.event_type === 'requests') existing.requests += event.total;
       eventMap.set(event.date, existing);
     }
 
     const chart = dayRange(current).map((date) => {
-      const fromEvents = eventMap.get(date) || { credits: 0 };
-      const fallbackCredits = tokenByDate.get(date) || 0;
+      const fromEvents = eventMap.get(date) || { credits: 0, requests: 0 };
+      const rawTokens = tokenByDate.get(date) || 0;
+      const fallbackCredits = rawTokens / 1000;
       return {
         date,
         credits: round(
           fromEvents.credits > 0 ? Math.max(fromEvents.credits, fallbackCredits) : fallbackCredits,
           4
         ),
+        tokens: rawTokens,
+        requests: fromEvents.requests,
       };
     });
 
@@ -495,6 +513,13 @@ export class UsageService {
         total_requests_trend_pct: percentageChange(
           currentSnapshot.total_requests,
           previousSnapshot.total_requests
+        ),
+        total_input_tokens: currentSnapshot.total_input_tokens,
+        total_output_tokens: currentSnapshot.total_output_tokens,
+        total_tokens: currentSnapshot.total_tokens,
+        total_tokens_trend_pct: percentageChange(
+          currentSnapshot.total_tokens,
+          previousSnapshot.total_tokens
         ),
         avg_response_time_ms: currentSnapshot.avg_response_time_ms,
         avg_response_time_trend_pct:
@@ -562,6 +587,27 @@ export class UsageService {
 
     await setCachedUsageOverview(userId, range, result);
     return result;
+  }
+
+  async getRequestLogs(
+    userId: Types.ObjectId,
+    options: { page: number; limit: number; range: UsageRange }
+  ): Promise<RequestLogsResponse> {
+    const now = new Date();
+    const currentPlan = await this.resolveCurrentPlan(userId);
+    const creditRange = this.resolveCreditUsageRange(now, currentPlan);
+    const { current } = resolveRange(
+      options.range,
+      now,
+      options.range === 'month_to_date' ? creditRange : undefined,
+    );
+
+    return requestLogRepository.list(userId, {
+      page: options.page,
+      limit: options.limit,
+      start: current.start,
+      end: current.end,
+    });
   }
 
   async exportOverview(

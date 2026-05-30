@@ -19,6 +19,7 @@ import {
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import { usageRepository } from '../usage/usage.repository.js';
+import { requestLogRepository } from '../usage/request-log.repository.js';
 import {
   assertValidCheckpointSnapshot,
   assertValidMessageContent,
@@ -238,6 +239,7 @@ interface UsageLedgerMessage {
   timestamp: Date | string;
   sequenceNumber?: number;
   clientMessageId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 function projectNameFromWorkingDirectory(path: string): string {
@@ -286,6 +288,8 @@ async function recordUsageEventsForMessage(
   source: string
 ): Promise<void> {
   const normalizedUsage = normalizeTokenUsage(message.tokenUsage);
+  const timestamp = safeEventTimestamp(message.timestamp);
+
   const events: Array<{
     user_id: Types.ObjectId;
     project_id: string;
@@ -304,7 +308,7 @@ async function recordUsageEventsForMessage(
       message_id: message.id,
       event_type: 'requests' as const,
       quantity: 1,
-      timestamp: safeEventTimestamp(message.timestamp),
+      timestamp,
       idempotency_key: `chat-message:${message.id}:requests`,
       metadata: usageEventMetadata(session, source, {
         message_id: message.id,
@@ -323,7 +327,7 @@ async function recordUsageEventsForMessage(
       message_id: message.id,
       event_type: 'credits' as const,
       quantity: normalizedUsage.total_tokens / 1000,
-      timestamp: safeEventTimestamp(message.timestamp),
+      timestamp,
       idempotency_key: `chat-message:${message.id}:credits`,
       metadata: usageEventMetadata(session, source, {
         message_id: message.id,
@@ -336,6 +340,34 @@ async function recordUsageEventsForMessage(
   }
 
   await usageRepository.createEvents(events);
+
+  // Create a request log entry for assistant messages (completed AI responses)
+  if (message.role === 'assistant' && normalizedUsage) {
+    const timingMs =
+      typeof message.metadata?.response_time_ms === 'number'
+        ? message.metadata.response_time_ms
+        : null;
+
+    await requestLogRepository.create({
+      user_id: userId,
+      session_id: session._id,
+      message_id: message.id,
+      timestamp,
+      ai_model: session.aiModel,
+      mode: session.source || source,
+      input_tokens: normalizedUsage.input_tokens,
+      output_tokens: normalizedUsage.output_tokens,
+      total_tokens: normalizedUsage.total_tokens,
+      total_cost: normalizedUsage.total_tokens / 1000,
+      timing_ms: timingMs,
+      status: 'success',
+    }).catch((err) => {
+      logger.warn('Failed to create request log entry', {
+        messageId: message.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 }
 
 function mergeAndSortMessages(...messageSets: ChatMessage[][]): ChatMessage[] {
@@ -481,6 +513,7 @@ export class ChatSessionService {
           timestamp: message.created_at,
           sequenceNumber: message.sequence_number,
           clientMessageId: message.client_message_id,
+          metadata: message.metadata,
         });
       }
     }
@@ -1204,6 +1237,7 @@ export class ChatSessionService {
           timestamp: messageCreatedAt,
           sequenceNumber: deliveredMessage.sequence_number,
           clientMessageId: deliveredMessage.client_message_id,
+          metadata: deliveredMessage.metadata,
         },
         'message_create'
       );

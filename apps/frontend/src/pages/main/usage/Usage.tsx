@@ -1,10 +1,16 @@
+import { useState } from "react";
 import {
   Activity,
   AlertTriangle,
   Gauge,
+  List,
   RefreshCw,
   Shield,
   Wallet,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import {
   BarChart,
@@ -18,7 +24,8 @@ import {
 import { CardContent, PageHeader, SectionCard, StatusBadge, type KpiChangeType } from "@nirex/ui";
 import { CardSkeleton, ChartSkeleton } from "@nirex/ui/Skeleton";
 import { useToast } from "../../../components/ToastProvider";
-import { useUsageOverviewQuery } from "../../../features/usage";
+import { useUsageOverviewQuery, useRequestLogsQuery } from "../../../features/usage";
+import type { UsageRange } from "@nirex/shared";
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
@@ -69,13 +76,44 @@ function getWindowStatusText(percentage: number, isLifted: boolean): string {
   return "Healthy";
 }
 
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatTiming(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${ms.toFixed(0)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function formatCost(credits: number): string {
+  return `${credits.toFixed(4)}`;
+}
+
+function truncateModel(model: string): string {
+  if (model.length <= 24) return model;
+  return `${model.slice(0, 21)}...`;
+}
+
 export function Usage() {
   const { toast } = useToast();
   const usageQuery = useUsageOverviewQuery();
+  const [logsPage, setLogsPage] = useState(1);
+  const [logsRange] = useState<UsageRange>("30d");
+  const logsQuery = useRequestLogsQuery({ page: logsPage, limit: 20, range: logsRange });
 
   const overview = usageQuery.data;
 
   const requestChange = toKpiChange(overview?.summary.total_requests_trend_pct, true);
+  const tokenChange = toKpiChange(overview?.summary.total_tokens_trend_pct, true);
 
   // Live balance fields from user record
   const balanceUsd = overview?.current_plan.balance_usd ?? 0;
@@ -333,18 +371,15 @@ export function Usage() {
               );
             })()}
 
-            {/* Total Requests — Bar Chart */}
+            {/* Total Requests — real data bar chart */}
             {(() => {
-              const requestChartData = [
-                { day: "Mon", requests: 1240 },
-                { day: "Tue", requests: 1890 },
-                { day: "Wed", requests: 1560 },
-                { day: "Thu", requests: 2340 },
-                { day: "Fri", requests: 2780 },
-                { day: "Sat", requests: 1920 },
-                { day: "Sun", requests: 2450 },
-              ];
-              const totalReq = overview.summary.total_requests > 0 ? overview.summary.total_requests : requestChartData.reduce((s, d) => s + d.requests, 0);
+              const totalReq = overview.summary.total_requests;
+              const requestChartData = overview.chart
+                .filter((_, i, arr) => {
+                  const step = arr.length > 30 ? Math.ceil(arr.length / 30) : 1;
+                  return i % step === 0;
+                })
+                .map((p) => ({ day: p.date.slice(5), requests: p.requests }));
 
               return (
                 <div className="bg-nirex-surface border border-border p-4 overflow-hidden">
@@ -358,7 +393,7 @@ export function Usage() {
                       requestChange.type === "negative" ? "text-red-600 dark:text-red-400" :
                       "text-muted-foreground"
                     }`}>
-                      {overview.summary.total_requests > 0 ? requestChange.text : "+12.4%"}
+                      {totalReq > 0 ? requestChange.text : "—"}
                     </div>
                   </div>
 
@@ -375,18 +410,22 @@ export function Usage() {
               );
             })()}
 
-            {/* Total Tokens — Line chart with dots */}
+            {/* Total Tokens — real data line chart */}
             {(() => {
-              const tokenChartData = [
-                { day: "Mon", tokens: 18600 },
-                { day: "Tue", tokens: 28350 },
-                { day: "Wed", tokens: 23400 },
-                { day: "Thu", tokens: 35100 },
-                { day: "Fri", tokens: 41700 },
-                { day: "Sat", tokens: 28800 },
-                { day: "Sun", tokens: 36750 },
-              ];
-              const totalTok = overview.summary.total_requests > 0 ? overview.summary.total_requests * 15 : tokenChartData.reduce((s, d) => s + d.tokens, 0);
+              const totalTok = overview.summary.total_tokens;
+              const inputTok = overview.summary.total_input_tokens;
+              const outputTok = overview.summary.total_output_tokens;
+              // Map the chart array (last N days) into chart-friendly format, sample every Nth point for readability
+              const chartPoints = overview.chart
+                .filter((_, i, arr) => {
+                  // Show at most 30 points; sample if range is 90d
+                  const step = arr.length > 30 ? Math.ceil(arr.length / 30) : 1;
+                  return i % step === 0;
+                })
+                .map((p) => ({
+                  day: p.date.slice(5), // "MM-DD"
+                  tokens: p.tokens,
+                }));
 
               return (
                 <div className="bg-nirex-surface border border-border p-4 overflow-hidden">
@@ -394,20 +433,28 @@ export function Usage() {
                     <div>
                       <p className="text-sm text-muted-foreground">Total Tokens</p>
                       <p className="text-2xl font-semibold mt-1 font-mono">{formatNumber(totalTok)}</p>
+                      <div className="flex gap-3 mt-1">
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          ↑ <span className="text-foreground">{formatNumber(inputTok)}</span> in
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          ↓ <span className="text-foreground">{formatNumber(outputTok)}</span> out
+                        </span>
+                      </div>
                     </div>
                     <div className={`text-xs font-medium mt-2 ${
-                      requestChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
-                      requestChange.type === "negative" ? "text-red-600 dark:text-red-400" :
+                      tokenChange.type === "positive" ? "text-emerald-600 dark:text-emerald-400" :
+                      tokenChange.type === "negative" ? "text-red-600 dark:text-red-400" :
                       "text-muted-foreground"
                     }`}>
-                      {overview.summary.total_requests > 0 ? requestChange.text : "+8.7%"}
+                      {totalTok > 0 ? tokenChange.text : "—"}
                     </div>
                   </div>
 
                   {/* Line chart with dots */}
                   <div className="h-[100px] mt-3">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={tokenChartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                      <LineChart data={chartPoints} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                         <defs>
                           <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="hsl(var(--color-info))" stopOpacity={0.25} />
@@ -416,7 +463,7 @@ export function Usage() {
                         </defs>
                         <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10, fontFamily: "JetBrains Mono, monospace" }} dy={4} />
                         <Area type="monotone" dataKey="tokens" stroke="none" fill="url(#tokenGradient)" />
-                        <Line type="monotone" dataKey="tokens" stroke="hsl(var(--color-info))" strokeWidth={2.5} dot={{ r: 3, fill: "hsl(var(--color-info))" }} activeDot={{ r: 5 }} />
+                        <Line type="monotone" dataKey="tokens" stroke="hsl(var(--color-info))" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -535,6 +582,133 @@ export function Usage() {
           </SectionCard>
 
 
+
+          {/* Request History */}
+          <SectionCard
+            title="Request History"
+            icon={List}
+            headerAction={
+              logsQuery.isFetching ? (
+                <RefreshCw size={13} className="animate-spin text-muted-foreground" />
+              ) : null
+            }
+          >
+            {logsQuery.isLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-10 bg-muted animate-pulse rounded" />
+                ))}
+              </div>
+            ) : logsQuery.isError ? (
+              <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                <AlertTriangle size={16} className="text-destructive shrink-0" />
+                Unable to load request history. Please try again.
+              </div>
+            ) : !logsQuery.data || logsQuery.data.logs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <Activity size={20} className="text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-muted-foreground">No requests in this period.</p>
+              </div>
+            ) : (
+              <>
+                {/* Table */}
+                <div className="overflow-x-auto -mx-4">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        <th className="text-left px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Time</th>
+                        <th className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Model</th>
+                        <th className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Mode</th>
+                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Input</th>
+                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Output</th>
+                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Cost</th>
+                        <th className="text-right px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Timing</th>
+                        <th className="text-center px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logsQuery.data.logs.map((log) => (
+                        <tr
+                          key={log.id}
+                          className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                        >
+                          <td className="px-4 py-2.5 font-mono text-muted-foreground whitespace-nowrap">
+                            {formatTimestamp(log.timestamp)}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-foreground whitespace-nowrap" title={log.model}>
+                            {truncateModel(log.model)}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground border border-border rounded">
+                              {log.mode || "chat"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                            {formatNumber(log.input_tokens)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                            {formatNumber(log.output_tokens)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-foreground whitespace-nowrap">
+                            {formatCost(log.total_cost)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground whitespace-nowrap">
+                            {formatTiming(log.timing_ms)}
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                            {log.status === "success" ? (
+                              <CheckCircle2 size={13} className="inline text-emerald-500" />
+                            ) : (
+                              <XCircle size={13} className="inline text-destructive" />
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {logsQuery.data.pagination.total_pages > 1 && (
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
+                    <p className="text-xs text-muted-foreground">
+                      Showing{" "}
+                      <span className="font-mono font-medium text-foreground">
+                        {(logsPage - 1) * 20 + 1}–{Math.min(logsPage * 20, logsQuery.data.pagination.total)}
+                      </span>{" "}
+                      of{" "}
+                      <span className="font-mono font-medium text-foreground">
+                        {logsQuery.data.pagination.total}
+                      </span>
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+                        disabled={logsPage === 1 || logsQuery.isFetching}
+                        className="inline-flex items-center justify-center w-7 h-7 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Previous page"
+                      >
+                        <ChevronLeft size={13} />
+                      </button>
+                      <span className="text-xs font-mono px-2 text-muted-foreground">
+                        {logsPage} / {logsQuery.data.pagination.total_pages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setLogsPage((p) => Math.min(logsQuery.data!.pagination.total_pages, p + 1))}
+                        disabled={!logsQuery.data.pagination.has_more || logsQuery.isFetching}
+                        className="inline-flex items-center justify-center w-7 h-7 border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Next page"
+                      >
+                        <ChevronRight size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </SectionCard>
 
           {usageQuery.isFetching ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">

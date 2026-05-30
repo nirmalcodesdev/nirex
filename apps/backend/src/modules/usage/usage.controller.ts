@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import type { UsageExportFormat, UsageRange } from '@nirex/shared';
+import type { RequestLogsQuerySchema } from '@nirex/shared';
 import { usageService } from './usage.service.js';
 import { AppError } from '../../types/index.js';
 
@@ -19,6 +20,17 @@ export async function getOverview(req: Request, res: Response): Promise<void> {
   res.json({
     status: 'success',
     data: overview,
+  });
+}
+
+export async function getRequestLogs(req: Request, res: Response): Promise<void> {
+  const userId = getUserId(req);
+  const { page, limit, range } = req.query as unknown as RequestLogsQuerySchema;
+  const logs = await usageService.getRequestLogs(userId, { page, limit, range });
+
+  res.json({
+    status: 'success',
+    data: logs,
   });
 }
 

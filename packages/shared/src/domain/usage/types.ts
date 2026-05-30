@@ -17,6 +17,10 @@ export interface UsageSummary {
   credits_used_pct: number;
   total_requests: number;
   total_requests_trend_pct: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  total_tokens_trend_pct: number;
   avg_response_time_ms: number | null;
   avg_response_time_trend_pct: number | null;
 }
@@ -24,6 +28,8 @@ export interface UsageSummary {
 export interface UsageChartPoint {
   date: string; // YYYY-MM-DD
   credits: number;
+  tokens: number;
+  requests: number;
 }
 
 export interface UsageTopProject {
@@ -72,4 +78,38 @@ export interface UsageOverviewQuery {
 export interface UsageExportQuery {
   range?: UsageRange;
   format?: UsageExportFormat;
+}
+
+export type RequestLogStatus = 'success' | 'failed';
+
+export interface RequestLogEntry {
+  id: string;
+  session_id: string;
+  message_id: string;
+  timestamp: string; // ISO date
+  model: string;
+  mode: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_cost: number; // credits
+  timing_ms: number | null;
+  status: RequestLogStatus;
+}
+
+export interface RequestLogsQuery {
+  page?: number;
+  limit?: number;
+  range?: UsageRange;
+}
+
+export interface RequestLogsResponse {
+  logs: RequestLogEntry[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+    has_more: boolean;
+  };
 }

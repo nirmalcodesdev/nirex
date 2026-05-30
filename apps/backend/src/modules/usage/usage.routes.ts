@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { usageExportQuerySchema, usageOverviewQuerySchema } from '@nirex/shared';
+import { usageExportQuerySchema, usageOverviewQuerySchema, requestLogsQuerySchema } from '@nirex/shared';
 import { asyncWrapper } from '../../utils/asyncWrapper.js';
 import { authenticateUser } from '../../middleware/authenticateUser.js';
 import { validate } from '../../middleware/validate.js';
@@ -22,6 +22,13 @@ router.get(
   apiLimiter,
   validate(usageExportQuerySchema, 'query'),
   asyncWrapper(usageController.exportOverview)
+);
+
+router.get(
+  '/requests',
+  apiLimiter,
+  validate(requestLogsQuerySchema, 'query'),
+  asyncWrapper(usageController.getRequestLogs)
 );
 
 export default router;

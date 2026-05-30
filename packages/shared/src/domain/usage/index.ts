@@ -8,6 +8,10 @@ export type {
   UsageOverviewResponse,
   UsageOverviewQuery,
   UsageExportQuery,
+  RequestLogStatus,
+  RequestLogEntry,
+  RequestLogsQuery,
+  RequestLogsResponse,
 } from './types.js';
 
 export {
@@ -15,7 +19,9 @@ export {
   usageExportFormatSchema,
   usageOverviewQuerySchema,
   usageExportQuerySchema,
+  requestLogsQuerySchema,
   type UsageOverviewQuerySchema,
   type UsageExportQuerySchema,
+  type RequestLogsQuerySchema,
   DEFAULT_CREDITS_LIMIT
 } from './schemas.js';
