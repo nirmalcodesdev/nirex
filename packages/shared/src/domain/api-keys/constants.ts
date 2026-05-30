@@ -1,6 +1,7 @@
 export const API_KEY_SCOPES = [
   'sessions:read',
   'sessions:write',
+  'ai:read',
   'usage:read',
   'billing:read',
   'billing:write',

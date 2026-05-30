@@ -16,6 +16,7 @@ import billingRoutes, { billingWebhookRouter } from './modules/billing/billing.r
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
 import apiKeyRoutes from './modules/api-keys/api-key.routes.js';
 import notificationsRoutes from './modules/notifications/notifications.routes.js';
+import aiRoutes from './modules/ai/ai.routes.js';
 import { configurePassport } from './config/passport.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,6 +82,7 @@ v1Router.use('/billing', billingRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/notifications', notificationsRoutes);
 v1Router.use('/api-keys', apiKeyRoutes);
+v1Router.use('/ai', aiRoutes);
 
 app.use('/api/v1', v1Router);
 
