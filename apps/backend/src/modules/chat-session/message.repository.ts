@@ -56,6 +56,7 @@ export interface MessageUsageRecord {
   sequence_number: number;
   client_message_id?: string;
   created_at: Date;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PaginatedResult<T> {
@@ -345,6 +346,7 @@ export class MessageRepository {
         sequence_number: 1,
         client_message_id: 1,
         created_at: 1,
+        metadata: 1,
       })
       .sort({ sequence_number: 1 })
       .lean()
@@ -357,6 +359,7 @@ export class MessageRepository {
       sequence_number: message.sequence_number as number,
       client_message_id: message.client_message_id as string | undefined,
       created_at: message.created_at as Date,
+      metadata: message.metadata as Record<string, unknown> | undefined,
     }));
   }
 

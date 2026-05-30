@@ -321,6 +321,10 @@ export type {
   UsageOverviewResponse,
   UsageOverviewQuery,
   UsageExportQuery,
+  RequestLogStatus,
+  RequestLogEntry,
+  RequestLogsQuery,
+  RequestLogsResponse,
 } from './domain/usage/index.js';
 
 export {
@@ -328,8 +332,10 @@ export {
   usageExportFormatSchema,
   usageOverviewQuerySchema,
   usageExportQuerySchema,
+  requestLogsQuerySchema,
   type UsageOverviewQuerySchema,
   type UsageExportQuerySchema,
+  type RequestLogsQuerySchema,
   DEFAULT_CREDITS_LIMIT,
 } from './domain/usage/index.js';
 

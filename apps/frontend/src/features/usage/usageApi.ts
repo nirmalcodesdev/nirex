@@ -3,10 +3,21 @@ import type {
   UsageOverviewQuery,
   UsageOverviewResponse,
   UsageRange,
+  RequestLogsQuery,
+  RequestLogsResponse,
 } from "@nirex/shared";
 import { API_BASE_URL, BackendApiError, dataOrThrow, request, type BackendResponse } from "../../lib/backendApi";
 
 const USAGE_BASE = "/usage";
+
+function buildRequestLogsPath(query: RequestLogsQuery): string {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.limit) params.set("limit", String(query.limit));
+  if (query.range) params.set("range", query.range);
+  const search = params.toString();
+  return search ? `${USAGE_BASE}/requests?${search}` : `${USAGE_BASE}/requests`;
+}
 
 function buildOverviewPath(query: UsageOverviewQuery): string {
   const params = new URLSearchParams();
@@ -67,6 +78,13 @@ export const usageApi = {
     });
 
     return dataOrThrow(payload, "USAGE_OVERVIEW_FAILED");
+  },
+
+  async getRequestLogs(query: RequestLogsQuery): Promise<RequestLogsResponse> {
+    const payload = await request<RequestLogsResponse>(buildRequestLogsPath(query), {
+      method: "GET",
+    });
+    return dataOrThrow(payload, "REQUEST_LOGS_FAILED");
   },
 
   async exportOverview(range: UsageRange, format: UsageExportFormat): Promise<UsageExportResult> {
