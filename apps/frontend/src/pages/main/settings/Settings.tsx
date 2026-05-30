@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle2,
@@ -67,7 +67,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function Settings() {
-  const [activeTab, setActiveTab] = useState("profile");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = searchParams.get("tab");
+    const validTabs = settingsNav.map((n) => n.id);
+    return tab && validTabs.includes(tab) ? tab : "profile";
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { theme, setTheme } = useTheme();
 
