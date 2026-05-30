@@ -83,7 +83,6 @@ import { Money } from './domain/money.js';
 import { resolveMonthlyCreditPeriod } from './domain/credit-period.js';
 import { getPaymentGateway, getStripeWebhookSecret, isStripeConfigured } from './billing.stripe.js';
 import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
-import { quotaService } from '../usage/quota.service.js';
 import { rollingWindowService } from '../usage/rolling-window.service.js';
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import type {
@@ -2654,16 +2653,8 @@ export class BillingService {
           const monthlyRequestCount = userDoc?.monthlyRequestCount ?? 0;
           const requestQuota = getPlanRequestQuota(planId);
 
-          let remainingIncluded: number;
-          let creditsUsed: number;
-          try {
-            const quotaStatus = await quotaService.getStatus(userId);
-            remainingIncluded = quotaStatus.remainingCredits;
-            creditsUsed = quotaStatus.creditsUsed;
-          } catch {
-            remainingIncluded = userDoc?.includedCredits ?? planIncluded;
-            creditsUsed = Math.max(0, planIncluded - remainingIncluded);
-          }
+          const remainingIncluded = userDoc?.includedCredits ?? planIncluded;
+          const creditsUsed = Math.max(0, planIncluded - remainingIncluded);
 
           const includedCredits = remainingIncluded;
           const totalCredits = includedCredits + topupBalance;
