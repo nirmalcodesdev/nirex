@@ -17,8 +17,7 @@ export default function Features() {
                     {features.map((f, i) => (
                         <div
                             key={f.label}
-                            className={`group relative bg-nirex-surface border border-border rounded-lg p-6 hover:bg-nirex-elevated hover:border-nirex-accent/20 transition-all duration-300 overflow-hidden ${f.large ? 'md:col-span-2' : ''
-                                } ${f.tall ? 'md:row-span-2' : ''}`}
+                            className={`group relative bg-nirex-surface border border-border p-6 hover:bg-nirex-elevated hover:border-nirex-accent/20 transition-all duration-300 overflow-hidden ${f.large ? 'md:col-span-2' : '' } ${f.tall ? 'md:row-span-2' : ''}`}
                             data-reveal="fade-up"
                             data-reveal-delay={`${i * 0.08}`}
                         >
@@ -30,7 +29,7 @@ export default function Features() {
                             <p className="body-m text-nirex-text-secondary">{f.description}</p>
 
                             {f.terminal && (
-                                <div className="mt-4 bg-nirex-void/50 rounded-md p-4 font-mono text-xs space-y-1">
+                                <div className="mt-4 bg-nirex-void/50 p-4 font-mono text-xs space-y-1">
                                     {f.terminal.map((line, li) => (
                                         <div key={li}>
                                             {line.prompt && <span className="t-prompt">$ </span>}

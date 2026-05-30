@@ -29,16 +29,16 @@ export function StepTerminal({
         <p className="text-nirex-text-secondary">Your first deployment, simulated in real-time</p>
       </div>
 
-      <div className="bg-nirex-surface/50 backdrop-blur-sm border border-nirex-accent/10 rounded-2xl p-1 overflow-hidden shadow-terminal">
+      <div className="bg-nirex-surface/50 backdrop-blur-sm border border-nirex-accent/10 p-1 overflow-hidden shadow-terminal">
         <div
           ref={terminalRef}
-          className="bg-nirex-void rounded-xl p-4 sm:p-6 font-mono text-sm h-[320px] overflow-y-auto border border-white/5 custom-scrollbar"
+          className="bg-nirex-void p-4 sm:p-6 font-mono text-sm h-[320px] overflow-y-auto border border-white/5 custom-scrollbar"
         >
           <div className="flex items-center justify-between mb-4 text-nirex-text-muted border-b border-white/10 pb-3">
             <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-nirex-error/80" />
-              <div className="w-2.5 h-2.5 rounded-full bg-nirex-warning/80" />
-              <div className="w-2.5 h-2.5 rounded-full bg-nirex-success/80" />
+              <div className="w-2.5 h-2.5 bg-nirex-error/80" />
+              <div className="w-2.5 h-2.5 bg-nirex-warning/80" />
+              <div className="w-2.5 h-2.5 bg-nirex-success/80" />
               <span className="ml-2 text-[10px] uppercase tracking-widest font-bold opacity-50">~/projects/my-app</span>
             </div>
           </div>
@@ -49,14 +49,7 @@ export function StepTerminal({
                 key={i}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className={`flex gap-3 ${line.type === "command"
-                  ? "text-nirex-text-primary"
-                  : line.type === "success"
-                    ? "text-nirex-success"
-                    : line.type === "link"
-                      ? "text-blue-400"
-                      : "text-nirex-text-muted"
-                  }`}
+                className={`flex gap-3 ${line.type === "command" ? "text-nirex-text-primary" : line.type === "success" ? "text-nirex-success" : line.type === "link" ? "text-blue-400" : "text-nirex-text-muted" }`}
               >
                 {line.type === "command" && <span className="text-nirex-accent font-bold shrink-0">$</span>}
                 {line.type === "link" ? (
@@ -84,7 +77,7 @@ export function StepTerminal({
           animate={{ opacity: 1, y: 0 }}
           className="mt-8 flex items-center justify-center gap-6"
         >
-          <div className="flex items-center gap-2 text-nirex-success bg-nirex-success/10 px-4 py-2 rounded-full border border-nirex-success/20">
+          <div className="flex items-center gap-2 text-nirex-success bg-nirex-success/10 px-4 py-2 border border-nirex-success/20">
             <CheckCircle2 size={18} />
             <span className="text-sm font-semibold tracking-wide">Deployment successful!</span>
           </div>

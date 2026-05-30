@@ -32,7 +32,7 @@ const statusConfig: Record<Status, { label: string; icon: typeof CheckCircle2; c
     },
     active: {
         label: "Active",
-        icon: Clock,
+        icon: CheckCircle2,
         colors: "bg-nirex-success/10 text-nirex-success border-nirex-success/20",
     },
     archived: {
@@ -49,7 +49,7 @@ export function StatusBadge({ status, showIcon = true, className }: StatusBadgeP
     return (
         <span
             className={cn(
-                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border",
+                "inline-flex items-center gap-1.5 px-2.5 py-1  text-xs font-medium border",
                 config.colors,
                 className
             )}

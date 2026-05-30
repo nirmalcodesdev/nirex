@@ -32,7 +32,7 @@ export default function FinalCTA() {
                     <Link to={ROUTES.AUTH.SIGNUP}>
                         <MagneticButton
                             strength={0.35}
-                            className="h-12 px-8 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
+                            className="h-12 px-8 bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
                         >
                             Get Started Free ↗
                         </MagneticButton>
@@ -40,7 +40,7 @@ export default function FinalCTA() {
 
                     <button
                         onClick={handleCopy}
-                        className="inline-flex items-center gap-3 h-12 px-8 rounded-lg border border-border bg-nirex-elevated/50 font-mono text-sm text-nirex-text-primary hover:border-nirex-accent/30 transition-all duration-200"
+                        className="inline-flex items-center gap-3 h-12 px-8 border border-border bg-nirex-elevated/50 font-mono text-sm text-nirex-text-primary hover:border-nirex-accent/30 transition-all duration-200"
                     >
                         {copied ? (
                             <span className="text-nirex-accent">✓ Copied</span>

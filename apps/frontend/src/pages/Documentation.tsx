@@ -50,7 +50,7 @@ const getDocContent = (activeDoc: string, _currentNavTitle?: string, currentItem
                                 ].map((item) => (
                                     <div
                                         key={item.title}
-                                        className="p-4 rounded-xl border border-border bg-card/50"
+                                        className="p-4 border border-border bg-card/50"
                                     >
                                         <item.icon className="text-nirex-accent mb-3" size={24} />
                                         <h3 className="font-semibold mb-1">{item.title}</h3>

@@ -23,17 +23,17 @@ export function UserAvatar({ className, showStatusIndicator = false, name }: Use
     return (
         <div className={cn("relative", className)}>
             <div className={cn(
-                "w-full h-full rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center overflow-hidden",
+                "w-full h-full bg-muted flex items-center justify-center overflow-hidden",
                 className
             )}>
                 {initials ? (
                     <span className="text-[0.7em] font-semibold text-white">{initials}</span>
                 ) : (
-                    <User className="w-1/2 h-1/2 text-white/80" />
+                    <User className="w-1/2 h-1/2 text-white/80" aria-hidden="true" />
                 )}
             </div>
             {showStatusIndicator && (
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-background" />
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-background" aria-hidden="true" />
             )}
         </div>
     );

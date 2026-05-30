@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  type BillingCycle,
   type BillingInvoiceItem,
   type BillingInvoiceStatus,
-  type BillingPlanId,
   type BillingSubscriptionStatus,
-  type ProrationPreviewQuery,
 } from "@nirex/shared";
 import {
   AlertCircle,
@@ -27,16 +24,11 @@ import { notificationsBaseQueryKey } from "../../../features/notifications/useNo
 import { usageBaseQueryKey } from "../../../features/usage";
 import {
   billingQueryKeys,
-  checkoutPlanId,
-  useApplyDiscountMutation,
   useBillingInvoicesQuery,
   useBillingOverviewQuery,
-  useChangePlanMutation,
-  useCreateCheckoutSessionMutation,
   useCreatePortalSessionMutation,
   useCreateTopUpSessionMutation,
   useDownloadInvoicePdfMutation,
-  useProrationPreviewQuery,
   useRemovePaymentMethodMutation,
   useRetryPaymentMutation,
   useSetDefaultPaymentMethodMutation,
@@ -55,12 +47,9 @@ import {
   getCreditPeriodNotice,
 } from "../../../features/billing/billingDisplay";
 import { useToast } from "../../../components/ToastProvider";
+import { usePlansDialog } from "../../../hooks/usePlansDialog";
 
-type BillingTab = "overview" | "plans" | "payments" | "invoices" | "admin";
-type PlanDialogState = {
-  planId: Exclude<BillingPlanId, "custom">;
-  billingCycle: BillingCycle;
-} | null;
+type BillingTab = "overview" | "payments" | "invoices" | "admin";
 
 const AUTO_RENEWAL_STATUSES: BillingSubscriptionStatus[] = ["TRIALING", "ACTIVE", "PAST_DUE", "UNPAID", "PAUSED"];
 let handledCheckoutLocationKey: string | null = null;
@@ -91,15 +80,7 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-const PLAN_TIER: Record<BillingPlanId, number> = {
-  free: 0,
-  go: 1,
-  pro: 2,
-  plus: 3,
-  max: 4,
-  enterprise: 5,
-  custom: 5,
-};
+
 
 function getVisiblePaidYtdMinor(invoices: BillingInvoiceItem[], year: number): number {
   const now = new Date();
@@ -186,7 +167,7 @@ function hasPortalSyncPending(): boolean {
 
 function BillingSkeleton() {
   return (
-    <div className="flex flex-col gap-5 px-3 py-4">
+    <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8 py-2 sm:py-4 lg:py-5 px-3 mx-auto max-w-[1600px]">
       <Skeleton className="h-8 w-56" variant="text" />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[1, 2, 3, 4].map((item) => <CardSkeleton key={item} />)}
@@ -210,8 +191,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-9 rounded-md px-3 text-sm font-medium transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-        }`}
+      className={`h-9 px-3 text-sm font-medium transition-colors ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground" }`}
     >
       {children}
     </button>
@@ -220,9 +200,6 @@ function TabButton({
 
 export function Billing() {
   const [activeTab, setActiveTab] = useState<BillingTab>("overview");
-  const [selectedCycle, setSelectedCycle] = useState<BillingCycle>("month");
-  const [planDialog, setPlanDialog] = useState<PlanDialogState>(null);
-  const [discountCode, setDiscountCode] = useState("");
   const [adminCustomerId, setAdminCustomerId] = useState("");
   const [adminReport, setAdminReport] = useState<string | null>(null);
   const [portalSyncPending, setPortalSyncPending] = useState(hasPortalSyncPending);
@@ -232,18 +209,16 @@ export function Billing() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { openPlansDialog } = usePlansDialog();
 
   const overviewQuery = useBillingOverviewQuery();
   const invoicesQuery = useBillingInvoicesQuery(50);
-  const checkoutMutation = useCreateCheckoutSessionMutation();
-  const changePlanMutation = useChangePlanMutation();
   const autoRenewalMutation = useUpdateAutoRenewalMutation();
   const retryPaymentMutation = useRetryPaymentMutation();
   const portalMutation = useCreatePortalSessionMutation();
   const topUpMutation = useCreateTopUpSessionMutation();
   const removePaymentMethodMutation = useRemovePaymentMethodMutation();
   const setDefaultPaymentMethodMutation = useSetDefaultPaymentMethodMutation();
-  const applyDiscountMutation = useApplyDiscountMutation();
   const downloadInvoiceMutation = useDownloadInvoicePdfMutation();
 
   const overview = overviewQuery.data;
@@ -251,15 +226,6 @@ export function Billing() {
     (invoicesQuery.data?.items?.length ?? 0) > 0
       ? invoicesQuery.data?.items ?? []
       : overview?.invoices ?? [];
-  const trimmedDiscountCode = discountCode.trim();
-  const prorationQuery: ProrationPreviewQuery | null = planDialog
-    ? {
-      planId: planDialog.planId,
-      billingCycle: planDialog.billingCycle,
-      ...(trimmedDiscountCode ? { couponCode: trimmedDiscountCode } : {}),
-    }
-    : null;
-  const prorationPreview = useProrationPreviewQuery(prorationQuery);
 
   const forceRefreshBillingFromProvider = useCallback(async (showErrorToast = false): Promise<void> => {
     if (portalSyncInFlightRef.current) return;
@@ -388,13 +354,10 @@ export function Billing() {
   const canUpdateAutoRenewal = AUTO_RENEWAL_STATUSES.includes(currentStatus);
 
   const tabs = useMemo<BillingTab[]>(() => {
-    const base: BillingTab[] = ["overview", "plans", "payments", "invoices"];
+    const base: BillingTab[] = ["overview", "payments", "invoices"];
     if (overview?.adminAccess) base.push("admin");
     return base;
   }, [overview?.adminAccess]);
-  const selectedPlanTrialDays = planDialog
-    ? (overview?.plans.find((plan) => plan.id === planDialog.planId)?.trialDays ?? 0)
-    : 0;
 
   async function openHostedPortal(): Promise<void> {
     try {
@@ -406,38 +369,6 @@ export function Billing() {
       window.location.assign(session.portalUrl);
     } catch (error) {
       toast(error instanceof Error ? error.message : "Unable to open billing portal.", "error");
-    }
-  }
-
-  async function startCheckout(planId: Exclude<BillingPlanId, "custom">, cycle: BillingCycle): Promise<void> {
-    const billingUrl = `${window.location.origin}/billing`;
-    const session = await checkoutMutation.mutateAsync({
-      planId,
-      billingCycle: cycle,
-      successUrl: `${billingUrl}?checkout=success`,
-      cancelUrl: `${billingUrl}?checkout=cancelled`,
-      ...(trimmedDiscountCode ? { couponCode: trimmedDiscountCode } : {}),
-    });
-    window.location.assign(session.checkoutUrl);
-  }
-
-  async function confirmPlanChange(): Promise<void> {
-    if (!planDialog) return;
-    try {
-      const hasActiveSubscription =
-        overview?.subscription.status !== "NONE" &&
-        overview?.subscription.status !== "CANCELED" &&
-        Boolean(overview?.subscription.subscriptionId);
-
-      if (!hasActiveSubscription) {
-        await startCheckout(planDialog.planId, planDialog.billingCycle);
-      } else {
-        await changePlanMutation.mutateAsync(planDialog);
-        toast("Subscription plan updated.", "success");
-      }
-      setPlanDialog(null);
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Unable to update plan.", "error");
     }
   }
 
@@ -488,10 +419,11 @@ export function Billing() {
           <button
             type="button"
             onClick={() => void overviewQuery.refetch()}
-            className="inline-flex h-9 w-fit items-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-muted"
+            className="inline-flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Retry"
+            aria-label="Retry loading billing data"
           >
-            <RefreshCw className="h-4 w-4" />
-            Retry
+            <RefreshCw size={14} />
           </button>
         </CardContent>
       </Card>
@@ -544,39 +476,41 @@ export function Billing() {
         : `Ends on ${formatDate(overview.subscription.currentPeriodEnd)}.`;
 
   return (
-    <div className="flex flex-col gap-5 px-3 py-4">
+    <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8 py-2 sm:py-4 lg:py-5 px-3 mx-auto max-w-[1600px]">
       <PageHeader
         title="Billing"
-        description="Manage subscription, payment methods, invoices, and operational billing status."
+        description="Subscription, payments, and invoices."
         actions={
           <button
             type="button"
             onClick={() => {
               void forceRefreshBillingFromProvider(true);
             }}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-muted"
+            disabled={overviewQuery.isFetching || invoicesQuery.isFetching || isProviderRefreshing}
+            className="inline-flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            title="Refresh"
+            aria-label="Refresh billing data"
           >
-            <RefreshCw className={`h-4 w-4 ${overviewQuery.isFetching || invoicesQuery.isFetching || isProviderRefreshing ? "animate-spin" : ""}`} />
-            Refresh
+            <RefreshCw size={14} className={overviewQuery.isFetching || invoicesQuery.isFetching || isProviderRefreshing ? "animate-spin" : ""} />
           </button>
         }
       />
 
-      <div className="flex flex-wrap gap-2">
+      <nav className="flex flex-wrap gap-2" aria-label="Billing tabs">
         {tabs.map((tab) => (
           <TabButton key={tab} active={activeTab === tab} onClick={() => setActiveTab(tab)}>
             {statusLabel(tab)}
           </TabButton>
         ))}
-      </div>
+      </nav>
 
       {showTrialBanner && (
-        <div className="rounded-lg border border-nirex-success/30 bg-nirex-success/10 p-4 text-sm text-nirex-success">
+        <div className=" border border-nirex-success/30 bg-nirex-success/10 p-4 text-sm text-nirex-success">
           Trial ends {formatDate(overview.subscription.trialEnd)}.
         </div>
       )}
       {currentStatus === "PAST_DUE" && (
-        <div className="flex flex-col gap-3 rounded-lg border border-nirex-warning/30 bg-nirex-warning/10 p-4 text-sm text-nirex-warning sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border border-nirex-warning/30 bg-nirex-warning/10 p-4 text-sm text-nirex-warning sm:flex-row sm:items-center sm:justify-between">
           <span>Payment is past due. Retry payment or update your payment method.</span>
           <button
             type="button"
@@ -587,7 +521,7 @@ export function Billing() {
                 onError: (error) => toast(error instanceof Error ? error.message : "Payment retry failed.", "error"),
               });
             }}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground disabled:opacity-60"
+            className="inline-flex h-9 items-center gap-2 bg-primary px-3 text-primary-foreground disabled:opacity-60"
           >
             {retryPaymentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Retry Payment
@@ -595,13 +529,13 @@ export function Billing() {
         </div>
       )}
       {showCancellationScheduledBanner && (
-        <div className="flex flex-col gap-3 rounded-lg border border-nirex-warning/30 bg-nirex-warning/10 p-4 text-sm text-nirex-warning sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border border-nirex-warning/30 bg-nirex-warning/10 p-4 text-sm text-nirex-warning sm:flex-row sm:items-center sm:justify-between">
           <span>Auto-renewal is off. Plan access ends on {formatDate(overview.subscription.currentPeriodEnd)}.</span>
           <button
             type="button"
             disabled={autoRenewalMutation.isPending}
             onClick={toggleAutoRenewal}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground disabled:opacity-60"
+            className="inline-flex h-9 items-center gap-2 bg-primary px-3 text-primary-foreground disabled:opacity-60"
           >
             {autoRenewalMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Enable Renewal
@@ -609,69 +543,24 @@ export function Billing() {
         </div>
       )}
       {scheduledPlanChange && scheduledPlanName && (
-        <div className="rounded-lg border border-nirex-info/30 bg-nirex-info/10 p-4 text-sm text-nirex-info">
+        <div className=" border border-nirex-info/30 bg-nirex-info/10 p-4 text-sm text-nirex-info">
           Plan downgrade scheduled. Your plan will change to {scheduledPlanName} on {formatDate(scheduledPlanChange.scheduledAt)}.
         </div>
       )}
       {currentStatus === "CANCELED" && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        <div className=" border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
           Subscription is canceled. Choose a plan to resubscribe.
         </div>
       )}
 
       {activeTab === "overview" && (
         <>
-          {/* Credit balance hero */}
-          {(() => {
-            const usage = overview.usage;
-            const balanceUsd = usage.balanceUsd ?? 0;
-            const includedCredits = usage.includedCredits ?? 0;
-            const topupBalance = usage.topupBalance ?? 0;
-            const rollingWindow = usage.rollingWindow;
-            const window5hUsed = rollingWindow?.window5h.used ?? 0;
-            const window5hLimit = rollingWindow?.window5h.limit;
-            const window7dUsed = rollingWindow?.window7d.used ?? 0;
-            const window7dLimit = rollingWindow?.window7d.limit;
-            return (
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="py-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Balance</p>
-                      <p className="mt-1 text-3xl font-bold text-foreground">
-                        ${balanceUsd.toFixed(2)}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {topupBalance > 0
-                          ? `${window5hUsed} / ${window5hLimit ?? '∞'} (5h) · ${window7dUsed} / ${window7dLimit ?? '∞'} (7d) · limit lifted`
-                          : window5hLimit !== null && window7dLimit !== null
-                            ? `${window5hUsed} / ${window5hLimit} (5h) · ${window7dUsed} / ${window7dLimit} (7d)`
-                            : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-1 text-sm">
-                      <div className="flex items-center justify-between gap-6">
-                        <span className="text-muted-foreground">Included</span>
-                        <span className="font-medium">${(includedCredits / 100).toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-6">
-                        <span className="text-muted-foreground">Top-up</span>
-                        <span className="font-medium">${(topupBalance / 100).toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
-
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               title="Current Plan"
               value={overview.currentPlan.name}
               change={formatMoneyMinor(overview.kpis.currentPlanAmountMinor, overview.kpis.currency)}
               changeType="neutral"
-              icon={CreditCard}
               changeContext={statusLabel(currentStatus)}
             />
             <KpiCard
@@ -679,7 +568,6 @@ export function Billing() {
               value={billingDateKpi.value}
               change={billingDateKpiChange}
               changeType="neutral"
-              icon={RefreshCw}
               changeContext={billingDateKpi.context}
             />
             <KpiCard
@@ -687,7 +575,6 @@ export function Billing() {
               value={formatMoneyMinor(paidYtdMinor, overview.kpis.currency)}
               change="Immutable invoices"
               changeType="neutral"
-              icon={FileText}
               changeContext="year to date"
             />
             <KpiCard
@@ -695,7 +582,6 @@ export function Billing() {
               value={formatDate(overview.kpis.lastFetchedAt)}
               change={overviewQuery.isFetching ? "Refreshing" : "Current"}
               changeType="neutral"
-              icon={CheckCircle2}
               changeContext="server data"
             />
           </div>
@@ -705,8 +591,8 @@ export function Billing() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-semibold">{overview.currentPlan.name}</h2>
-                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${subscriptionBadgeClass(currentStatus)}`}>
+                    <h2 className="text-lg font-semibold font-display">{overview.currentPlan.name}</h2>
+                    <span className={` border px-2 py-0.5 text-xs font-medium ${subscriptionBadgeClass(currentStatus)}`}>
                       {statusLabel(currentStatus)}
                     </span>
                   </div>
@@ -719,6 +605,13 @@ export function Billing() {
                     </p>
                   ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={openPlansDialog}
+                  className="inline-flex h-9 items-center gap-2 bg-primary px-3 text-sm text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Upgrade plan
+                </button>
               </div>
               <div className="flex flex-col gap-3 border-y border-border py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -732,10 +625,10 @@ export function Billing() {
                   aria-label={autoRenewalEnabled ? "Disable auto renewal" : "Enable auto renewal"}
                   disabled={!canUpdateAutoRenewal || autoRenewalMutation.isPending}
                   onClick={toggleAutoRenewal}
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${autoRenewalEnabled ? "bg-primary" : "bg-muted-foreground/40"}`}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${autoRenewalEnabled ? "bg-primary" : "bg-muted-foreground/40"}`}
                 >
                   <span
-                    className={`inline-block h-5 w-5 rounded-full bg-background shadow transition-transform ${autoRenewalEnabled ? "translate-x-5" : "translate-x-1"}`}
+                    className={`inline-block h-5 w-5 bg-background shadow transition-transform ${autoRenewalEnabled ? "translate-x-5" : "translate-x-1"}`}
                   />
                 </button>
               </div>
@@ -757,7 +650,7 @@ export function Billing() {
           <Card>
             <CardContent className="space-y-4 py-5">
               <div>
-                <h2 className="text-lg font-semibold">Top-Up Credits</h2>
+                <h2 className="text-lg font-semibold font-display">Top-Up Credits</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Credits never expire. While your top-up balance is above $0, monthly request limits are lifted.
                 </p>
@@ -766,15 +659,15 @@ export function Billing() {
                 {TOPUP_PACKS.map((pack) => (
                   <div
                     key={pack.id}
-                    className={`relative flex flex-col rounded-lg border p-4 ${pack.popular ? "border-primary/40 bg-primary/5" : "border-border"}`}
+                    className={`relative flex flex-col border border-border p-4 ${pack.popular ? "border-primary/40 bg-primary/5" : ""}`}
                   >
                     {pack.popular && (
-                      <span className="absolute -top-2.5 left-3 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                      <span className="absolute -top-2.5 left-3 bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
                         Popular
                       </span>
                     )}
-                    <p className="text-base font-semibold">{pack.price}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">${(pack.credits / 100).toFixed(2)} value</p>
+                    <p className="text-base font-semibold font-mono">{pack.price}</p>
+                    <p className="mt-1 text-sm text-muted-foreground font-mono">${(pack.credits / 100).toFixed(2)} value</p>
                     <button
                       type="button"
                       disabled={topUpMutation.isPending}
@@ -784,7 +677,7 @@ export function Billing() {
                             toast(error instanceof Error ? error.message : "Unable to start top-up.", "error"),
                         });
                       }}
-                      className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
+                      className="mt-4 inline-flex h-9 items-center justify-center bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
                     >
                       {topUpMutation.isPending && topUpMutation.variables === pack.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -800,109 +693,39 @@ export function Billing() {
         </>
       )}
 
-      {activeTab === "plans" && (
-        <Card>
-          <CardContent className="space-y-5 py-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Plans</h2>
-              <div className="inline-flex rounded-md border border-border p-1">
-                {(["month", "year"] as BillingCycle[]).map((cycle) => (
-                  <button
-                    key={cycle}
-                    type="button"
-                    onClick={() => setSelectedCycle(cycle)}
-                    className={`h-8 rounded px-3 text-sm ${selectedCycle === cycle ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-                  >
-                    {cycle === "month" ? "Monthly" : "Yearly"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-3">
-              {overview.plans.map((plan) => {
-                const planId = checkoutPlanId(plan.id);
-                // Max only supports monthly billing
-                const effectiveCycle: BillingCycle = plan.id === "max" ? "month" : selectedCycle;
-                const price = plan.prices[effectiveCycle] ?? plan.prices.month;
-                const hasActiveCurrentSubscription =
-                  overview.subscription.status !== "NONE" &&
-                  overview.subscription.status !== "CANCELED";
-                const isCurrent = hasActiveCurrentSubscription && plan.id === overview.currentPlan.id;
-                const isDowngrade = hasActiveCurrentSubscription && plan.id !== "free" && PLAN_TIER[plan.id] < PLAN_TIER[overview.currentPlan.id];
-                const canSelect = Boolean(planId) && !isCurrent && !isDowngrade && plan.checkoutEnabled;
-                return (
-                  <div key={plan.id} className={`flex min-h-[300px] flex-col rounded-lg border p-4 ${plan.id === "max" ? "border-primary/30" : "border-border"}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold">{plan.name}</h3>
-                        <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        {isCurrent && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">Current</span>}
-                        {plan.id === "max" && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Monthly only</span>}
-                      </div>
-                    </div>
-                    <div className="mt-4 text-2xl font-semibold">
-                      {price ? formatMoneyMinor(price.amountMinor, price.currency) : "Custom"}
-                      {price && <span className="text-sm font-normal text-muted-foreground"> / mo</span>}
-                    </div>
-                    {plan.trialDays > 0 && <p className="mt-1 text-xs text-muted-foreground">{plan.trialDays}-day free trial</p>}
-                    <div className="mt-4 flex-1 space-y-2">
-                      {plan.features.map((feature) => (
-                        <div key={feature} className="flex items-start gap-2 text-sm">
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-nirex-success" />
-                          <span>{feature}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!canSelect}
-                      onClick={() => {
-                        if (!planId) return;
-                        setPlanDialog({ planId, billingCycle: effectiveCycle });
-                      }}
-                      className="mt-4 inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
-                    >
-                      {isCurrent ? "Current Plan" : isDowngrade ? "Downgrade Not Available" : canSelect ? "Select Plan" : plan.checkoutEnabled ? "Included" : "Not Available"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+
 
       {activeTab === "payments" && (
         <Card>
           <CardContent className="space-y-4 py-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Payment Methods</h2>
+                <h2 className="text-lg font-semibold font-display">Payment Methods</h2>
                 <p className="mt-1 text-sm text-muted-foreground">Card details are collected only through the payment provider hosted flow.</p>
               </div>
               <button
                 type="button"
                 disabled={portalMutation.isPending}
                 onClick={() => void openHostedPortal()}
-                className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
+                className="inline-flex h-9 items-center gap-2 bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
               >
                 {portalMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                 Secure Portal
               </button>
             </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+            <div className=" border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
               PCI posture: this app never handles raw card numbers, CVV, or full PAN.
             </div>
             {overview.paymentMethods.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                No saved payment methods.
+              <div className=" border border-dashed border-border p-8 text-center">
+                <CreditCard size={24} className="mx-auto mb-2 text-muted-foreground/60" />
+                <p className="text-sm font-medium text-muted-foreground">No saved payment methods</p>
+                <p className="text-xs text-muted-foreground mt-1">Add a card through the secure billing portal.</p>
               </div>
             ) : (
               <div className="space-y-3">
                 {overview.paymentMethods.map((method) => (
-                  <div key={method.id} className="flex flex-col gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div key={method.id} className="flex flex-col gap-3 border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">
                       <CreditCard className="h-5 w-5 text-muted-foreground" />
                       <div>
@@ -925,7 +748,7 @@ export function Billing() {
                             onError: (error) => toast(error instanceof Error ? error.message : "Unable to set default.", "error"),
                           });
                         }}
-                        className="h-9 rounded-md border border-border px-3 text-sm hover:bg-muted disabled:opacity-50"
+                        className="h-9 border border-border px-3 text-sm hover:bg-muted disabled:opacity-50"
                       >
                         Set Default
                       </button>
@@ -938,7 +761,7 @@ export function Billing() {
                             onError: (error) => toast(error instanceof Error ? error.message : "Unable to remove method.", "error"),
                           });
                         }}
-                        className="h-9 rounded-md border border-nirex-error/30 px-3 text-sm text-nirex-error hover:bg-nirex-error/10 disabled:opacity-50"
+                        className="h-9 border border-nirex-error/30 px-3 text-sm text-nirex-error hover:bg-nirex-error/10 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -955,7 +778,7 @@ export function Billing() {
         <Card>
           <CardContent className="space-y-4 py-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Invoice History</h2>
+                <h2 className="text-lg font-semibold font-display">Invoice History</h2>
               {invoicesQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
             <div className="overflow-x-auto">
@@ -973,16 +796,22 @@ export function Billing() {
                 <tbody className="divide-y divide-border">
                   {invoices.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-muted-foreground">No invoices available.</td>
+                      <td colSpan={6} className="py-12 text-center text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center">
+                          <FileText size={24} className="mb-2 text-muted-foreground/60" />
+                          <p className="text-sm font-medium">No invoices yet</p>
+                          <p className="text-xs mt-1">Invoices will appear after your first payment.</p>
+                        </div>
+                      </td>
                     </tr>
                   ) : invoices.map((invoice) => (
-                    <tr key={invoice.invoiceId}>
+                    <tr key={invoice.invoiceId} className="hover:bg-muted transition-colors duration-150">
                       <td className="py-3 pr-4 font-medium">{invoice.number ?? invoice.invoiceNumber ?? invoice.invoiceId}</td>
                       <td className="py-3 pr-4 text-muted-foreground">{formatDate(invoice.createdAt)}</td>
                       <td className="py-3 pr-4 text-muted-foreground">{invoice.description ?? "Subscription invoice"}</td>
-                      <td className="py-3 pr-4">{formatMoneyMinor(invoice.totalMinor, invoice.currency)}</td>
+                      <td className="py-3 pr-4 font-mono">{formatMoneyMinor(invoice.totalMinor, invoice.currency)}</td>
                       <td className="py-3 pr-4">
-                        <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${invoiceBadgeClass(invoice.status)}`}>
+                        <span className={` border px-2 py-0.5 text-xs font-medium ${invoiceBadgeClass(invoice.status)}`}>
                           {statusLabel(invoice.status)}
                         </span>
                       </td>
@@ -991,7 +820,7 @@ export function Billing() {
                           type="button"
                           disabled={downloadInvoiceMutation.isPending}
                           onClick={() => void downloadInvoice(invoice)}
-                          className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-2 text-sm hover:bg-muted disabled:opacity-50"
+                          className="inline-flex h-8 items-center gap-2 border border-border bg-background px-2 text-sm hover:bg-muted disabled:opacity-50 transition-colors duration-150"
                         >
                           <Download className="h-4 w-4" />
                           Download
@@ -1009,19 +838,19 @@ export function Billing() {
       {activeTab === "admin" && overview.adminAccess && (
         <Card>
           <CardContent className="space-y-4 py-5">
-            <h2 className="text-lg font-semibold">Billing Admin</h2>
+                <h2 className="text-lg font-semibold font-display">Billing Admin</h2>
             <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto]">
               <input
                 value={adminCustomerId}
                 onChange={(event) => setAdminCustomerId(event.target.value)}
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
-                placeholder="Customer ObjectId"
-                aria-label="Customer ObjectId"
+                className="h-9 border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Customer ID"
+                aria-label="Customer ID"
               />
               <button
                 type="button"
                 onClick={() => void runAdminReport()}
-                className="h-9 rounded-md border border-border px-3 text-sm hover:bg-muted"
+                className="h-9 border border-border px-3 text-sm hover:bg-muted"
               >
                 Reconciliation Report
               </button>
@@ -1036,110 +865,17 @@ export function Billing() {
                     toast(error instanceof Error ? error.message : "Unable to load customer.", "error");
                   }
                 }}
-                className="h-9 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50"
+                className="h-9 bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50"
               >
                 Load Customer
               </button>
             </div>
-            {adminReport && <p className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">{adminReport}</p>}
+            {adminReport && <p className=" border border-border bg-muted/20 p-3 text-sm text-muted-foreground">{adminReport}</p>}
           </CardContent>
         </Card>
       )}
 
-      {planDialog && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-lg">
-            <h2 className="text-lg font-semibold">Confirm Plan Change</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Review the amount due today before changing plans.
-            </p>
-            <div className="mt-4 space-y-2 rounded-lg border border-border p-3 text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">Plan</span>
-                <span>{statusLabel(planDialog.planId)} · {planDialog.billingCycle}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{planDialog.billingCycle === "year" ? "Annual price" : "Monthly price"}</span>
-                <span>
-                  {prorationPreview.data
-                    ? `${formatMoneyMinor(prorationPreview.data.newRecurringAmount.amountMinor, prorationPreview.data.newRecurringAmount.currency)} / ${planDialog.billingCycle === "year" ? "yr" : "mo"}`
-                    : prorationPreview.isFetching ? "Calculating…" : "Available at checkout"}
-                </span>
-              </div>
-              {prorationPreview.data && prorationPreview.data.creditApplied.amountMinor > 0 && (
-                <>
-                  <div className="flex justify-between gap-3 text-nirex-success">
-                    <span>Unused time on current plan</span>
-                    <span>−{formatMoneyMinor(prorationPreview.data.creditApplied.amountMinor, prorationPreview.data.creditApplied.currency)}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Prorated refund for remaining days on your current subscription
-                  </p>
-                </>
-              )}
-              <div className="flex justify-between gap-3 border-t border-border pt-2 font-medium">
-                <span>Due today</span>
-                <span>
-                  {prorationPreview.data
-                    ? formatMoneyMinor(prorationPreview.data.amountDueToday.amountMinor, prorationPreview.data.amountDueToday.currency)
-                    : prorationPreview.isFetching ? "Calculating…" : "Available at checkout"}
-                </span>
-              </div>
-              {selectedPlanTrialDays > 0 && (
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">Trial</span>
-                  <span>{selectedPlanTrialDays}-day free trial</span>
-                </div>
-              )}
-            </div>
-            {prorationPreview.data?.description && (
-              <p className="mt-2 text-xs text-muted-foreground">{prorationPreview.data.description}</p>
-            )}
-            <div className="mt-4">
-              <label className="text-sm font-medium" htmlFor="discount-code">Discount code</label>
-              <div className="mt-2 flex gap-2">
-                <input
-                  id="discount-code"
-                  value={discountCode}
-                  onChange={(event) => setDiscountCode(event.target.value)}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
-                />
-                <button
-                  type="button"
-                  disabled={!discountCode.trim() || applyDiscountMutation.isPending}
-                  onClick={() => {
-                    applyDiscountMutation.mutate({ code: discountCode.trim() }, {
-                      onSuccess: () => toast("Discount applied.", "success"),
-                      onError: (error) => toast(error instanceof Error ? error.message : "Discount failed.", "error"),
-                    });
-                  }}
-                  className="h-9 rounded-md border border-border px-3 text-sm hover:bg-muted disabled:opacity-50"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPlanDialog(null)}
-                className="h-9 rounded-md border border-border px-3 text-sm hover:bg-muted"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                disabled={checkoutMutation.isPending || changePlanMutation.isPending}
-                onClick={() => void confirmPlanChange()}
-                className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:opacity-60"
-              >
-                {(checkoutMutation.isPending || changePlanMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin" />}
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

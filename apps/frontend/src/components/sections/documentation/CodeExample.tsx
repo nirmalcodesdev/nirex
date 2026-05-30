@@ -31,7 +31,7 @@ export function CodeExample({ blocks, filename }: CodeExampleProps) {
     };
 
     return (
-        <div className="rounded-xl overflow-hidden bg-[#0d1117] border border-border my-6">
+        <div className=" overflow-hidden bg-[#0d1117] border border-border my-6">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-[#161b22] border-b border-white/10">
                 <div className="flex items-center gap-2">
@@ -41,10 +41,7 @@ export function CodeExample({ blocks, filename }: CodeExampleProps) {
                                 <button
                                     key={block.language + block.label}
                                     onClick={() => setActiveTab(idx)}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === idx
-                                        ? "bg-white/10 text-white"
-                                        : "text-gray-400 hover:text-white hover:bg-white/5"
-                                        }`}
+                                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${activeTab === idx ? "bg-white/10 text-white" : "text-gray-400 hover:text-white hover:bg-white/5" }`}
                                 >
                                     {block.label}
                                 </button>

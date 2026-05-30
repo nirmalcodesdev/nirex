@@ -33,9 +33,9 @@ export function StepPreferences({ preferences, isLoading, onToggle, onComplete }
         {PREFERENCE_ITEMS.map((item) => (
           <label
             key={item.id}
-            className="flex items-center gap-4 p-5 rounded-2xl border border-nirex-accent/10 bg-nirex-surface/40 hover:bg-nirex-surface/60 cursor-pointer transition-all hover:border-nirex-accent/30 group"
+            className="flex items-center gap-4 p-5 border border-nirex-accent/10 bg-nirex-surface/40 hover:bg-nirex-surface/60 cursor-pointer transition-all hover:border-nirex-accent/30 group"
           >
-            <div className="w-11 h-11 rounded-xl bg-nirex-accent/10 flex items-center justify-center shrink-0 border border-nirex-accent/10 group-hover:scale-110 transition-transform">
+            <div className="w-11 h-11 bg-nirex-accent/10 flex items-center justify-center shrink-0 border border-nirex-accent/10 group-hover:scale-110 transition-transform">
               <item.icon size={20} className="text-nirex-accent" />
             </div>
             <div className="flex-1">
@@ -49,7 +49,7 @@ export function StepPreferences({ preferences, isLoading, onToggle, onComplete }
                 onChange={() => onToggle(item.id)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-nirex-void/50 border border-white/5 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-nirex-text-muted after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-nirex-accent peer-checked:after:bg-white" />
+              <div className="w-11 h-6 bg-nirex-void/50 border border-white/5 peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-nirex-text-muted after: after:h-5 after:w-5 after:transition-all peer-checked:bg-nirex-accent peer-checked:after:bg-white" />
             </div>
           </label>
         ))}
@@ -59,7 +59,7 @@ export function StepPreferences({ preferences, isLoading, onToggle, onComplete }
         <button
           onClick={onComplete}
           disabled={isLoading}
-          className="inline-flex items-center gap-2 bg-nirex-accent text-white hover:bg-nirex-accent-hi disabled:opacity-50 disabled:cursor-not-allowed rounded-xl px-8 py-3.5 font-bold transition-all shadow-lg shadow-nirex-accent/20 hover:shadow-xl hover:shadow-nirex-accent/30 min-w-[200px] justify-center"
+          className="inline-flex items-center gap-2 bg-nirex-accent text-white hover:bg-nirex-accent-hi disabled:opacity-50 disabled:cursor-not-allowed px-8 py-3.5 font-bold transition-all shadow-lg shadow-nirex-accent/20 hover:shadow-xl hover:shadow-nirex-accent/30 min-w-[200px] justify-center"
         >
           {isLoading ? (
             <>

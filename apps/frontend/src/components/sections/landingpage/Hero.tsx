@@ -87,14 +87,14 @@ export default function Hero() {
                     <Link to={ROUTES.AUTH.SIGNUP}>
                         <MagneticButton
                             strength={0.35}
-                            className="h-11 px-6 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
+                            className="h-11 px-6 bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
                         >
                             Get Started
                             <span className="inline-block transition-transform hover:translate-x-0.5 hover:-translate-y-0.5">↗</span>
                         </MagneticButton>
                     </Link>
 
-                    <button className="h-11 px-6 rounded-lg border border-border font-mono text-[13px] text-nirex-text-secondary hover:border-nirex-accent/30 hover:text-nirex-text-primary transition-all duration-200">
+                    <button className="h-11 px-6 border border-border font-mono text-[13px] text-nirex-text-secondary hover:border-nirex-accent/30 hover:text-nirex-text-primary transition-all duration-200">
                         <span className="text-nirex-accent">$ </span>nirex --demo
                     </button>
                 </div>

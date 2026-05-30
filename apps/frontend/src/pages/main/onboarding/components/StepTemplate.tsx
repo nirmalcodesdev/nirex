@@ -30,10 +30,7 @@ export function StepTemplate({ templates, selectedTemplate, onSelect }: StepTemp
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => onSelect(template.id)}
-            className={`relative overflow-hidden bg-nirex-surface/40 backdrop-blur-sm border rounded-xl p-5 text-center transition-all duration-300 ${selectedTemplate === template.id
-              ? "border-nirex-accent ring-2 ring-nirex-accent/20 bg-nirex-accent/5"
-              : "border-nirex-accent/10 hover:border-nirex-accent/30"
-              }`}
+            className={`relative overflow-hidden bg-nirex-surface/40 backdrop-blur-sm border p-5 text-center transition-all duration-300 ${selectedTemplate === template.id ? "border-nirex-accent ring-2 ring-nirex-accent/20 bg-nirex-accent/5" : "border-nirex-accent/10 hover:border-nirex-accent/30" }`}
           >
             <div className="text-3xl mb-3 filter drop-shadow-sm">{template.icon}</div>
             <div className="font-semibold text-sm text-nirex-text-primary">{template.name}</div>
@@ -43,7 +40,7 @@ export function StepTemplate({ templates, selectedTemplate, onSelect }: StepTemp
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
-                className="absolute top-2 right-2 w-5 h-5 rounded-full bg-nirex-accent flex items-center justify-center shadow-lg shadow-nirex-accent/20"
+                className="absolute top-2 right-2 w-5 h-5 bg-nirex-accent flex items-center justify-center shadow-lg shadow-nirex-accent/20"
               >
                 <Check size={12} className="text-white" />
               </motion.div>

@@ -43,7 +43,7 @@ export function Callout({ type = "info", title, children }: CalloutProps) {
     const Icon = style.icon;
 
     return (
-        <div className={`rounded-xl border ${style.border} ${style.bg} p-4 my-6`}>
+        <div className={` border ${style.border} ${style.bg} p-4 my-6`}>
             <div className="flex gap-3">
                 <Icon className={`shrink-0 ${style.iconColor}`} size={20} />
                 <div className="flex-1">

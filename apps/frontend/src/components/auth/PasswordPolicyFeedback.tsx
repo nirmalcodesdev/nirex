@@ -32,22 +32,18 @@ export function PasswordPolicyFeedback({ password, context, compact = false }: P
         {[1, 2, 3, 4].map((level) => (
           <div
             key={level}
-            className={`flex-1 rounded-full transition-colors ${
-              level <= strength.score ? activeColor : "bg-nirex-surface"
-            }`}
+            className={`flex-1 transition-colors ${ level <= strength.score ? activeColor : "bg-nirex-surface" }`}
           />
         ))}
       </div>
       <p className={`text-xs ${strength.score >= 3 ? "text-nirex-accent" : "text-nirex-text-muted"}`}>
         {strength.label}
       </p>
-      <div className="space-y-1.5 p-3 bg-nirex-surface rounded-lg">
+      <div className="space-y-1.5 p-3 bg-nirex-surface ">
         {result.requirements.map((requirement) => (
           <div
             key={requirement.code}
-            className={`flex items-center gap-2 text-xs ${
-              requirement.met ? "text-nirex-accent" : "text-nirex-text-muted"
-            }`}
+            className={`flex items-center gap-2 text-xs ${ requirement.met ? "text-nirex-accent" : "text-nirex-text-muted" }`}
           >
             <Check className={`h-3 w-3 ${requirement.met ? "opacity-100" : "opacity-0"}`} />
             {requirement.label}

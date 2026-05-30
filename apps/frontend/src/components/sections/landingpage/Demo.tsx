@@ -40,10 +40,7 @@ export default function Demo() {
                             <button
                                 key={i}
                                 onClick={() => setActive(i)}
-                                className={`text-left px-3 py-2 rounded-md font-mono text-xs whitespace-nowrap transition-all duration-200 flex-shrink-0 max-w-[170px] truncate ${active === i
-                                    ? 'bg-nirex-elevated border-l-2 border-nirex-accent text-nirex-text-primary'
-                                    : 'text-nirex-text-muted hover:text-nirex-text-secondary'
-                                    }`}
+                                className={`text-left px-3 py-2 font-mono text-xs whitespace-nowrap transition-all duration-200 flex-shrink-0 max-w-[170px] truncate ${active === i ? 'bg-nirex-elevated border-l-2 border-nirex-accent text-nirex-text-primary' : 'text-nirex-text-muted hover:text-nirex-text-secondary' }`}
                             >
                                 {c.cmd}
                             </button>
@@ -72,7 +69,7 @@ export default function Demo() {
                     </div>
 
                     {/* Context panel */}
-                    <div className="hidden lg:block bg-nirex-surface border border-border rounded-lg p-4 min-w-0">
+                    <div className="hidden lg:block bg-nirex-surface border border-border p-4 min-w-0">
                         <div className="label-mono text-nirex-text-muted mb-3">Context</div>
                         <div className="font-mono text-xs text-nirex-text-secondary space-y-1">
                             <div className="text-nirex-accent-hi">{commands[active]?.context.type === 'diff' ? '◉ Diff View' : commands[active]?.context.type === 'files' ? '◉ Generated Files' : '◉ File Tree'}</div>

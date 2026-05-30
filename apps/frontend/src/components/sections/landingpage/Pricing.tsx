@@ -18,10 +18,7 @@ export default function Pricing() {
                     {plans.map((plan, i) => (
                         <div
                             key={plan.name}
-                            className={`relative bg-nirex-surface border rounded-xl overflow-hidden transition-all duration-300 ${plan.highlight
-                                ? 'border-nirex-accent shadow-elevated scale-[1.02]'
-                                : 'border-border hover:border-nirex-accent/20'
-                                }`}
+                            className={`relative bg-nirex-surface border overflow-hidden transition-all duration-300 ${plan.highlight ? 'border-nirex-accent shadow-elevated scale-[1.02]' : 'border-border hover:border-nirex-accent/20' }`}
                             data-reveal="fade-up"
                             data-reveal-delay={`${i * 0.1}`}
                         >
@@ -51,10 +48,7 @@ export default function Pricing() {
 
                                 <MagneticButton
                                     strength={0.3}
-                                    className={`w-full h-11 rounded-lg font-body text-sm font-medium transition-all duration-200 ${plan.highlight
-                                        ? 'bg-nirex-accent text-nirex-text-inverse hover:opacity-90'
-                                        : 'border border-border text-nirex-text-primary hover:border-nirex-accent/30 hover:bg-nirex-elevated'
-                                        }`}
+                                    className={`w-full h-11 font-body text-sm font-medium transition-all duration-200 ${plan.highlight ? 'bg-nirex-accent text-nirex-text-inverse hover:opacity-90' : 'border border-border text-nirex-text-primary hover:border-nirex-accent/30 hover:bg-nirex-elevated' }`}
                                 >
                                     {plan.cta}
                                 </MagneticButton>

@@ -52,10 +52,7 @@ export default function Nav({
     return (
         <>
             <nav
-                className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-200 ${scrolled
-                    ? 'backdrop-blur-2xl border-b border-border bg-nirex-base/80'
-                    : 'bg-transparent border-b border-transparent'
-                    } ${className}`}
+                className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-200 ${scrolled ? 'backdrop-blur-2xl border-b border-border bg-nirex-base/80' : 'bg-transparent border-b border-transparent' } ${className}`}
                 style={{ WebkitBackdropFilter: scrolled ? 'blur(16px) saturate(180%)' : undefined }}
             >
                 <div className="nirex-container-wide flex items-center justify-between h-16">
@@ -90,7 +87,7 @@ export default function Nav({
                             ctaTo,
                             <MagneticButton
                                 strength={0.35}
-                                className="h-10 px-5 flex items-center gap-2 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium hover:opacity-90 transition-opacity"
+                                className="h-10 px-5 flex items-center gap-2 bg-nirex-accent text-nirex-text-inverse font-body text-sm font-medium hover:opacity-90 transition-opacity"
                             >
                                 {ctaText}
                                 <span className="inline-block transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5">↗</span>
@@ -128,7 +125,7 @@ export default function Nav({
                         <>
                             {ctaText} ↗
                         </>,
-                        'mt-4 h-12 px-8 rounded-lg bg-nirex-accent text-nirex-text-inverse font-body text-base font-medium flex items-center',
+                        'mt-4 h-12 px-8  bg-nirex-accent text-nirex-text-inverse font-body text-base font-medium flex items-center',
                         () => setMobileOpen(false)
                     )}
                 </div>

@@ -13,7 +13,7 @@ export function StepSuccess({ onNavigate }: StepSuccessProps) {
         initial={{ scale: 0, rotate: -20 }}
         animate={{ scale: 1, rotate: 0 }}
         transition={{ type: "spring", stiffness: 200, damping: 15 }}
-        className="w-24 h-24 mx-auto mb-8 rounded-full bg-gradient-to-br from-nirex-success to-emerald-600 flex items-center justify-center shadow-2xl shadow-nirex-success/30 border-4 border-white/10"
+        className="w-24 h-24 mx-auto mb-8 bg-gradient-to-br from-nirex-success to-emerald-600 flex items-center justify-center shadow-2xl shadow-nirex-success/30 border-4 border-white/10"
       >
         <CheckCircle2 size={48} className="text-white" />
       </motion.div>
@@ -52,9 +52,9 @@ export function StepSuccess({ onNavigate }: StepSuccessProps) {
             whileHover={{ y: -5, scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={item.action}
-            className="group relative bg-nirex-surface/40 backdrop-blur-sm border border-nirex-accent/10 rounded-2xl p-6 text-left transition-all hover:bg-nirex-surface/60 hover:border-nirex-accent/30 shadow-lg hover:shadow-xl"
+            className="group relative bg-nirex-surface/40 backdrop-blur-sm border border-nirex-accent/10 p-6 text-left transition-all hover:bg-nirex-surface/60 hover:border-nirex-accent/30 shadow-lg hover:shadow-xl"
           >
-            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-inner border border-white/5`}>
+            <div className={`w-12 h-12 bg-gradient-to-br ${item.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-inner border border-white/5`}>
               <item.icon size={22} className={item.textColor} />
             </div>
             <h3 className="font-bold text-sm text-nirex-text-primary mb-1 group-hover:text-nirex-accent transition-colors">{item.title}</h3>
@@ -70,7 +70,7 @@ export function StepSuccess({ onNavigate }: StepSuccessProps) {
         whileHover={{ scale: 1.03, y: -2 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => onNavigate(ROUTES.DASHBOARD.ROOT)}
-        className="inline-flex items-center gap-3 bg-nirex-accent text-white hover:bg-nirex-accent-hi rounded-2xl px-10 py-4 font-bold transition-all shadow-xl shadow-nirex-accent/20 hover:shadow-2xl hover:shadow-nirex-accent/30"
+        className="inline-flex items-center gap-3 bg-nirex-accent text-white hover:bg-nirex-accent-hi px-10 py-4 font-bold transition-all shadow-xl shadow-nirex-accent/20 hover:shadow-2xl hover:shadow-nirex-accent/30"
       >
         Launch Dashboard
         <ArrowRight size={20} />
@@ -82,7 +82,7 @@ export function StepSuccess({ onNavigate }: StepSuccessProps) {
         transition={{ delay: 0.6 }}
         className="mt-8 text-xs text-nirex-text-muted font-medium"
       >
-        Pro tip: Run <code className="px-2 py-1 rounded bg-nirex-void border border-white/5 text-nirex-accent font-bold mx-1">nirex --help</code> anytime to see all CLI commands.
+        Pro tip: Run <code className="px-2 py-1 bg-nirex-void border border-white/5 text-nirex-accent font-bold mx-1">nirex --help</code> anytime to see all CLI commands.
       </motion.p>
     </div>
   );
