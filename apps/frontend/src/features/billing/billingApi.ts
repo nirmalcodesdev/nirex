@@ -228,6 +228,28 @@ export const billingApi = {
     });
   },
 
+  async verifyCheckoutSession(sessionId: string): Promise<{
+    processed: boolean;
+    alreadyProcessed: boolean;
+    sessionStatus: string;
+    mode: string;
+    newBalance: number | null;
+    topupPackName: string | null;
+  }> {
+    const payload = await request<{
+      processed: boolean;
+      alreadyProcessed: boolean;
+      sessionStatus: string;
+      mode: string;
+      newBalance: number | null;
+      topupPackName: string | null;
+    }>(`${BILLING_BASE}/verify-checkout-session`, {
+      method: "POST",
+      body: { session_id: sessionId },
+    });
+    return dataOrThrow(payload, "BILLING_VERIFY_SESSION_FAILED");
+  },
+
   async adminManualCharge(customerId: string, body: AdminManualChargeRequest): Promise<BillingPayment> {
     const payload = await request<BillingPayment>(
       `${BILLING_BASE}/admin/customers/${customerId}/manual-charge`,

@@ -289,20 +289,41 @@ export function Billing() {
     const params = new URLSearchParams(location.search);
     const checkoutStatus = params.get("checkout");
     const topupStatus = params.get("topup");
+    const sessionId = params.get("session_id");
     if (!checkoutStatus && !topupStatus) return;
     if (handledCheckoutLocationKey === location.key) return;
     handledCheckoutLocationKey = location.key;
 
-    if (checkoutStatus === "success") {
-      toast("Checkout completed. Billing data is refreshing.", "success");
+    async function handleSuccess(): Promise<void> {
+      if (sessionId) {
+        try {
+          const result = await billingApi.verifyCheckoutSession(sessionId);
+          if (result.processed && result.topupPackName) {
+            toast(
+              `${result.topupPackName} added! New balance: $${(result.newBalance ?? 0).toFixed(2)}`,
+              "success",
+            );
+          }
+        } catch (error) {
+          toast(
+            error instanceof Error ? error.message : "Payment verification failed. Your credits will appear shortly.",
+            "warning",
+          );
+        }
+      }
+
       void forceRefreshBillingFromProvider();
+    }
+
+    if (checkoutStatus === "success") {
+      toast("Checkout completed. Syncing your account...", "success");
+      void handleSuccess();
     } else if (checkoutStatus === "cancelled") {
       toast("Checkout was cancelled.", "info");
     }
 
     if (topupStatus === "success") {
-      toast("Top-up purchased! Credits have been added to your balance.", "success");
-      void forceRefreshBillingFromProvider();
+      void handleSuccess();
     } else if (topupStatus === "cancelled") {
       toast("Top-up was cancelled.", "info");
     }

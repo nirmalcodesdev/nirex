@@ -205,3 +205,10 @@ export async function adminManualCharge(req: Request, res: Response): Promise<vo
   );
   res.status(201).json({ status: 'success', data: payment });
 }
+
+export async function verifyCheckoutSession(req: Request, res: Response): Promise<void> {
+  const userId = getUserId(req);
+  const { session_id } = req.body as { session_id: string };
+  const result = await billingService.verifyCheckoutSession(userId, session_id);
+  res.json({ status: 'success', data: result });
+}

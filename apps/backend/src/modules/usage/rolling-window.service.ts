@@ -7,272 +7,254 @@ import {
   type RollingWindowUsage,
 } from '@nirex/shared';
 import { getRedisClient, isRedisAvailable } from '../../config/redis.js';
+import { AppError } from '../../types/index.js';
 import { logger } from '../../utils/logger.js';
-import { usageRepository } from './usage.repository.js';
 
-const WINDOW_5H_KEY = '5h';
-const WINDOW_7D_KEY = '7d';
-
-interface WindowCheck {
-  used: number;
-  limit: number;
-  remaining: number;
-  resetsAt: Date | null;
-  firstSlotFreesAt: Date | null;
-  exceeded: boolean;
-}
-
-interface RollingWindowStatus {
-  window5h: WindowCheck;
-  window7d: WindowCheck;
-  exceeded: boolean;
-  exceededWindow: '5h' | '7d' | null;
-}
+const WINDOW_5H = '5h';
+const WINDOW_7D = '7d';
 
 function redisKey(userId: Types.ObjectId | string, window: string): string {
   return `rolling:${userId}:${window}`;
 }
 
-function nowMs(): number {
-  return Date.now();
+function safeLimit(limit: number): number {
+  return Number.isFinite(limit) && limit > 0 ? limit : 0;
 }
 
-function windowStartMs(windowMs: number): number {
-  return nowMs() - windowMs;
-}
+// ─── Atomic Lua script ─────────────────────────────────────────────────
 
-async function redisCount(
-  userId: Types.ObjectId,
-  windowMs: number,
-  windowKey: string,
-): Promise<number> {
-  if (!isRedisAvailable()) {
-    return -1;
-  }
+const CHECK_AND_RECORD_SCRIPT = `
+local now = tonumber(ARGV[1])
+local member = ARGV[2]
+local win5h = tonumber(ARGV[3])
+local win7d = tonumber(ARGV[4])
+local max5h = tonumber(ARGV[5])
+local max7d = tonumber(ARGV[6])
 
-  try {
-    const redis = getRedisClient();
-    const key = redisKey(userId, windowKey);
-    const start = windowStartMs(windowMs);
+-- Evict entries older than the window
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - win5h)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - win7h)
 
-    const pipeline = redis.pipeline();
-    pipeline.zremrangebyscore(key, 0, start);
-    pipeline.zcard(key);
+local count5h = redis.call('ZCARD', KEYS[1])
+local count7d = redis.call('ZCARD', KEYS[2])
 
-    const results = await pipeline.exec();
-    if (!results) return -1;
+-- Check limits (max <= 0 means unlimited)
+if max5h > 0 and count5h >= max5h then
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local oldestTs = (#oldest >= 2) and tonumber(oldest[2]) or 0
+  return {0, count5h, count7d, '5h', oldestTs, 0}
+end
+if max7d > 0 and count7d >= max7d then
+  local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+  local oldestTs = (#oldest >= 2) and tonumber(oldest[2]) or 0
+  return {0, count5h, count7d, '7d', 0, oldestTs}
+end
 
-    const cardResult = results[1];
-    if (!cardResult || cardResult[0]) return -1;
+-- Record the request (member = unique per-request id, ensures no dedup needed)
+redis.call('ZADD', KEYS[1], now, member .. ':5h')
+redis.call('ZADD', KEYS[2], now, member .. ':7h')
+count5h = count5h + 1
+count7d = count7d + 1
 
-    return cardResult[1] as number;
-  } catch (error) {
-    logger.warn('Rolling window Redis count failed, falling back to MongoDB.', {
-      userId: userId.toString(),
-      windowKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return -1;
-  }
-}
+-- Refresh TTL so keys live as long as entries exist
+redis.call('PEXPIRE', KEYS[1], win5h + 60000)
+redis.call('PEXPIRE', KEYS[2], win7d + 60000)
 
-async function redisGetBoundaryTimestamps(
-  userId: Types.ObjectId,
-  windowKey: string,
-): Promise<{ oldest: number | null; newest: number | null }> {
-  if (!isRedisAvailable()) {
-    return { oldest: null, newest: null };
-  }
+-- Get oldest entries for resetsAt
+local oldest5h = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+local oldest7d = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+local o5h = (#oldest5h >= 2) and tonumber(oldest5h[2]) or 0
+local o7d = (#oldest7d >= 2) and tonumber(oldest7d[2]) or 0
 
-  try {
-    const redis = getRedisClient();
-    const key = redisKey(userId, windowKey);
+return {1, count5h, count7d, '', o5h, o7d}
+`;
 
-    const pipeline = redis.pipeline();
-    pipeline.zrange(key, 0, 0, 'WITHSCORES');
-    pipeline.zrange(key, -1, -1, 'WITHSCORES');
+// ─── Read-only status script (for UI display, no side effects) ─────────
 
-    const results = await pipeline.exec();
-    if (!results) return { oldest: null, newest: null };
+const GET_STATUS_SCRIPT = `
+local now = tonumber(ARGV[1])
+local win5h = tonumber(ARGV[2])
+local win7d = tonumber(ARGV[3])
 
-    const oldestResult = results[0];
-    const newestResult = results[1];
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - win5h)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - win7d)
 
-    let oldest: number | null = null;
-    let newest: number | null = null;
+local count5h = redis.call('ZCARD', KEYS[1])
+local count7d = redis.call('ZCARD', KEYS[2])
 
-    if (oldestResult && !oldestResult[0] && oldestResult[1]) {
-      const arr = oldestResult[1] as string[];
-      if (arr.length >= 2 && arr[1]) {
-        oldest = parseInt(arr[1], 10);
-      }
-    }
+local oldest5h = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+local oldest7d = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+local o5h = (#oldest5h >= 2) and tonumber(oldest5h[2]) or 0
+local o7d = (#oldest7d >= 2) and tonumber(oldest7d[2]) or 0
 
-    if (newestResult && !newestResult[0] && newestResult[1]) {
-      const arr = newestResult[1] as string[];
-      if (arr.length >= 2 && arr[1]) {
-        newest = parseInt(arr[1], 10);
-      }
-    }
+return {count5h, count7d, o5h, o7d}
+`;
 
-    return { oldest, newest };
-  } catch (error) {
-    logger.warn('Rolling window Redis get boundary timestamps failed.', {
-      userId: userId.toString(),
-      windowKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return { oldest: null, newest: null };
-  }
-}
-
-async function redisRecord(
-  userId: Types.ObjectId,
-  windowMs: number,
-  windowKey: string,
-  timestamp: number,
-  idempotencyKey: string,
-): Promise<boolean> {
-  if (!isRedisAvailable()) {
-    return false;
-  }
-
-  try {
-    const redis = getRedisClient();
-    const key = redisKey(userId, windowKey);
-    const start = timestamp - windowMs;
-
-    const pipeline = redis.pipeline();
-    pipeline.zremrangebyscore(key, 0, start);
-    pipeline.zadd(key, 'NX', timestamp, idempotencyKey);
-    pipeline.pexpire(key, windowMs + 60000);
-
-    const results = await pipeline.exec();
-    if (!results) return false;
-
-    const zaddResult = results[1];
-    if (!zaddResult || zaddResult[0]) return false;
-
-    return (zaddResult[1] as number) === 1;
-  } catch (error) {
-    logger.warn('Rolling window Redis record failed.', {
-      userId: userId.toString(),
-      windowKey,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
-
-async function mongoCount(
-  userId: Types.ObjectId,
-  windowMs: number,
-): Promise<number> {
-  const start = new Date(windowStartMs(windowMs));
-  const end = new Date();
-
-  try {
-    const totals = await usageRepository.getEventTotals(userId, { start, end });
-    return totals.requests;
-  } catch (error) {
-    logger.error('Rolling window MongoDB count failed.', {
-      userId: userId.toString(),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return 0;
-  }
+function resetsAt(oldestTimestamp: number, windowMs: number): string | null {
+  if (oldestTimestamp <= 0) return null;
+  return new Date(oldestTimestamp + windowMs).toISOString();
 }
 
 export class RollingWindowService {
-  async checkWindow(
-    userId: Types.ObjectId,
-    planId: BillingPlanId,
-  ): Promise<RollingWindowStatus> {
-    const caps = getPlanRollingWindowCaps(planId);
-    const now = nowMs();
+  private checkAndRecordScriptHash: string | null = null;
+  private getStatusScriptHash: string | null = null;
 
-    const [count5h, count7d] = await Promise.all([
-      isRedisAvailable()
-        ? redisCount(userId, ROLLING_WINDOW_5H_MS, WINDOW_5H_KEY)
-        : Promise.resolve(-1),
-      isRedisAvailable()
-        ? redisCount(userId, ROLLING_WINDOW_7D_MS, WINDOW_7D_KEY)
-        : Promise.resolve(-1),
-    ]);
-
-    const used5h = count5h >= 0 ? count5h : await mongoCount(userId, ROLLING_WINDOW_5H_MS);
-    const used7d = count7d >= 0 ? count7d : await mongoCount(userId, ROLLING_WINDOW_7D_MS);
-
-    const limit5h = caps.window5h;
-    const limit7d = caps.window7d;
-
-    const remaining5h = limit5h === Infinity ? Infinity : Math.max(0, limit5h - used5h);
-    const remaining7d = limit7d === Infinity ? Infinity : Math.max(0, limit7d - used7d);
-
-    const exceeded5h = limit5h !== Infinity && used5h >= limit5h;
-    const exceeded7d = limit7d !== Infinity && used7d >= limit7d;
-
-    const exceeded = exceeded5h || exceeded7d;
-    const exceededWindow = exceeded5h ? '5h' : exceeded7d ? '7d' : null;
-
-    const [bounds5h, bounds7d] = await Promise.all([
-      used5h > 0 ? redisGetBoundaryTimestamps(userId, WINDOW_5H_KEY) : Promise.resolve({ oldest: null, newest: null }),
-      used7d > 0 ? redisGetBoundaryTimestamps(userId, WINDOW_7D_KEY) : Promise.resolve({ oldest: null, newest: null }),
-    ]);
-
-    const resetsAt5h = bounds5h.newest !== null
-      ? new Date(bounds5h.newest + ROLLING_WINDOW_5H_MS)
-      : null;
-    const resetsAt7d = bounds7d.newest !== null
-      ? new Date(bounds7d.newest + ROLLING_WINDOW_7D_MS)
-      : null;
-
-    const firstSlotFreesAt5h = bounds5h.oldest !== null
-      ? new Date(bounds5h.oldest + ROLLING_WINDOW_5H_MS)
-      : null;
-    const firstSlotFreesAt7d = bounds7d.oldest !== null
-      ? new Date(bounds7d.oldest + ROLLING_WINDOW_7D_MS)
-      : null;
-
-    return {
-      window5h: {
-        used: used5h,
-        limit: limit5h,
-        remaining: remaining5h,
-        resetsAt: resetsAt5h,
-        firstSlotFreesAt: firstSlotFreesAt5h,
-        exceeded: exceeded5h,
-      },
-      window7d: {
-        used: used7d,
-        limit: limit7d,
-        remaining: remaining7d,
-        resetsAt: resetsAt7d,
-        firstSlotFreesAt: firstSlotFreesAt7d,
-        exceeded: exceeded7d,
-      },
-      exceeded,
-      exceededWindow,
-    };
+  private async loadScript(script: string): Promise<string> {
+    if (!isRedisAvailable()) return '';
+    try {
+      const redis = getRedisClient();
+      return await redis.script('LOAD', script) as string;
+    } catch (error) {
+      logger.warn('Failed to load rolling window Lua script.', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return '';
+    }
   }
 
-  async recordUsage(
-    userId: Types.ObjectId,
-    idempotencyKey: string,
-    timestamp: number = nowMs(),
-  ): Promise<void> {
-    const [recorded5h, recorded7d] = await Promise.all([
-      redisRecord(userId, ROLLING_WINDOW_5H_MS, WINDOW_5H_KEY, timestamp, idempotencyKey),
-      redisRecord(userId, ROLLING_WINDOW_7D_MS, WINDOW_7D_KEY, timestamp, idempotencyKey),
-    ]);
+  private async ensureScripts(): Promise<void> {
+    if (!isRedisAvailable()) return;
+    if (!this.checkAndRecordScriptHash) {
+      this.checkAndRecordScriptHash = await this.loadScript(CHECK_AND_RECORD_SCRIPT);
+    }
+    if (!this.getStatusScriptHash) {
+      this.getStatusScriptHash = await this.loadScript(GET_STATUS_SCRIPT);
+    }
+  }
 
-    if (!recorded5h || !recorded7d) {
-      logger.debug('Rolling window: Redis record incomplete, MongoDB is source of truth.', {
+  async checkAndRecord(
+    userId: Types.ObjectId,
+    planId: BillingPlanId,
+  ): Promise<{ allowed: boolean; exceeded: '5h' | '7d' | null; retryAfterMs: number | null }> {
+    if (!isRedisAvailable()) {
+      return { allowed: true, exceeded: null, retryAfterMs: null };
+    }
+
+    await this.ensureScripts();
+
+    const caps = getPlanRollingWindowCaps(planId);
+    const limit5h = safeLimit(caps.window5h);
+    const limit7d = safeLimit(caps.window7d);
+
+    if (limit5h <= 0 && limit7d <= 0) {
+      return { allowed: true, exceeded: null, retryAfterMs: null };
+    }
+
+    const now = Date.now();
+    const member = `${now}:${Math.random().toString(36).slice(2, 9)}`;
+
+    try {
+      const redis = getRedisClient();
+      const key5h = redisKey(userId, WINDOW_5H);
+      const key7d = redisKey(userId, WINDOW_7D);
+
+      let result: Array<number | string>;
+      if (this.checkAndRecordScriptHash) {
+        result = await redis.evalsha(
+          this.checkAndRecordScriptHash,
+          2,
+          key5h, key7d,
+          now, member, ROLLING_WINDOW_5H_MS, ROLLING_WINDOW_7D_MS, limit5h, limit7d,
+        ) as Array<number | string>;
+      } else {
+        result = await redis.eval(
+          CHECK_AND_RECORD_SCRIPT,
+          2,
+          key5h, key7d,
+          now, member, ROLLING_WINDOW_5H_MS, ROLLING_WINDOW_7D_MS, limit5h, limit7d,
+        ) as Array<number | string>;
+      }
+
+      const allowed = result[0] === 1;
+      const exceeded = (result[3] as string) || null;
+
+      let retryAfterMs: number | null = null;
+      if (!allowed && exceeded) {
+        const oldestTs = Number(result[exceeded === '5h' ? 4 : 5]) || 0;
+        const windowMs = exceeded === '5h' ? ROLLING_WINDOW_5H_MS : ROLLING_WINDOW_7D_MS;
+        if (oldestTs > 0) {
+          retryAfterMs = Math.max(0, (oldestTs + windowMs) - now);
+        } else {
+          retryAfterMs = windowMs;
+        }
+      }
+
+      return { allowed, exceeded: exceeded as '5h' | '7d' | null, retryAfterMs };
+    } catch (error) {
+      logger.warn('Rolling window check+record failed, allowing request.', {
         userId: userId.toString(),
-        idempotencyKey,
-        recorded5h,
-        recorded7d,
+        planId,
+        error: error instanceof Error ? error.message : String(error),
       });
+      return { allowed: true, exceeded: null, retryAfterMs: null };
+    }
+  }
+
+  async getStatus(
+    userId: Types.ObjectId,
+    planId: BillingPlanId,
+  ): Promise<{
+    window5h: { used: number; limit: number; resetsAt: string | null };
+    window7d: { used: number; limit: number; resetsAt: string | null };
+  }> {
+    const caps = getPlanRollingWindowCaps(planId);
+    const limit5h = safeLimit(caps.window5h);
+    const limit7d = safeLimit(caps.window7d);
+
+    if (!isRedisAvailable()) {
+      return {
+        window5h: { used: 0, limit: limit5h, resetsAt: null },
+        window7d: { used: 0, limit: limit7d, resetsAt: null },
+      };
+    }
+
+    await this.ensureScripts();
+
+    const now = Date.now();
+
+    try {
+      const redis = getRedisClient();
+      const key5h = redisKey(userId, WINDOW_5H);
+      const key7d = redisKey(userId, WINDOW_7D);
+
+      let result: Array<number>;
+      if (this.getStatusScriptHash) {
+        result = await redis.evalsha(
+          this.getStatusScriptHash,
+          2,
+          key5h, key7d,
+          now, ROLLING_WINDOW_5H_MS, ROLLING_WINDOW_7D_MS,
+        ) as Array<number>;
+      } else {
+        result = await redis.eval(
+          GET_STATUS_SCRIPT,
+          2,
+          key5h, key7d,
+          now, ROLLING_WINDOW_5H_MS, ROLLING_WINDOW_7D_MS,
+        ) as Array<number>;
+      }
+
+      return {
+        window5h: {
+          used: result[0] || 0,
+          limit: limit5h,
+          resetsAt: resetsAt(result[2] || 0, ROLLING_WINDOW_5H_MS),
+        },
+        window7d: {
+          used: result[1] || 0,
+          limit: limit7d,
+          resetsAt: resetsAt(result[3] || 0, ROLLING_WINDOW_7D_MS),
+        },
+      };
+    } catch (error) {
+      logger.warn('Rolling window status fetch failed.', {
+        userId: userId.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        window5h: { used: 0, limit: limit5h, resetsAt: null },
+        window7d: { used: 0, limit: limit7d, resetsAt: null },
+      };
     }
   }
 
@@ -280,39 +262,26 @@ export class RollingWindowService {
     userId: Types.ObjectId,
     planId: BillingPlanId,
   ): Promise<RollingWindowUsage> {
-    const status = await this.checkWindow(userId, planId);
+    const status = await this.getStatus(userId, planId);
 
     return {
       window5h: {
         used: status.window5h.used,
-        limit: status.window5h.limit === Infinity ? null : status.window5h.limit,
-        remaining: status.window5h.remaining === Infinity ? null : status.window5h.remaining,
-        resetsAt: status.window5h.resetsAt?.toISOString() ?? null,
+        limit: status.window5h.limit > 0 ? status.window5h.limit : null,
+        remaining: status.window5h.limit > 0
+          ? Math.max(0, status.window5h.limit - status.window5h.used)
+          : null,
+        resetsAt: status.window5h.resetsAt,
       },
       window7d: {
         used: status.window7d.used,
-        limit: status.window7d.limit === Infinity ? null : status.window7d.limit,
-        remaining: status.window7d.remaining === Infinity ? null : status.window7d.remaining,
-        resetsAt: status.window7d.resetsAt?.toISOString() ?? null,
+        limit: status.window7d.limit > 0 ? status.window7d.limit : null,
+        remaining: status.window7d.limit > 0
+          ? Math.max(0, status.window7d.limit - status.window7d.used)
+          : null,
+        resetsAt: status.window7d.resetsAt,
       },
     };
-  }
-
-  async assertWithinLimits(
-    userId: Types.ObjectId,
-    planId: BillingPlanId,
-  ): Promise<RollingWindowStatus> {
-    const status = await this.checkWindow(userId, planId);
-
-    if (status.exceeded) {
-      const window = status.exceededWindow === '5h' ? '5-hour' : '7-day';
-      const limit = status.exceededWindow === '5h' ? status.window5h.limit : status.window7d.limit;
-      throw new Error(
-        `Rolling window limit exceeded (${window}). Limit: ${limit} requests. Please wait for the window to reset.`,
-      );
-    }
-
-    return status;
   }
 }
 

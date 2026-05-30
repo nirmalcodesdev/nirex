@@ -14,6 +14,7 @@ import {
 import type {
   GatewayChargeInvoiceParams,
   GatewayCheckoutSession,
+  GatewayCheckoutSessionDetail,
   GatewayCheckoutSessionParams,
   GatewayCreateCustomerParams,
   GatewayCustomer,
@@ -663,7 +664,7 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
         customer: params.customerId,
         client_reference_id: params.clientReferenceId,
         line_items: [{ price: params.priceId, quantity: 1 }],
-        success_url: params.successUrl,
+        success_url: `${params.successUrl}${params.successUrl.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: params.cancelUrl,
         payment_method_collection: isPayment ? undefined : 'always',
         saved_payment_method_options: {
@@ -681,6 +682,22 @@ export class StripePaymentGatewayAdapter implements PaymentGatewayPort {
       throw new GatewayUnavailableError('Stripe checkout session did not include a URL.');
     }
     return { id: session.id, url: session.url };
+  }
+
+  async retrieveCheckoutSession(id: string): Promise<GatewayCheckoutSessionDetail> {
+    const session = await this.call('retrieveCheckoutSession', id, () =>
+      this.stripe.checkout.sessions.retrieve(id),
+    );
+
+    return {
+      id: session.id,
+      mode: session.mode as GatewayCheckoutSessionDetail['mode'],
+      status: session.status as GatewayCheckoutSessionDetail['status'] | null ?? 'open',
+      paymentStatus: (session.payment_status as GatewayCheckoutSessionDetail['paymentStatus']) ?? 'unpaid',
+      metadata: (readRecord(session.metadata) ?? {}) as GatewayCheckoutSessionDetail['metadata'],
+      clientReferenceId: session.client_reference_id ?? null,
+      customerId: typeof session.customer === 'string' ? session.customer : null,
+    };
   }
 
   async createPortalSession(customerId: string, returnUrl: string, idempotencyKey: string): Promise<GatewayPortalSession> {

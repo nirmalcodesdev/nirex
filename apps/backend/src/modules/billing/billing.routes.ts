@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { z } from 'zod';
 import {
   adminManualChargeSchema,
   adminRefundSchema,
@@ -89,6 +90,17 @@ protectedRouter.post(
   requireApiKeyScopes(['billing:write']),
   validate(createPortalSessionSchema),
   asyncWrapper(billingController.createPortalSession),
+);
+
+const verifyCheckoutSessionSchema = z.object({
+  session_id: z.string().min(1, 'session_id is required'),
+});
+protectedRouter.post(
+  '/verify-checkout-session',
+  billingMutationLimiter,
+  requireApiKeyScopes(['billing:write']),
+  validate(verifyCheckoutSessionSchema),
+  asyncWrapper(billingController.verifyCheckoutSession),
 );
 protectedRouter.post(
   '/payment-methods',
