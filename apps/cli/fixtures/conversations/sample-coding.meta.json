@@ -1,0 +1,20 @@
+{
+  "id": "fixture-session-001",
+  "model": "claude-sonnet-4-20250514",
+  "working_directory": "/tmp/nirex-fixture-project",
+  "git_branch": "main",
+  "total_tokens": {
+    "input": 400,
+    "output": 230,
+    "cached": 0,
+    "reasoning": 0,
+    "total": 630
+  },
+  "turn_count": 4,
+  "tool_call_count": 1,
+  "created_at": "2026-01-15T10:00:00.000Z",
+  "updated_at": "2026-01-15T10:00:15.000Z",
+  "last_turn_at": "2026-01-15T10:00:15.000Z",
+  "status": "active",
+  "tags": ["fixture", "demo"]
+}

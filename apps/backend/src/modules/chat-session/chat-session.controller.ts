@@ -482,7 +482,7 @@ export async function addMessage(
 ): Promise<void> {
   const userId = getUserId(req);
   const sessionId = getSessionId(req);
-  const { role, content, token_usage, client_message_id } = req.body as AddMessageRequest;
+  const { role, content, token_usage, client_message_id, turn_number } = req.body as AddMessageRequest;
   // Metadata may be included but is not part of the main type
   const metadata = (req.body as Record<string, unknown>).metadata as Record<string, unknown> | undefined;
 
@@ -493,7 +493,8 @@ export async function addMessage(
     content,
     token_usage,
     metadata,
-    client_message_id
+    client_message_id,
+    turn_number
   );
 
   res.status(201).json({

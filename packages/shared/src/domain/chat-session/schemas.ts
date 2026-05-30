@@ -166,6 +166,7 @@ export const addMessageSchema = z.object({
     .min(1, 'client_message_id cannot be empty')
     .max(200, 'client_message_id is too long')
     .optional(),
+  turn_number: z.number().int().min(0).optional(),
   token_usage: z
     .object({
       input_tokens: z.number().int().min(0).optional(),
