@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import {
   DEFAULT_BILLING_CURRENCY,
   CREDITS_PER_DOLLAR,
@@ -86,6 +86,7 @@ import { invalidateUsageOverviewCache } from '../usage/usage.cache.js';
 import { rollingWindowService } from '../usage/rolling-window.service.js';
 import { invalidateDashboardOverviewCache } from '../dashboard/dashboard.cache.js';
 import type {
+  GatewayCheckoutSessionDetail,
   GatewayEvent,
   GatewayInvoice,
   GatewayPaymentIntent,
@@ -918,9 +919,9 @@ export class WebhookService {
       }
 
       const userId = new Types.ObjectId(clientRef);
-      const idempotencyKey = `topup:checkout:${event.id}`;
+      const checkoutSessionId = readString(data, 'id') ?? event.id;
+      const idempotencyKey = `topup:checkout:${checkoutSessionId}`;
 
-      // Idempotency check — skip if already processed
       const existing = await CreditTransactionModel.findOne({ idempotencyKey }).session(session).exec();
       if (existing) {
         await this.auditService.record(
@@ -2894,6 +2895,262 @@ export class BillingService {
 
       return { sessionId: session.id, checkoutUrl: session.url };
     });
+  }
+
+  async verifyCheckoutSession(
+    userId: Types.ObjectId,
+    sessionId: string,
+  ): Promise<{
+    processed: boolean;
+    alreadyProcessed: boolean;
+    sessionStatus: string;
+    mode: string;
+    newBalance: number | null;
+    topupPackName: string | null;
+  }> {
+    return this.withOperation('verifyCheckoutSession', userId.toString(), async () => {
+      const session = await this.gateway.retrieveCheckoutSession(sessionId);
+
+      if (session.mode === 'payment') {
+        return this.verifyTopUpCheckout(userId, session);
+      }
+
+      if (session.mode === 'subscription') {
+        try {
+          const customer = await billingRepository.findCustomerByUserId(userId);
+          if (customer) {
+            await this.syncCustomerFromProvider(userId, customer);
+          }
+        } catch (error) {
+          logger.warn('Failed to sync customer after subscription checkout verify.', {
+            userId: userId.toString(),
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return {
+          processed: session.status === 'complete',
+          alreadyProcessed: false,
+          sessionStatus: session.status,
+          mode: session.mode,
+          newBalance: null,
+          topupPackName: null,
+        };
+      }
+
+      return {
+        processed: false,
+        alreadyProcessed: false,
+        sessionStatus: session.status,
+        mode: session.mode,
+        newBalance: null,
+        topupPackName: null,
+      };
+    });
+  }
+
+  private async verifyTopUpCheckout(
+    userId: Types.ObjectId,
+    session: GatewayCheckoutSessionDetail,
+  ): Promise<{
+    processed: boolean;
+    alreadyProcessed: boolean;
+    sessionStatus: string;
+    mode: string;
+    newBalance: number | null;
+    topupPackName: string | null;
+  }> {
+    const noMatch = (): ReturnType<BillingService['verifyTopUpCheckout']> =>
+      Promise.resolve({
+        processed: false,
+        alreadyProcessed: false,
+        sessionStatus: session.status,
+        mode: session.mode,
+        newBalance: null,
+        topupPackName: null,
+      });
+
+    const sessionOwnerId = session.clientReferenceId ?? (session.metadata['userId'] as string | undefined);
+    if (!sessionOwnerId || sessionOwnerId !== userId.toString()) {
+      logger.warn('Top-up verify: session does not belong to authenticated user.', {
+        userId: userId.toString(),
+        sessionId: session.id,
+        sessionOwnerId: sessionOwnerId ?? null,
+      });
+      return noMatch();
+    }
+
+    if (session.status !== 'complete' || session.paymentStatus !== 'paid') {
+      return noMatch();
+    }
+
+    const packId = session.metadata['packId'] as TopUpPackId | undefined;
+    if (!packId) {
+      logger.warn('Top-up verify: no packId in session metadata.', { sessionId: session.id });
+      return noMatch();
+    }
+
+    const pack = getTopUpPack(packId);
+    if (!pack) {
+      logger.warn('Top-up verify: invalid packId.', { sessionId: session.id, packId });
+      return noMatch();
+    }
+
+    const idempotencyKey = `topup:checkout:${session.id}`;
+
+    const existing = await CreditTransactionModel.findOne({ idempotencyKey }).lean().exec();
+    if (existing) {
+      const userDoc = await UserModel.findById(userId)
+        .select('topupBalance includedCredits')
+        .lean()
+        .exec();
+      const topupBalance = userDoc?.topupBalance ?? 0;
+      const includedCredits = userDoc?.includedCredits ?? 0;
+      return {
+        processed: true,
+        alreadyProcessed: true,
+        sessionStatus: session.status,
+        mode: session.mode,
+        newBalance: (includedCredits + topupBalance) / CREDITS_PER_DOLLAR,
+        topupPackName: pack.name,
+      };
+    }
+
+    const mongoSession = await mongoose.startSession();
+
+    try {
+      const result = await mongoSession.withTransaction(async () => {
+        const txExisting = await CreditTransactionModel.findOne({ idempotencyKey })
+          .session(mongoSession)
+          .lean()
+          .exec();
+        if (txExisting) {
+          return { credited: false as const };
+        }
+
+        const userBefore = await UserModel.findOneAndUpdate(
+          { _id: userId },
+          { $inc: { topupBalance: pack.credits } },
+          { session: mongoSession, returnDocument: 'before', new: false },
+        ).exec();
+
+        if (!userBefore) {
+          throw new AppError('User not found during top-up verification.', 404, 'USER_NOT_FOUND');
+        }
+
+        await CreditTransactionModel.create(
+          [{
+            userId,
+            amount: pack.credits,
+            type: 'topup',
+            source: 'topup',
+            includedCreditsBefore: userBefore.includedCredits ?? 0,
+            topupBalanceBefore: userBefore.topupBalance ?? 0,
+            idempotencyKey,
+            metadata: { packId, sessionId: session.id, verifiedVia: 'api' },
+          }],
+          { session: mongoSession },
+        );
+
+        return {
+          credited: true as const,
+          topupBalanceBefore: userBefore.topupBalance ?? 0,
+          includedCreditsBefore: userBefore.includedCredits ?? 0,
+        };
+      });
+
+      if (!result || !result.credited) {
+        const userDoc = await UserModel.findById(userId)
+          .select('topupBalance includedCredits')
+          .lean()
+          .exec();
+        const topupBalance = userDoc?.topupBalance ?? 0;
+        const includedCredits = userDoc?.includedCredits ?? 0;
+        return {
+          processed: true,
+          alreadyProcessed: true,
+          sessionStatus: session.status,
+          mode: session.mode,
+          newBalance: (includedCredits + topupBalance) / CREDITS_PER_DOLLAR,
+          topupPackName: pack.name,
+        };
+      }
+
+      const { topupBalanceBefore, includedCreditsBefore } = result;
+
+      const topupCustomer = await billingRepository.findCustomerByUserId(userId);
+      if (topupCustomer) {
+        await billingRepository.upsertInvoice({
+          customerId: topupCustomer._id,
+          userId,
+          providerInvoiceId: session.id,
+          description: `Top-up: ${pack.name} ($${(pack.amountMinor / 100).toFixed(2)})`,
+          status: 'PAID',
+          currency: pack.currency,
+          subtotalMinor: pack.amountMinor,
+          taxMinor: 0,
+          discountMinor: 0,
+          totalMinor: pack.amountMinor,
+          amountDueMinor: 0,
+          amountPaidMinor: pack.amountMinor,
+          amountRemainingMinor: 0,
+          paidAt: new Date(),
+          providerCreatedAt: new Date(),
+        }).catch((error) => {
+          logger.warn('Failed to create top-up invoice during verification.', {
+            userId: userId.toString(),
+            sessionId: session.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      const user = await userRepository.findById(userId);
+      if (user) {
+        await createBillingNotificationSafely(userId, {
+          kind: 'billing',
+          severity: 'info',
+          title: 'Top-up added',
+          message: `$${(pack.amountMinor / 100).toFixed(2)} has been added to your balance.`,
+          dedupe_key: idempotencyKey,
+        }, { sessionId: session.id });
+
+        if (user.email) {
+          await sendBillingEmailSafely(
+            'topup_completed',
+            userId,
+            () => sendBillingTopUpCompletedEmail({
+              to: user.email,
+              customerName: user.fullName,
+              planName: pack.name,
+              amountMinor: pack.amountMinor,
+              currency: pack.currency,
+              billingPortalUrl: `${env.APP_URL}/billing`,
+            }),
+            { sessionId: session.id },
+          );
+        }
+      }
+
+      await invalidateBillingDependentCachesSafely(userId, {
+        source: 'verifyCheckoutSession.topup',
+        sessionId: session.id,
+      });
+
+      const newTopupBalance = topupBalanceBefore + pack.credits;
+      const newIncludedCredits = includedCreditsBefore;
+
+      return {
+        processed: true,
+        alreadyProcessed: false,
+        sessionStatus: session.status,
+        mode: session.mode,
+        newBalance: (newIncludedCredits + newTopupBalance) / CREDITS_PER_DOLLAR,
+        topupPackName: pack.name,
+      };
+    } finally {
+      await mongoSession.endSession();
+    }
   }
 
   async createPortalSession(

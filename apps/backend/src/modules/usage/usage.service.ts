@@ -564,7 +564,10 @@ export class UsageService {
         return {
           plan_id: currentPlan.planId,
           plan_name: currentPlan.planName,
-          included_credits: spendableCredits.creditsLimit,
+          included_credits: Math.max(
+            spendableCredits.creditsLimit,
+            remainingIncluded + Math.max(0, spendableCredits.creditsUsed),
+          ),
           subscription_status: currentPlan.subscriptionStatus,
           cancel_at_period_end: currentPlan.cancelAtPeriodEnd,
           next_billing_date: currentPlan.nextBillingDate,

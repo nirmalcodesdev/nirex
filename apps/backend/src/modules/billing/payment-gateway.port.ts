@@ -92,6 +92,16 @@ export interface GatewayCheckoutSession {
   url: string;
 }
 
+export interface GatewayCheckoutSessionDetail {
+  id: string;
+  mode: 'subscription' | 'payment' | 'setup';
+  status: 'complete' | 'expired' | 'open';
+  paymentStatus: 'paid' | 'unpaid' | 'no_payment_required';
+  metadata: JsonObject;
+  clientReferenceId: string | null;
+  customerId: string | null;
+}
+
 export interface GatewayPortalSession {
   url: string;
 }
@@ -193,6 +203,7 @@ export interface PaymentGatewayPort {
   createPrice(params: GatewayPriceParams): Promise<GatewayPrice>;
 
   createCheckoutSession(params: GatewayCheckoutSessionParams): Promise<GatewayCheckoutSession>;
+  retrieveCheckoutSession(id: string): Promise<GatewayCheckoutSessionDetail>;
   createPortalSession(customerId: string, returnUrl: string, idempotencyKey: string): Promise<GatewayPortalSession>;
 
   previewUpcomingInvoice(params: GatewayUpcomingInvoiceParams): Promise<GatewayUpcomingInvoice>;
