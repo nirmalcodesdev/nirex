@@ -1,0 +1,9 @@
+{
+  "typescript.tsdk": "apps/nirex-cli/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "files.exclude": {
+    "**/.turbo": true,
+    "apps/nirex-cli/node_modules": true
+  }
+}
