@@ -6,7 +6,11 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "check-types": "turbo run check-types",
+    "agent:install": "cd apps/nirex-cli && %USERPROFILE%\\.bun\\bin\\bun install",
+    "agent:dev": "cd apps/nirex-cli && %USERPROFILE%\\.bun\\bin\\bun run dev",
+    "agent:typecheck": "cd apps/nirex-cli && %USERPROFILE%\\.bun\\bin\\bun run typecheck",
+    "agent:build": "cd apps/nirex-cli && %USERPROFILE%\\.bun\\bin\\bun run --cwd packages/opencode build"
   },
   "devDependencies": {
     "prettier": "^3.7.4",
